@@ -10,5 +10,8 @@ services:
         value: 20
       - key: ADMIN_PASSWORD
         sync: false
+        # Contraseña del panel admin. Ej: kiosko247Aa
       - key: DATABASE_URL
         sync: false
+        # Connection string de Supabase (Transaction pooler, puerto 6543).
+        # Ej: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres

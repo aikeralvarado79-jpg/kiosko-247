@@ -38,39 +38,67 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 // Public
-app.get('/api/state', (req, res) => {
-  res.json(store.getState());
+app.get('/api/state', async (req, res) => {
+  try {
+    res.json(await store.getState());
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo leer el estado: ' + err.message });
+  }
 });
 
-app.post('/api/orders', (req, res) => {
-  const result = store.createOrder(req.body || {});
-  if (result.error) return res.status(400).json({ error: result.error });
-  res.json(result);
+app.post('/api/orders', async (req, res) => {
+  try {
+    const result = await store.createOrder(req.body || {});
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo crear el pedido: ' + err.message });
+  }
 });
 
 // Admin
-app.post('/api/products', requireAdmin, (req, res) => {
-  res.json(store.createProduct(req.body || {}));
+app.post('/api/products', requireAdmin, async (req, res) => {
+  try {
+    res.json(await store.createProduct(req.body || {}));
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo crear el producto: ' + err.message });
+  }
 });
 
-app.put('/api/products/:id', requireAdmin, (req, res) => {
-  const result = store.updateProduct(req.params.id, req.body || {});
-  if (result.error) return res.status(404).json({ error: result.error });
-  res.json(result);
+app.put('/api/products/:id', requireAdmin, async (req, res) => {
+  try {
+    const result = await store.updateProduct(req.params.id, req.body || {});
+    if (result.error) return res.status(404).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo actualizar el producto: ' + err.message });
+  }
 });
 
-app.delete('/api/products/:id', requireAdmin, (req, res) => {
-  res.json(store.deleteProduct(req.params.id));
+app.delete('/api/products/:id', requireAdmin, async (req, res) => {
+  try {
+    res.json(await store.deleteProduct(req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo eliminar el producto: ' + err.message });
+  }
 });
 
-app.post('/api/categories', requireAdmin, (req, res) => {
-  res.json(store.addCategory((req.body || {}).name));
+app.post('/api/categories', requireAdmin, async (req, res) => {
+  try {
+    res.json(await store.addCategory((req.body || {}).name));
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo agregar la categoría: ' + err.message });
+  }
 });
 
-app.patch('/api/orders/:id', requireAdmin, (req, res) => {
-  const result = store.updateOrderStatus(req.params.id, (req.body || {}).status);
-  if (result.error) return res.status(404).json({ error: result.error });
-  res.json(result);
+app.patch('/api/orders/:id', requireAdmin, async (req, res) => {
+  try {
+    const result = await store.updateOrderStatus(req.params.id, (req.body || {}).status);
+    if (result.error) return res.status(404).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo actualizar el pedido: ' + err.message });
+  }
 });
 
 // Pexels proxy (used in production; in dev Vite proxies /pexels-api)
@@ -106,6 +134,11 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3500;
-app.listen(PORT, () => {
-  console.log(`[kiosko] Servidor corriendo en http://localhost:${PORT}`);
+store.initStore().then(() => {
+  app.listen(PORT, () => {
+    console.log(`[kiosko] Servidor corriendo en http://localhost:${PORT}`);
+  });
+}).catch((err) => {
+  console.error('[kiosko] Error inicializando el store:', err);
+  process.exit(1);
 });

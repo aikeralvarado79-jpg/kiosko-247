@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: kiosko-247
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: ADMIN_PASSWORD
+        sync: false

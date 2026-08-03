@@ -1,0 +1,111 @@
+import express from 'express';
+import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
+import { fileURLToPath } from 'url';
+import * as store from './store.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+
+app.use(express.json({ limit: '2mb' }));
+
+const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || config.adminPassword;
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY || config.pexelsApiKey;
+
+const sessions = new Set();
+
+const requireAdmin = (req, res, next) => {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token || !sessions.has(token)) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+};
+
+// Auth
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body || {};
+  if (password === ADMIN_PASSWORD) {
+    const token = crypto.randomBytes(24).toString('hex');
+    sessions.add(token);
+    return res.json({ token });
+  }
+  return res.status(401).json({ error: 'Contraseña incorrecta' });
+});
+
+// Public
+app.get('/api/state', (req, res) => {
+  res.json(store.getState());
+});
+
+app.post('/api/orders', (req, res) => {
+  const result = store.createOrder(req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json(result);
+});
+
+// Admin
+app.post('/api/products', requireAdmin, (req, res) => {
+  res.json(store.createProduct(req.body || {}));
+});
+
+app.put('/api/products/:id', requireAdmin, (req, res) => {
+  const result = store.updateProduct(req.params.id, req.body || {});
+  if (result.error) return res.status(404).json({ error: result.error });
+  res.json(result);
+});
+
+app.delete('/api/products/:id', requireAdmin, (req, res) => {
+  res.json(store.deleteProduct(req.params.id));
+});
+
+app.post('/api/categories', requireAdmin, (req, res) => {
+  res.json(store.addCategory((req.body || {}).name));
+});
+
+app.patch('/api/orders/:id', requireAdmin, (req, res) => {
+  const result = store.updateOrderStatus(req.params.id, (req.body || {}).status);
+  if (result.error) return res.status(404).json({ error: result.error });
+  res.json(result);
+});
+
+// Pexels proxy (used in production; in dev Vite proxies /pexels-api)
+app.use('/pexels-api', async (req, res) => {
+  try {
+    const target = 'https://api.pexels.com/v1' + req.url;
+    const upstream = await fetch(target, {
+      headers: { Authorization: PEXELS_API_KEY }
+    });
+    const body = await upstream.text();
+    res
+      .status(upstream.status)
+      .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
+      .send(body);
+  } catch {
+    res.status(502).json({ error: 'No se pudo contactar a Pexels' });
+  }
+});
+
+// Static build (production)
+const dist = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(dist)) {
+  app.use(express.static(dist));
+}
+
+app.use((req, res, next) => {
+  if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/pexels-api')) {
+    return next();
+  }
+  res.sendFile(path.join(dist, 'index.html'), (err) => {
+    if (err) next();
+  });
+});
+
+const PORT = process.env.PORT || 3500;
+app.listen(PORT, () => {
+  console.log(`[kiosko] Servidor corriendo en http://localhost:${PORT}`);
+});

@@ -15,12 +15,24 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), '
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || config.adminPassword;
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || config.pexelsApiKey;
 
-const sessions = new Set();
+const signToken = (payload) => {
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', ADMIN_PASSWORD).update(data).digest('base64url');
+  return `${data}.${sig}`;
+};
+
+const verifyToken = (token) => {
+  const [data, sig] = String(token).split('.');
+  if (!data || !sig) return false;
+  const expected = crypto.createHmac('sha256', ADMIN_PASSWORD).update(data).digest('base64url');
+  if (sig.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+};
 
 const requireAdmin = (req, res, next) => {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  if (!token || !sessions.has(token)) {
+  if (!token || !verifyToken(token)) {
     return res.status(401).json({ error: 'No autorizado' });
   }
   next();
@@ -30,8 +42,7 @@ const requireAdmin = (req, res, next) => {
 app.post('/api/auth/login', (req, res) => {
   const { password } = req.body || {};
   if (password === ADMIN_PASSWORD) {
-    const token = crypto.randomBytes(24).toString('hex');
-    sessions.add(token);
+    const token = signToken({ role: 'admin', iat: Date.now() });
     return res.json({ token });
   }
   return res.status(401).json({ error: 'Contraseña incorrecta' });

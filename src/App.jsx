@@ -1840,6 +1840,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                 type="number"
                 required
                 min="0"
+                step="0.01"
                 value={formData.price}
                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                 placeholder="1500"

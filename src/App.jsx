@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { api, getToken, setToken, clearToken } from './api.js';
 
 // SVG Icons Helper Components for full visual depth without external dependencies
@@ -25,7 +25,10 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     dollarSign: <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
     layers: <path d="m12 2 10 5-10 5L2 7zm0 10 10 5-10 5-10-5zm0 10 10 5-10 5-10-5z" />,
     refresh: <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />,
-    sparkles: <path d="m12 3 1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />
+    sparkles: <path d="m12 3 1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />,
+    upload: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />,
+    image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
+    xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />
   };
 
   return (
@@ -1693,6 +1696,45 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
   const [isSearchingImages, setIsSearchingImages] = useState(false);
   const [imageSearchError, setImageSearchError] = useState('');
   const [imageSource, setImageSource] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingImage(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 800;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          const ratio = MAX / Math.max(width, height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        setFormData((prev) => ({ ...prev, image: dataUrl }));
+        setIsUploadingImage(false);
+      };
+      img.onerror = () => {
+        setIsUploadingImage(false);
+        setImageSearchError('No se pudo leer la imagen seleccionada.');
+      };
+      img.src = reader.result;
+    };
+    reader.onerror = () => {
+      setIsUploadingImage(false);
+      setImageSearchError('No se pudo leer la imagen seleccionada.');
+    };
+    reader.readAsDataURL(file);
+  };
 
   const searchImages = async () => {
     const query = [formData.brand, formData.name, formData.category]
@@ -1931,7 +1973,25 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">URL de Imagen</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Imagen del Producto</label>
+            <div className="flex items-center gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadingImage}
+                className="flex-1 py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-300 font-bold text-xs hover:bg-teal-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Icon name="upload" className="w-4 h-4" />
+                {isUploadingImage ? 'Procesando imagen...' : 'Subir imagen de archivo'}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+              />
+            </div>
             <input
               type="url"
               value={formData.image}

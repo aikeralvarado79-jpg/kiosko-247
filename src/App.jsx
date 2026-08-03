@@ -103,8 +103,19 @@ export default function App() {
 
   // Polling: keep products, orders and tracking fresh in real time
   useEffect(() => {
-    const id = setInterval(() => loadState({ silent: true }), 5000);
-    return () => clearInterval(id);
+    const POLL_INTERVAL = Number(import.meta.env.VITE_POLL_INTERVAL) || 5000;
+
+    const poll = () => {
+      if (document.hidden) return; // no gastar requests con la pestaña oculta
+      loadState({ silent: true });
+    };
+
+    const id = setInterval(poll, POLL_INTERVAL);
+    document.addEventListener('visibilitychange', poll);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', poll);
+    };
   }, [loadState]);
 
   // Cart State

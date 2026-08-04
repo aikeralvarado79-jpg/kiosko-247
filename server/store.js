@@ -559,6 +559,33 @@ export const updateOrderStatus = async (id, status) => {
   return { state: newState };
 };
 
+// Cancela un pedido devolviendo el stock de sus artículos. Solo permite cancelar
+// pedidos pendientes o en preparación que pertenezcan al teléfono que los cancela.
+export const cancelOrder = async (id, phone) => {
+  const state = await store.getState();
+  const existing = state.orders.find((o) => o.id === id);
+  if (!existing) return { error: 'Pedido no encontrado' };
+  if (normalizePhone(existing.phone) !== normalizePhone(phone)) {
+    return { error: 'No autorizado para cancelar este pedido' };
+  }
+  if (existing.status === 'cancelado') return { error: 'El pedido ya fue cancelado' };
+  if (existing.status === 'listo' || existing.status === 'entregado') {
+    return { error: 'Este pedido ya no puede cancelarse' };
+  }
+
+  const products = state.products.map((p) => {
+    const it = existing.items.find((x) => x.id === p.id);
+    return it ? { ...p, stock: p.stock + it.quantity } : p;
+  });
+  const orders = state.orders.map((o) => (o.id === id ? { ...o, status: 'cancelado' } : o));
+
+  await store.saveProducts(products);
+  await store.saveOrders(orders);
+
+  const newState = await store.getState();
+  return { state: newState };
+};
+
 function maybeAddCategory(categories, cat) {
   if (cat && !categories.includes(cat)) {
     return [...categories, cat];

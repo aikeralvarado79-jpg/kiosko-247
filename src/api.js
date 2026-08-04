@@ -24,6 +24,7 @@ export const api = {
   updateProduct: (id, product) => request(`/api/products/${id}`, { method: 'PUT', body: JSON.stringify(product) }),
   deleteProduct: (id) => request(`/api/products/${id}`, { method: 'DELETE' }),
   updateOrderStatus: (id, status) => request(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  cancelOrder: (id, phone) => request(`/api/orders/${id}/cancel`, { method: 'POST', body: JSON.stringify({ phone }) }),
   saveSettings: (settings) => request('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   getCustomer: (phone) => request(`/api/customers/${encodeURIComponent(phone)}`),
   upsertCustomer: (phone, data) => request(`/api/customers/${encodeURIComponent(phone)}`, { method: 'PUT', body: JSON.stringify(data) }),

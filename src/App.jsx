@@ -71,6 +71,11 @@ const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
 
 const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
 
+// Administradores reconocidos por teléfono (formato 11 dígitos, sin espacios).
+const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'];
+
+const isAdminPhone = (phone) => ADMIN_PHONES.includes(normalizePhoneDigits(phone));
+
 const CUSTOMER_KEY = 'kiosko_customer';
 
 const normalizePhoneDigits = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
@@ -134,7 +139,8 @@ const STATUS_STYLES = {
   pendiente: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40', ring: 'border-amber-500/50', dot: 'bg-amber-400' },
   en_preparacion: { badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', ring: 'border-cyan-500/50', dot: 'bg-cyan-400' },
   listo: { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', ring: 'border-emerald-500/50', dot: 'bg-emerald-400' },
-  entregado: { badge: 'bg-slate-500/20 text-slate-300 border-slate-500/40', ring: 'border-slate-500/50', dot: 'bg-slate-400' }
+  entregado: { badge: 'bg-slate-500/20 text-slate-300 border-slate-500/40', ring: 'border-slate-500/50', dot: 'bg-slate-400' },
+  cancelado: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', ring: 'border-rose-500/50', dot: 'bg-rose-400' }
 };
 
 const playChime = (() => {
@@ -168,7 +174,8 @@ const STATUS_LABELS = {
   pendiente: 'Pendiente',
   en_preparacion: 'En Preparación',
   listo: 'Listo',
-  entregado: 'Entregado'
+  entregado: 'Entregado',
+  cancelado: 'Cancelado'
 };
 
 function RateBanner({ rate }) {
@@ -320,6 +327,13 @@ export default function App() {
   // Cliente reconocido (pre-llenado automático del checkout)
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
 
+  // True si el cliente identificado figura en la lista de administradores por teléfono
+  const isCurrentAdmin = useMemo(() => {
+    if (!savedCustomer?.phoneNumber) return false;
+    const key = `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber}`.replace(/\D/g, '').slice(-11);
+    return ADMIN_PHONES.includes(key);
+  }, [savedCustomer]);
+
   // Identificación obligatoria: se abre al entrar como cliente sin datos guardados
   const [isIdentityOpen, setIsIdentityOpen] = useState(() => !loadSavedCustomer());
 
@@ -412,6 +426,8 @@ export default function App() {
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState(null);
   const [deleteConfirmProduct, setDeleteConfirmProduct] = useState(null);
+  const [orderDetailOrder, setOrderDetailOrder] = useState(null);
+  const [cancelConfirmOrder, setCancelConfirmOrder] = useState(null);
 
   // Toast notifications
   const [toasts, setToasts] = useState([]);
@@ -705,6 +721,17 @@ export default function App() {
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
   };
 
+  const handleCancelOrder = async (orderId, phone) => {
+    const res = await api.cancelOrder(orderId, phone);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo cancelar el pedido', 'error');
+      return;
+    }
+    setOrders(res.data.state.orders || []);
+    setCancelConfirmOrder(null);
+    addToast(`Pedido ${orderId} cancelado`, 'info');
+  };
+
   const handleSavePromos = async (newPromos) => {
     const res = await api.saveSettings({ promos: newPromos });
     if (!res.ok) {
@@ -805,22 +832,24 @@ export default function App() {
               <Icon name="shoppingBag" className="w-4 h-4 shrink-0" />
               <span className="hidden min-[420px]:inline">Tienda</span>
             </button>
-            <button
-              onClick={() => setActiveView('admin')}
-              className={`px-2.5 sm:px-4 py-2 rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 flex items-center gap-1.5 sm:gap-2 ${
-                activeView === 'admin'
-                  ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40'
-              }`}
-            >
-              <Icon name="layers" className="w-4 h-4 shrink-0" />
-              <span className="hidden min-[560px]:inline">Panel</span>
-              {orders.filter((o) => o.status === 'pendiente').length > 0 && (
-                <span className="min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-xs font-bold flex items-center justify-center animate-pulse">
-                  {orders.filter((o) => o.status === 'pendiente').length}
-                </span>
-              )}
-            </button>
+            {(isCurrentAdmin || isAdminAuthed) && (
+              <button
+                onClick={() => setActiveView('admin')}
+                className={`px-2.5 sm:px-4 py-2 rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 flex items-center gap-1.5 sm:gap-2 ${
+                  activeView === 'admin'
+                    ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40'
+                }`}
+              >
+                <Icon name="layers" className="w-4 h-4 shrink-0" />
+                <span className="hidden min-[560px]:inline">Panel</span>
+                {orders.filter((o) => o.status === 'pendiente').length > 0 && (
+                  <span className="min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-xs font-bold flex items-center justify-center animate-pulse">
+                    {orders.filter((o) => o.status === 'pendiente').length}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
 
           {/* Theme toggle */}
@@ -899,6 +928,8 @@ export default function App() {
             onRepeatLastOrder={handleRepeatLastOrder}
             customerOrders={customerOrders}
             customerProfile={customerProfile}
+            onViewOrderDetail={(order) => setOrderDetailOrder(order)}
+            onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -991,6 +1022,31 @@ export default function App() {
         />
       )}
 
+      {/* 5b. Order Detail Modal */}
+      {orderDetailOrder && (
+        <OrderDetailModal
+          order={orderDetailOrder}
+          rate={rate}
+          onClose={() => setOrderDetailOrder(null)}
+          onRequestCancelOrder={(order) => {
+            setOrderDetailOrder(null);
+            setCancelConfirmOrder(order);
+          }}
+        />
+      )}
+
+      {/* 5c. Cancel Order Confirm Modal */}
+      {cancelConfirmOrder && (
+        <CancelOrderModal
+          order={cancelConfirmOrder}
+          onClose={() => setCancelConfirmOrder(null)}
+          onConfirm={() => {
+            const key = `${savedCustomer?.phoneCode || ''}${savedCustomer?.phoneNumber || ''}`.replace(/\D/g, '').slice(-11);
+            handleCancelOrder(cancelConfirmOrder.id, key);
+          }}
+        />
+      )}
+
       {/* Fixed bottom cart bar */}
       {activeView === 'customer' && cartCount > 0 && (
         <CartFloatBar
@@ -1008,6 +1064,7 @@ export default function App() {
           savedCustomer={savedCustomer}
           onConfirm={handleIdentifyCustomer}
           onSwitchCustomer={handleSwitchCustomer}
+          isCurrentAdmin={isCurrentAdmin}
           onGoToAdmin={() => {
             setIsIdentityOpen(false);
             setActiveView('admin');
@@ -1143,7 +1200,9 @@ function CustomerView({
   lastOrderForCustomer,
   onRepeatLastOrder,
   customerOrders,
-  customerProfile
+  customerProfile,
+  onViewOrderDetail,
+  onRequestCancelOrder
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
@@ -1272,6 +1331,7 @@ function CustomerView({
             <div className="px-3 sm:px-4 pb-3 sm:pb-4 space-y-2 sm:space-y-2.5 animate-fade-in">
               {customerOrders.slice(0, 10).map((o) => {
                 const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
+                const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
                 return (
                   <div
                     key={o.id}
@@ -1282,10 +1342,7 @@ function CustomerView({
                         Pedido <span className="text-teal-400">#{o.id}</span>
                       </span>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${style.badge}`}>
-                        {o.status === 'pendiente' && 'Pendiente'}
-                        {o.status === 'en_preparacion' && 'En preparación'}
-                        {o.status === 'listo' && 'Listo'}
-                        {o.status === 'entregado' && 'Entregado'}
+                        {STATUS_LABELS[o.status] || 'Pendiente'}
                       </span>
                     </div>
                     <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
@@ -1294,6 +1351,24 @@ function CustomerView({
                     <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                       {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
                     </p>
+                    <div className="flex items-center gap-2 mt-2.5">
+                      <button
+                        onClick={() => onViewOrderDetail(o)}
+                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-1"
+                      >
+                        <Icon name="eye" className="w-3 h-3" />
+                        Ver detalle
+                      </button>
+                      {cancellable && (
+                        <button
+                          onClick={() => onRequestCancelOrder(o)}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1"
+                        >
+                          <Icon name="x" className="w-3 h-3" />
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -1674,7 +1749,7 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
   );
 }
 
-function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCustomer, onGoToAdmin }) {
+function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCustomer, onGoToAdmin, isCurrentAdmin }) {
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -1903,14 +1978,16 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
                   Volver a {savedCustomer.customerName.split(' ')[0]}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={onGoToAdmin}
-                className="w-full py-2 text-[11px] text-slate-500 hover:text-teal-300 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Icon name="layers" className="w-3.5 h-3.5" />
-                ¿Eres el administrador? Ir al panel
-              </button>
+              {(isCurrentAdmin || ADMIN_PHONES.includes(`${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11))) && (
+                <button
+                  type="button"
+                  onClick={onGoToAdmin}
+                  className="w-full py-2 text-[11px] text-slate-500 hover:text-teal-300 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="layers" className="w-3.5 h-3.5" />
+                  ¿Eres el administrador? Ir al panel
+                </button>
+              )}
             </div>
           </form>
         ) : (
@@ -2769,7 +2846,8 @@ function AdminView({
               { key: 'pendiente', label: 'Pendientes', count: orders.filter((o) => o.status === 'pendiente').length },
               { key: 'en_preparacion', label: 'Preparación', count: orders.filter((o) => o.status === 'en_preparacion').length },
               { key: 'listo', label: 'Listos', count: orders.filter((o) => o.status === 'listo').length },
-              { key: 'entregado', label: 'Entregados', count: orders.filter((o) => o.status === 'entregado').length }
+              { key: 'entregado', label: 'Entregados', count: orders.filter((o) => o.status === 'entregado').length },
+              { key: 'cancelado', label: 'Cancelados', count: orders.filter((o) => o.status === 'cancelado').length }
             ].map((f) => (
               <button
                 key={f.key}
@@ -2808,7 +2886,7 @@ function AdminView({
                           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
-                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', entregado: 'Entregado' })[order.status]}
+                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
                         </span>
                       </div>
 
@@ -2886,7 +2964,8 @@ function AdminView({
                           { key: 'pendiente', label: 'Pendiente' },
                           { key: 'en_preparacion', label: 'En Prep.' },
                           { key: 'listo', label: 'Listo' },
-                          { key: 'entregado', label: 'Entregado' }
+                          { key: 'entregado', label: 'Entregado' },
+                          { key: 'cancelado', label: 'Cancelado' }
                         ].map((stBtn) => (
                           <button
                             key={stBtn.key}
@@ -3648,6 +3727,131 @@ function DeleteConfirmModal({ product, onClose, onConfirm }) {
             className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20"
           >
             Sí, Eliminar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrderDetailModal({ order, rate, onClose, onRequestCancelOrder }) {
+  const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
+  const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
+  return (
+    <div className="fixed inset-0 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-scale-up">
+        <div className="p-5 sm:p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base sm:text-lg font-black text-white">
+              Detalle del Pedido <span className="text-teal-400">#{order.id}</span>
+            </h3>
+            <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${style.badge}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+              {STATUS_LABELS[order.status] || 'Pendiente'}
+            </span>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 sm:p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="bg-slate-800/60 rounded-xl p-3">
+              <span className="text-slate-500 block text-[10px] font-semibold uppercase tracking-wider">Cliente</span>
+              <span className="text-white font-bold">{order.customerName || 'Cliente'}</span>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3">
+              <span className="text-slate-500 block text-[10px] font-semibold uppercase tracking-wider">Fecha</span>
+              <span className="text-white font-bold">{order.timestamp || '—'}</span>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/60 rounded-xl p-3 text-xs flex items-center gap-2">
+            <span className="text-slate-500 font-semibold text-[10px] uppercase tracking-wider">Entrega</span>
+            {order.type === 'delivery' ? (
+              <>
+                <Icon name="mapPin" className="w-3.5 h-3.5 text-amber-300" />
+                <span className="text-amber-300 font-bold">{order.address || 'Domicilio'}</span>
+              </>
+            ) : (
+              <span className="text-teal-300 font-bold">Retiro por mostrador</span>
+            )}
+          </div>
+
+          <div className="rounded-2xl bg-slate-800/40 p-3 space-y-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block">Artículos</span>
+            {order.items.map((it, idx) => (
+              <div key={idx} className="flex justify-between text-xs">
+                <span className="text-slate-300">{it.quantity}x {it.name} <span className="text-slate-500">· {formatUsd(it.price)} c/u</span></span>
+                <span className="font-bold text-white">
+                  {formatUsd(it.price * it.quantity)}
+                  {rate?.rate > 0 && (
+                    <span className="block text-[10px] text-slate-500 text-right">{formatBs(usdToBs(it.price * it.quantity, rate.rate))}</span>
+                  )}
+                </span>
+              </div>
+            ))}
+            <div className="pt-2 border-t border-slate-700 flex justify-between font-bold text-sm text-white">
+              <span>Total</span>
+              <span className="text-teal-400 text-right">
+                {formatUsd(order.total)}
+                {rate?.rate > 0 && (
+                  <span className="block text-[10px] text-teal-300/90">{formatBs(usdToBs(order.total, rate.rate))}</span>
+                )}
+              </span>
+            </div>
+          </div>
+
+          {order.notes && (
+            <div className="rounded-xl bg-slate-800/60 p-3 text-xs">
+              <span className="text-slate-500 font-semibold text-[10px] uppercase tracking-wider">Notas</span>
+              <p className="text-slate-300 italic mt-1">"{order.notes}"</p>
+            </div>
+          )}
+
+          {cancellable && (
+            <button
+              onClick={() => onRequestCancelOrder(order)}
+              className="w-full py-3 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-sm hover:bg-rose-500/25 transition-all flex items-center justify-center gap-2"
+            >
+              <Icon name="x" className="w-4 h-4" />
+              Cancelar este pedido
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CancelOrderModal({ order, onClose, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+        <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+          <Icon name="alertTriangle" className="w-6 h-6" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-white">¿Cancelar pedido #{order.id}?</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            El pedido quedará anulado y el stock de sus artículos se devolverá al inventario.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <button
+            onClick={onClose}
+            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700"
+          >
+            Volver
+          </button>
+          <button
+            onClick={onConfirm}
+            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20"
+          >
+            Sí, Cancelar
           </button>
         </div>
       </div>

@@ -149,6 +149,17 @@ app.patch('/api/orders/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// Cancelar pedido (público, pero solo el dueño del teléfono puede cancelar su pedido)
+app.post('/api/orders/:id/cancel', async (req, res) => {
+  try {
+    const result = await store.cancelOrder(req.params.id, (req.body || {}).phone);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo cancelar el pedido: ' + err.message });
+  }
+});
+
 app.put('/api/settings', requireAdmin, async (req, res) => {
   try {
     await store.saveSettings(req.body || {});

@@ -150,7 +150,8 @@ export const STATUS_LABELS = {
   pendiente: 'Pendiente',
   en_preparacion: 'En Preparación',
   listo: 'Listo',
-  entregado: 'Entregado'
+  entregado: 'Entregado',
+  cancelado: 'Cancelado'
 };
 
 export const formatSize = (product) => {

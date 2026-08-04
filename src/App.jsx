@@ -70,6 +70,57 @@ const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
 
 const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
 
+const CUSTOMER_KEY = 'kiosko_customer';
+
+const normalizePhoneDigits = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
+
+const parsePhone = (phone) => {
+  const digits = String(phone || '').replace(/\D/g, '');
+  const num = digits.length >= 11 ? digits.slice(-11) : digits;
+  if (num.length < 7) return { code: '', number: '' };
+  return { code: num.slice(0, 4), number: num.slice(-7) };
+};
+
+const loadSavedCustomer = () => {
+  try {
+    const raw = localStorage.getItem(CUSTOMER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveCustomerData = (data) => {
+  try {
+    localStorage.setItem(CUSTOMER_KEY, JSON.stringify(data));
+  } catch {}
+};
+
+// Construye el registro de clientes conocidos a partir del historial de pedidos
+// (último pedido gana por teléfono). Falla back a los datos locales del cliente.
+const buildKnownCustomers = (orders, saved) => {
+  const map = new Map();
+  for (const o of orders) {
+    const digits = normalizePhoneDigits(o.phone);
+    if (!digits || map.has(digits)) continue;
+    const { code, number } = parsePhone(o.phone);
+    map.set(digits, { name: o.customerName || '', code, number, address: o.address || '', phone: o.phone });
+  }
+  if (saved && saved.phoneNumber) {
+    const key = `${saved.phoneCode || ''}${saved.phoneNumber || ''}`.replace(/\D/g, '').slice(-11);
+    if (key && !map.has(key)) {
+      map.set(key, {
+        name: saved.customerName || '',
+        code: saved.phoneCode || '',
+        number: saved.phoneNumber || '',
+        address: saved.address || '',
+        phone: `${saved.phoneCode || ''} ${saved.phoneNumber || ''}`.trim()
+      });
+    }
+  }
+  return Array.from(map.values());
+};
+
 const formatPhoneWhatsApp = (phone) => {
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) return null;
@@ -265,6 +316,23 @@ export default function App() {
   });
   const [isCartOpen, setIsCartOpen] = useState(false);
 
+  // Cliente reconocido (pre-llenado automático del checkout)
+  const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
+
+  // Registro de clientes conocidos derivado del historial de pedidos + datos locales
+  const knownCustomers = useMemo(
+    () => buildKnownCustomers(orders, savedCustomer),
+    [orders, savedCustomer]
+  );
+
+  // Último pedido del cliente reconocido, para "Repetir mi último pedido"
+  const lastOrderForCustomer = useMemo(() => {
+    if (!savedCustomer?.phoneNumber) return null;
+    const key = `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber}`.replace(/\D/g, '').slice(-11);
+    if (!key) return null;
+    return orders.find((o) => normalizePhoneDigits(o.phone) === key) || null;
+  }, [orders, savedCustomer]);
+
   // Persist cart across reloads/navigation (per browser session)
   useEffect(() => {
     sessionStorage.setItem('kiosko_cart', JSON.stringify(cart));
@@ -450,6 +518,18 @@ export default function App() {
       return;
     }
 
+    // Guardar cliente reconocido para pre-llenado automático en el próximo pedido
+    const parsedPhone = parsePhone(orderPayload.phone);
+    const customerRecord = {
+      customerName: orderPayload.customerName,
+      phoneCode: parsedPhone.code || formData.phoneCode,
+      phoneNumber: parsedPhone.number || formData.phoneNumber,
+      address: orderPayload.address || '',
+      type: orderPayload.type
+    };
+    saveCustomerData(customerRecord);
+    setSavedCustomer(customerRecord);
+
     const { state, order } = res.data;
     setProducts(state.products || []);
     setOrders(state.orders || []);
@@ -458,6 +538,39 @@ export default function App() {
     setIsCartOpen(false);
     setCurrentOrderTracking(order.id);
     addToast('¡Pedido realizado con éxito!', 'success');
+  };
+
+  // Rellena el carrito con los artículos del último pedido del cliente reconocido
+  const handleRepeatLastOrder = () => {
+    if (!lastOrderForCustomer) {
+      addToast('No encontramos un pedido anterior para repetir', 'info');
+      return;
+    }
+    const order = lastOrderForCustomer;
+    const restored = [];
+    let skipped = 0;
+    order.items.forEach((it) => {
+      const live = products.find((p) => p.id === it.id);
+      if (!live || live.stock <= 0) {
+        skipped++;
+        return;
+      }
+      restored.push({
+        product: live,
+        quantity: Math.min(it.quantity, Math.max(0, live.stock))
+      });
+    });
+    if (restored.length === 0) {
+      addToast('Los productos de tu último pedido ya no están disponibles', 'warning');
+      return;
+    }
+    setCart(restored);
+    setIsCartOpen(true);
+    addToast(
+      skipped > 0
+        ? `Repetido tu último pedido (${restored.length} artículos, ${skipped} no disponibles)`
+        : `Repetido tu último pedido (${restored.length} artículos)`
+    );
   };
 
   const handleSaveProduct = async (productData) => {
@@ -680,6 +793,9 @@ export default function App() {
             onOpenProductModal={(product) => setProductDetailModal(product)}
             currentOrderTracking={trackedOrder}
             setCurrentOrderTracking={setCurrentOrderTracking}
+            savedCustomer={savedCustomer}
+            lastOrderForCustomer={lastOrderForCustomer}
+            onRepeatLastOrder={handleRepeatLastOrder}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -744,6 +860,9 @@ export default function App() {
           cartTotal={cartTotal}
           rate={rate}
           onSubmit={handlePlaceOrder}
+          savedCustomer={savedCustomer}
+          knownCustomers={knownCustomers}
+          onSaveCustomer={setSavedCustomer}
         />
       )}
 
@@ -899,7 +1018,10 @@ function CustomerView({
   onAddToCart,
   onOpenProductModal,
   currentOrderTracking,
-  setCurrentOrderTracking
+  setCurrentOrderTracking,
+  savedCustomer,
+  lastOrderForCustomer,
+  onRepeatLastOrder
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestions = useMemo(() => {
@@ -974,6 +1096,30 @@ function CustomerView({
                 </div>
               </div>
             ))}
+        </div>
+      )}
+
+      {/* Repetir último pedido del cliente reconocido */}
+      {savedCustomer?.customerName && lastOrderForCustomer && (
+        <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-teal-500/15 via-cyan-500/10 to-emerald-500/15 border border-teal-500/30 flex items-center gap-3 sm:gap-4">
+          <span className="p-2 sm:p-2.5 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+            <Icon name="refresh" className="w-4 h-4 sm:w-5 sm:h-5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm sm:text-base font-bold text-white truncate">
+              ¡Hola de nuevo, {savedCustomer.customerName.split(' ')[0]}!
+            </p>
+            <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+              Tu último pedido #{lastOrderForCustomer.id} ({lastOrderForCustomer.items.length} artículos) está listo para repetirse.
+            </p>
+          </div>
+          <button
+            onClick={onRepeatLastOrder}
+            className="shrink-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all active:scale-95 flex items-center gap-1.5"
+          >
+            <Icon name="refresh" className="w-3.5 h-3.5" />
+            <span className="hidden min-[360px]:inline">Repetir pedido</span>
+          </button>
         </div>
       )}
 
@@ -1524,17 +1670,39 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer, knownCustomers, onSaveCustomer }) {
   const [formData, setFormData] = useState({
-    customerName: '',
-    phoneCode: '0412',
-    phoneNumber: '',
-    type: 'pickup', // 'pickup' | 'delivery'
-    address: '',
+    customerName: savedCustomer?.customerName || '',
+    phoneCode: savedCustomer?.phoneCode || '0412',
+    phoneNumber: savedCustomer?.phoneNumber || '',
+    type: savedCustomer?.type || 'pickup', // 'pickup' | 'delivery'
+    address: savedCustomer?.address || '',
     notes: ''
   });
 
   const [errors, setErrors] = useState({});
+  const [showPhoneSuggestions, setShowPhoneSuggestions] = useState(false);
+
+  // Autocompletado por teléfono: busca clientes conocidos cuyos 7 dígitos coincidan
+  const phoneSuggestions = useMemo(() => {
+    if (formData.phoneNumber.length < 3) return [];
+    const q = formData.phoneNumber;
+    return knownCustomers
+      .filter((c) => (c.number || '').startsWith(q))
+      .slice(0, 3);
+  }, [knownCustomers, formData.phoneNumber]);
+
+  const applyCustomer = (customer) => {
+    setFormData((prev) => ({
+      ...prev,
+      customerName: customer.name || prev.customerName,
+      phoneCode: customer.code || prev.phoneCode,
+      phoneNumber: customer.number || prev.phoneNumber,
+      address: customer.address || prev.address
+    }));
+    setShowPhoneSuggestions(false);
+    if (customer.address) setFormData((prev) => ({ ...prev, type: 'delivery' }));
+  };
 
   const validate = () => {
     const newErrors = {};
@@ -1550,16 +1718,27 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (validate()) {
-      onSubmit({
+      const full = {
         ...formData,
         phone: `${formData.phoneCode} ${formData.phoneNumber}`
-      });
+      };
+      if (onSaveCustomer) {
+        onSaveCustomer({
+          customerName: formData.customerName,
+          phoneCode: formData.phoneCode,
+          phoneNumber: formData.phoneNumber,
+          address: formData.address || '',
+          type: formData.type
+        });
+      }
+      onSubmit(full);
     }
   };
 
   const handlePhoneNumber = (value) => {
     const digits = value.replace(/\D/g, '').slice(0, 7);
     setFormData({ ...formData, phoneNumber: digits });
+    setShowPhoneSuggestions(digits.length >= 3);
   };
 
   return (
@@ -1571,7 +1750,14 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit }) {
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-white">Finalizar Pedido</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Completa tus datos para enviarlo al kiosco</p>
+            {savedCustomer?.customerName ? (
+              <p className="text-xs text-teal-400 mt-0.5 flex items-center gap-1">
+                <Icon name="user" className="w-3 h-3" />
+                ¡Hola de nuevo, {savedCustomer.customerName.split(' ')[0]}! Tus datos ya están listos.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-400 mt-0.5">Completa tus datos para enviarlo al kiosco</p>
+            )}
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
             <Icon name="x" className="w-5 h-5" />
@@ -1642,11 +1828,42 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit }) {
                   inputMode="numeric"
                   value={formData.phoneNumber}
                   onChange={(e) => handlePhoneNumber(e.target.value)}
+                  onBlur={() => setTimeout(() => setShowPhoneSuggestions(false), 150)}
                   placeholder="1234567"
                   maxLength={7}
                   className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
                 />
               </div>
+              {showPhoneSuggestions && phoneSuggestions.length > 0 && (
+                <div className="mt-2 space-y-1.5 animate-fade-in">
+                  <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+                    Clientes conocidos — toca para autocompletar
+                  </p>
+                  {phoneSuggestions.map((c) => (
+                    <button
+                      key={c.phone}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applyCustomer(c);
+                      }}
+                      className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-slate-800 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all text-left"
+                    >
+                      <span className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 shrink-0">
+                        <Icon name="user" className="w-3.5 h-3.5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-bold text-white truncate">{c.name}</span>
+                        <span className="block text-[10px] text-slate-400 truncate">
+                          {c.code} {c.number}
+                          {c.address ? ` · ${c.address}` : ''}
+                        </span>
+                      </span>
+                      <Icon name="arrowRight" className="w-3.5 h-3.5 text-teal-400 shrink-0 ml-auto" />
+                    </button>
+                  ))}
+                </div>
+              )}
               <p className="text-[10px] text-slate-500 mt-1">Código móvil + 7 dígitos (ej: {formData.phoneCode} 1234567)</p>
               {errors.phone && <p className="text-xs text-rose-400 mt-1">{errors.phone}</p>}
             </div>

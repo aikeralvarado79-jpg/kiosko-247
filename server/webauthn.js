@@ -49,7 +49,12 @@ export const registrationOptions = async (req, res) => {
       userID: phoneToUserId(key),
       userDisplayName: customerName || 'Cliente',
       attestationType: 'none',
-      authenticatorSelection: { residentKey: 'required', userVerification: 'required' }
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform',
+        residentKey: 'discouraged',
+        userVerification: 'required'
+      },
+      preferredAuthenticatorType: 'localDevice'
     });
 
     challengeStore.set(`reg-${key}`, { challenge: options.challenge, expires: Date.now() + 5 * 60 * 1000 });
@@ -83,12 +88,12 @@ export const registrationVerify = async (req, res) => {
       return res.status(400).json({ error: 'No se pudo verificar la biometría' });
     }
 
-    const { credentialPublicKey, credentialID, counter } = verification.registrationInfo;
+    const { credential } = verification.registrationInfo;
 
     await store.saveWebAuthn(key, {
-      credentialId: credentialID,
-      publicKey: Buffer.from(credentialPublicKey),
-      counter
+      credentialId: credential.id,
+      publicKey: Buffer.from(credential.publicKey),
+      counter: credential.counter
     });
 
     res.json({ ok: true });

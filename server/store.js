@@ -78,13 +78,15 @@ const fileStore = {
 
   async getWebAuthnByPhone(phone) {
     const key = normalizePhone(phone);
-    return this.state.webauthn.find((c) => c.phone === key) || null;
+    const cred = this.state.webauthn.find((c) => c.phone === key) || null;
+    if (!cred) return null;
+    return { ...cred, publicKey: Buffer.isBuffer(cred.publicKey) ? cred.publicKey : Buffer.from(cred.publicKey || []) };
   },
 
   async saveWebAuthn(phone, credential) {
     const key = normalizePhone(phone);
     this.state.webauthn = [
-      credential,
+      { phone: key, ...credential, publicKey: Array.from(credential.publicKey) },
       ...this.state.webauthn.filter((c) => c.phone !== key)
     ];
     this.persist();

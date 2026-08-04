@@ -12,6 +12,7 @@ const defaultState = () => ({
   categories: [...INITIAL_CATEGORIES],
   orders: JSON.parse(JSON.stringify(INITIAL_ORDERS)),
   customers: [],
+  webauthn: [],
   settings: { promos: [] }
 });
 
@@ -73,6 +74,20 @@ const fileStore = {
   async getCustomerByPhone(phone) {
     const key = normalizePhone(phone);
     return this.state.customers.find((c) => c.phone === key) || null;
+  },
+
+  async getWebAuthnByPhone(phone) {
+    const key = normalizePhone(phone);
+    return this.state.webauthn.find((c) => c.phone === key) || null;
+  },
+
+  async saveWebAuthn(phone, credential) {
+    const key = normalizePhone(phone);
+    this.state.webauthn = [
+      credential,
+      ...this.state.webauthn.filter((c) => c.phone !== key)
+    ];
+    this.persist();
   },
 
   async upsertCustomer({ phone, customerName, address }) {
@@ -153,6 +168,13 @@ const pgStore = {
         addresses JSONB DEFAULT '[]',
         "createdAt" TEXT,
         "lastOrderAt" TEXT
+      );
+      CREATE TABLE IF NOT EXISTS webauthn_credentials (
+        phone TEXT PRIMARY KEY,
+        credential_id TEXT,
+        public_key BYTEA,
+        counter INTEGER,
+        "createdAt" TEXT
       );
     `);
   },
@@ -255,6 +277,33 @@ const pgStore = {
     const { rows } = await this.pool.query('SELECT * FROM customers WHERE phone = $1', [key]);
     if (!rows[0]) return null;
     return { ...rows[0], addresses: rows[0].addresses || [] };
+  },
+
+  async getWebAuthnByPhone(phone) {
+    const key = normalizePhone(phone);
+    if (!key || key.length < 7) return null;
+    const { rows } = await this.pool.query('SELECT * FROM webauthn_credentials WHERE phone = $1', [key]);
+    if (!rows[0]) return null;
+    return {
+      phone: rows[0].phone,
+      credentialId: rows[0].credential_id,
+      publicKey: rows[0].public_key,
+      counter: rows[0].counter,
+      createdAt: rows[0].createdAt
+    };
+  },
+
+  async saveWebAuthn(phone, credential) {
+    const key = normalizePhone(phone);
+    await this.pool.query(
+      `INSERT INTO webauthn_credentials (phone, credential_id, public_key, counter, "createdAt")
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (phone) DO UPDATE SET
+         credential_id = EXCLUDED.credential_id,
+         public_key = EXCLUDED.public_key,
+         counter = EXCLUDED.counter`,
+      [key, credential.credentialId, credential.publicKey, credential.counter, new Date().toISOString()]
+    );
   },
 
   async upsertCustomer({ phone, customerName, address }) {
@@ -385,6 +434,10 @@ export const saveSettings = (settings) => store.saveSettings(settings);
 export const getCustomerByPhone = (phone) => store.getCustomerByPhone(phone);
 
 export const upsertCustomer = (customer) => store.upsertCustomer(customer);
+
+export const getWebAuthnByPhone = (phone) => store.getWebAuthnByPhone(phone);
+
+export const saveWebAuthn = (phone, credential) => store.saveWebAuthn(phone, credential);
 
 export const createOrder = async (orderData) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {

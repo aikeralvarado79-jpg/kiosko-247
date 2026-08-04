@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
 
 // SVG Icons Helper Components for full visual depth without external dependencies
@@ -782,7 +783,7 @@ export default function App() {
             </div>
             <div className="min-w-0">
               <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate">
-                Kiosco 24/7
+                Empresas Alvarados
               </h1>
               <span className="hidden sm:flex text-xs text-teal-400/90 font-medium items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping inline-block" />
@@ -1016,7 +1017,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="mt-auto border-t border-slate-800/80 bg-slate-950/60 py-5 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500">
-        <p>© 2026 Kiosco 24/7 Digital Platform • Gestión inteligente de inventario y pedidos al instante.</p>
+        <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
       </footer>
     </div>
   );
@@ -1029,7 +1030,7 @@ function LoadingScreen() {
         <Icon name="store" className="w-7 h-7" />
       </div>
       <div>
-        <h2 className="text-lg font-bold text-white">Cargando el Kiosco 24/7...</h2>
+        <h2 className="text-lg font-bold text-white">Cargando Empresas Alvarados...</h2>
         <p className="text-xs text-slate-400 mt-1">Sincronizando productos y pedidos desde el servidor.</p>
       </div>
     </div>
@@ -1291,7 +1292,7 @@ function CustomerView({
                       {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
                     </p>
                     <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
-                      {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en kiosco'}
+                      {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
                     </p>
                   </div>
                 );
@@ -1679,6 +1680,24 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
   const [phoneNumber, setPhoneNumber] = useState('');
   const [errors, setErrors] = useState({});
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isWorking, setIsWorking] = useState(false);
+  const [step, setStep] = useState('form'); // 'form' | 'webauthn'
+  const [webAuthnStep, setWebAuthnStep] = useState(''); // '' | 'login' | 'register'
+  const [webauthnError, setWebauthnError] = useState('');
+  const [webauthnSupported, setWebauthnSupported] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supported = browserSupportsWebAuthn();
+      let platformOk = false;
+      if (supported) {
+        try { platformOk = await platformAuthenticatorIsAvailable(); } catch { platformOk = false; }
+      }
+      if (!cancelled) setWebauthnSupported(supported && platformOk);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const suggestions = useMemo(() => {
     if (phoneNumber.length < 3) return [];
@@ -1700,14 +1719,67 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     setShowSuggestions(false);
   };
 
-  const handleSubmit = (e) => {
+  // Determina si el teléfono ya tiene biometría registrada
+  const hasRegisteredBiometry = async (phoneKey) => {
+    const res = await api.webauthnLoginOptions({ phone: phoneKey });
+    if (res.ok) return true;
+    if (res.status === 404) return false;
+    throw new Error(res.data.error || 'No se pudo consultar tu registro biométrico');
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const newErrors = {};
     if (!customerName.trim()) newErrors.customerName = 'Ingresa tu nombre';
     if (!/^\d{7}$/.test(phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
-    onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
+
+    if (!webauthnSupported) {
+      setStep('form');
+      setWebauthnError('Tu dispositivo no soporta biometría. Usá un celular actualizado con huella o Face ID.');
+      return;
+    }
+
+    setWebauthnError('');
+    setStep('webauthn');
+    setIsWorking(true);
+
+    try {
+      const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
+      const hasBio = await hasRegisteredBiometry(phoneKey);
+
+      if (hasBio) {
+        // Login: pedir huella / Face ID
+        setWebAuthnStep('login');
+        const res = await api.webauthnLoginOptions({ phone: phoneKey });
+        if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar la verificación');
+        const authResponse = await startAuthentication({ optionsJSON: res.data.options });
+        const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
+        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
+      } else {
+        // Registro: crear biometría
+        setWebAuthnStep('register');
+        const res = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: customerName.trim() });
+        if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar el registro');
+        const regResponse = await startRegistration({ optionsJSON: res.data.options });
+        const verifyRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
+        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'No se pudo guardar tu biometría');
+      }
+
+      setIsWorking(false);
+      onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
+    } catch (err) {
+      setIsWorking(false);
+      setWebauthnError(err.message || 'No se pudo completar la verificación');
+      setStep('form');
+    }
+  };
+
+  const resetForm = () => {
+    setStep('form');
+    setWebAuthnStep('');
+    setWebauthnError('');
   };
 
   return (
@@ -1719,111 +1791,162 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
             <Icon name="user" className="w-7 h-7 sm:w-8 sm:h-8" />
           </div>
           <h2 className="text-lg sm:text-xl font-black text-white mt-3">
-            {savedCustomer?.customerName ? 'Cambiar de usuario' : '¡Bienvenido al Kiosco!'}
+            {savedCustomer?.customerName ? 'Cambiar de usuario' : 'Bienvenido a Empresas Alvarados'}
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Identifícate para pedir. Tu teléfono es tu tarjeta de cliente.
+            Identifícate para pedir. Tu teléfono + biometría es tu tarjeta de cliente.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-4">
-          {/* Nombre */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Tu Nombre *</label>
-            <input
-              type="text"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder="Ej: Juan Pérez"
-              autoFocus
-              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
-            />
-            {errors.customerName && <p className="text-xs text-rose-400 mt-1">{errors.customerName}</p>}
-          </div>
-
-          {/* Teléfono */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono / WhatsApp *</label>
-            <div className="flex gap-2">
-              <select
-                value={phoneCode}
-                onChange={(e) => setPhoneCode(e.target.value)}
-                className="w-24 shrink-0 px-3 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm font-bold focus:border-teal-500 focus:outline-none"
-              >
-                {PHONE_CODES.map((code) => (
-                  <option key={code} value={code}>{code}</option>
-                ))}
-              </select>
+        {step === 'form' ? (
+          <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-4">
+            {/* Nombre */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Tu Nombre *</label>
               <input
-                type="tel"
-                inputMode="numeric"
-                value={phoneNumber}
-                onChange={(e) => handlePhoneNumber(e.target.value)}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                placeholder="1234567"
-                maxLength={7}
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+                autoFocus
                 className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
               />
+              {errors.customerName && <p className="text-xs text-rose-400 mt-1">{errors.customerName}</p>}
             </div>
 
-            {showSuggestions && suggestions.length > 0 && (
-              <div className="mt-2 space-y-1.5 animate-fade-in">
-                <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-                  Clientes conocidos — toca para autocompletar
-                </p>
-                {suggestions.map((c) => (
-                  <button
-                    key={c.phone}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      applyCustomer(c);
-                    }}
-                    className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-slate-800 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all text-left"
-                  >
-                    <span className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 shrink-0">
-                      <Icon name="user" className="w-3.5 h-3.5" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-xs font-bold text-white truncate">{c.name}</span>
-                      <span className="block text-[10px] text-slate-400 truncate">{c.code} {c.number}</span>
-                    </span>
-                    <Icon name="arrowRight" className="w-3.5 h-3.5 text-teal-400 shrink-0 ml-auto" />
-                  </button>
-                ))}
+            {/* Teléfono */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono / WhatsApp *</label>
+              <div className="flex gap-2">
+                <select
+                  value={phoneCode}
+                  onChange={(e) => setPhoneCode(e.target.value)}
+                  className="w-24 shrink-0 px-3 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm font-bold focus:border-teal-500 focus:outline-none"
+                >
+                  {PHONE_CODES.map((code) => (
+                    <option key={code} value={code}>{code}</option>
+                  ))}
+                </select>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={phoneNumber}
+                  onChange={(e) => handlePhoneNumber(e.target.value)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  placeholder="1234567"
+                  maxLength={7}
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                />
               </div>
-            )}
-            {errors.phone && <p className="text-xs text-rose-400 mt-1">{errors.phone}</p>}
-          </div>
 
-          {/* Acciones */}
-          <div className="space-y-2.5 pt-1">
-            <button
-              type="submit"
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
-            >
-              <Icon name="check" className="w-4 h-4" />
-              Entrar al Kiosco
-            </button>
-            {savedCustomer?.customerName && (
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="mt-2 space-y-1.5 animate-fade-in">
+                  <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+                    Clientes conocidos — toca para autocompletar
+                  </p>
+                  {suggestions.map((c) => (
+                    <button
+                      key={c.phone}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applyCustomer(c);
+                      }}
+                      className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-slate-800 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all text-left"
+                    >
+                      <span className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 shrink-0">
+                        <Icon name="user" className="w-3.5 h-3.5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-bold text-white truncate">{c.name}</span>
+                        <span className="block text-[10px] text-slate-400 truncate">{c.code} {c.number}</span>
+                      </span>
+                      <Icon name="arrowRight" className="w-3.5 h-3.5 text-teal-400 shrink-0 ml-auto" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              {errors.phone && <p className="text-xs text-rose-400 mt-1">{errors.phone}</p>}
+            </div>
+
+            {/* Indicador de biometría */}
+            <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-800/70 border border-teal-500/25">
+              <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+                <Icon name="check" className="w-4 h-4" />
+              </span>
+              <p className="text-[11px] text-slate-300 leading-snug">
+                Verificación por <span className="font-bold text-teal-300">biometría del celular</span> (huella o Face ID).
+                {!webauthnSupported && <span className="block text-rose-400 mt-1">Tu dispositivo no lo soporta.</span>}
+              </p>
+            </div>
+
+            {webauthnError && (
+              <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5">{webauthnError}</p>
+            )}
+
+            {/* Acciones */}
+            <div className="space-y-2.5 pt-1">
+              <button
+                type="submit"
+                disabled={isWorking}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <Icon name="check" className="w-4 h-4" />
+                Entrar a Empresas Alvarados
+              </button>
+              {savedCustomer?.customerName && (
+                <button
+                  type="button"
+                  onClick={onSwitchCustomer}
+                  className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
+                >
+                  Volver a {savedCustomer.customerName.split(' ')[0]}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={onSwitchCustomer}
-                className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
+                onClick={onGoToAdmin}
+                className="w-full py-2 text-[11px] text-slate-500 hover:text-teal-300 transition-colors flex items-center justify-center gap-1.5"
               >
-                Volver a {savedCustomer.customerName.split(' ')[0]}
+                <Icon name="layers" className="w-3.5 h-3.5" />
+                ¿Eres el administrador? Ir al panel
               </button>
-            )}
+            </div>
+          </form>
+        ) : (
+          <div className="p-8 sm:p-10 flex flex-col items-center text-center space-y-4">
+            <div className="relative">
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 shadow-xl shadow-teal-500/30 animate-pulse">
+                {webAuthnStep === 'login' ? (
+                  <Icon name="user" className="w-10 h-10" />
+                ) : (
+                  <Icon name="check" className="w-10 h-10" />
+                )}
+              </div>
+              <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-4 border-slate-900 flex items-center justify-center">
+                <Icon name="check" className="w-3 h-3 text-slate-950" />
+              </span>
+            </div>
+            <div>
+              <h3 className="text-base sm:text-lg font-bold text-white">
+                {webAuthnStep === 'login' ? 'Confirmá tu identidad' : 'Registrá tu biometría'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                {webAuthnStep === 'login'
+                  ? 'Usá tu huella o Face ID para confirmar que sos vos.'
+                  : 'Usá tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
+              </p>
+            </div>
             <button
               type="button"
-              onClick={onGoToAdmin}
-              className="w-full py-2 text-[11px] text-slate-500 hover:text-teal-300 transition-colors flex items-center justify-center gap-1.5"
+              onClick={resetForm}
+              disabled={isWorking}
+              className="text-xs text-slate-500 hover:text-teal-300 transition-colors disabled:opacity-50"
             >
-              <Icon name="layers" className="w-3.5 h-3.5" />
-              ¿Eres el administrador? Ir al panel
+              Cancelar
             </button>
           </div>
-        </form>
+        )}
       </div>
     </div>
   );
@@ -2090,7 +2213,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
                 ¡Hola de nuevo, {savedCustomer.customerName.split(' ')[0]}! Tus datos ya están listos.
               </p>
             ) : (
-              <p className="text-xs text-slate-400 mt-0.5">Completa tus datos para enviarlo al kiosco</p>
+              <p className="text-xs text-slate-400 mt-0.5">Completa tus datos para enviarlo a la tienda</p>
             )}
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
@@ -2111,7 +2234,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
               }`}
             >
               <Icon name="store" className="w-4 h-4" />
-              Retiro en Kiosco
+              Retiro en Tienda
             </button>
             <button
               type="button"
@@ -2385,7 +2508,7 @@ function AdminView({
       <div className="flex flex-col sm:flex-row md:items-center justify-between gap-4 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md">
         <div>
           <span className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold uppercase tracking-wider">
-            🛡️ Panel Administrativo Kiosco
+            🛡️ Panel Administrativo
           </span>
           <h2 className="text-lg sm:text-2xl font-black text-white mt-2">Control de Inventario y Ventas</h2>
           <p className="text-xs text-slate-400 mt-1">Gestiona tus productos en tiempo real y atiende pedidos entrantes.</p>
@@ -2467,7 +2590,7 @@ function AdminView({
           { key: 'inventory', label: 'Inventario', full: 'Inventario de Productos', icon: 'package' },
           { key: 'orders', label: `Pedidos (${pendingOrders.length})`, full: `Pedidos en Vivo (${pendingOrders.length})`, icon: 'clock' },
           { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
-          { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Kiosco', icon: 'trendingUp' }
+          { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Negocio', icon: 'trendingUp' }
         ].map((tab) => (
           <button
             key={tab.key}

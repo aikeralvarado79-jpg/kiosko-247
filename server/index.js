@@ -4,6 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import * as store from './store.js';
+import * as webauthn from './webauthn.js';
 import { getBcvRate } from './rate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -96,6 +97,12 @@ app.put('/api/customers/:phone', async (req, res) => {
     res.status(500).json({ error: 'No se pudo actualizar el cliente: ' + err.message });
   }
 });
+
+// WebAuthn: biometría del celular para identificar al cliente
+app.post('/api/webauthn/register-options', webauthn.registrationOptions);
+app.post('/api/webauthn/register-verify', webauthn.registrationVerify);
+app.post('/api/webauthn/login-options', webauthn.authenticationOptions);
+app.post('/api/webauthn/login-verify', webauthn.authenticationVerify);
 
 // Admin
 app.post('/api/products', requireAdmin, async (req, res) => {

@@ -26,5 +26,9 @@ export const api = {
   updateOrderStatus: (id, status) => request(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   saveSettings: (settings) => request('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   getCustomer: (phone) => request(`/api/customers/${encodeURIComponent(phone)}`),
-  upsertCustomer: (phone, data) => request(`/api/customers/${encodeURIComponent(phone)}`, { method: 'PUT', body: JSON.stringify(data) })
+  upsertCustomer: (phone, data) => request(`/api/customers/${encodeURIComponent(phone)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  webauthnRegisterOptions: (data) => request('/api/webauthn/register-options', { method: 'POST', body: JSON.stringify(data) }),
+  webauthnRegisterVerify: (data) => request('/api/webauthn/register-verify', { method: 'POST', body: JSON.stringify(data) }),
+  webauthnLoginOptions: (data) => request('/api/webauthn/login-options', { method: 'POST', body: JSON.stringify(data) }),
+  webauthnLoginVerify: (data) => request('/api/webauthn/login-verify', { method: 'POST', body: JSON.stringify(data) })
 };

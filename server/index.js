@@ -4,6 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import * as store from './store.js';
+import { getBcvRate } from './rate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -51,9 +52,18 @@ app.post('/api/auth/login', (req, res) => {
 // Public
 app.get('/api/state', async (req, res) => {
   try {
-    res.json(await store.getState());
+    const [state, rate] = await Promise.all([store.getState(), getBcvRate()]);
+    res.json({ ...state, rate });
   } catch (err) {
     res.status(500).json({ error: 'No se pudo leer el estado: ' + err.message });
+  }
+});
+
+app.get('/api/rate', async (req, res) => {
+  try {
+    res.json(await getBcvRate());
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo obtener la tasa: ' + err.message });
   }
 });
 

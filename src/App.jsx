@@ -58,6 +58,14 @@ const formatSize = (product) => {
   return `${formatted}${product.sizeUnit || ''}`;
 };
 
+const formatUsd = (n) => `$${Number(n || 0).toLocaleString('es-AR')}`;
+
+const formatBs = (n) => `Bs ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
+
+const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
+
 const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'entregado'];
 
 const STATUS_LABELS = {
@@ -67,6 +75,73 @@ const STATUS_LABELS = {
   entregado: 'Entregado'
 };
 
+function RateBanner({ rate }) {
+  const [usdInput, setUsdInput] = useState('');
+  const [bsInput, setBsInput] = useState('');
+  const r = rate?.rate || 0;
+
+  const handleUsd = (value) => {
+    const v = value.replace(/[^\d.,]/g, '');
+    setUsdInput(v);
+    const num = parseFloat(v.replace(',', '.'));
+    setBsInput(Number.isFinite(num) ? (num * r).toFixed(2) : '');
+  };
+
+  const handleBs = (value) => {
+    const v = value.replace(/[^\d.,]/g, '');
+    setBsInput(v);
+    const num = parseFloat(v.replace(',', '.'));
+    setUsdInput(Number.isFinite(num) && r > 0 ? (num / r).toFixed(2) : '');
+  };
+
+  return (
+    <div className="border-b border-slate-800 bg-slate-900/90 px-4 lg:px-8 py-3">
+      <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-3 flex-wrap justify-center">
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-teal-500/10 border border-teal-500/30 text-xs font-bold text-teal-300">
+            <Icon name="dollarSign" className="w-4 h-4" />
+            Tasa BCV del Día
+          </span>
+          <span className="text-sm text-slate-300 font-semibold">
+            1 US$ = <span className="text-teal-300 font-black">{r ? r.toLocaleString('es-AR') : '—'} Bs</span>
+          </span>
+          {rate?.date && (
+            <span className="text-[11px] text-slate-500">
+              {rate.source} · {new Date(rate.date).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-1.5">
+            <Icon name="dollarSign" className="w-4 h-4 text-teal-400" />
+            <input
+              type="text"
+              inputMode="decimal"
+              value={usdInput}
+              onChange={(e) => handleUsd(e.target.value)}
+              placeholder="0.00"
+              className="w-20 bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
+            />
+          </div>
+          <Icon name="refresh" className="w-4 h-4 text-slate-600 rotate-90" />
+          <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-1.5">
+            <span className="text-teal-300 font-bold text-sm">Bs</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={bsInput}
+              onChange={(e) => handleBs(e.target.value)}
+              placeholder="0,00"
+              className="w-24 bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // App views: 'customer' | 'admin'
   const [activeView, setActiveView] = useState('customer');
@@ -75,6 +150,7 @@ export default function App() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [rate, setRate] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
@@ -97,6 +173,7 @@ export default function App() {
     setProducts(res.data.products || []);
     setCategories(res.data.categories || []);
     setOrders(res.data.orders || []);
+    if (res.data.rate) setRate(res.data.rate);
     setIsLoading(false);
   }, []);
 
@@ -428,6 +505,9 @@ export default function App() {
         </div>
       </header>
 
+      {/* Tasa BCV del día + Calculadora */}
+      <RateBanner rate={rate} />
+
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         {isLoading ? (
@@ -443,6 +523,7 @@ export default function App() {
             setSelectedCategory={setSelectedCategory}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            rate={rate}
             onAddToCart={addToCart}
             onOpenProductModal={(product) => setProductDetailModal(product)}
             currentOrderTracking={trackedOrder}
@@ -453,6 +534,7 @@ export default function App() {
             products={products}
             categories={categories}
             orders={orders}
+            rate={rate}
             adminTab={adminTab}
             setAdminTab={setAdminTab}
             onLogout={handleAdminLogout}
@@ -478,6 +560,7 @@ export default function App() {
         onClose={() => setIsCartOpen(false)}
         cart={cart}
         cartTotal={cartTotal}
+        rate={rate}
         onUpdateQty={updateCartQty}
         onRemove={removeFromCart}
         onProceedToCheckout={() => {
@@ -490,6 +573,7 @@ export default function App() {
       {productDetailModal && (
         <ProductDetailModal
           product={productDetailModal}
+          rate={rate}
           onClose={() => setProductDetailModal(null)}
           onAddToCart={(qty) => {
             addToCart(productDetailModal, qty);
@@ -504,6 +588,7 @@ export default function App() {
           onClose={() => setIsCheckoutOpen(false)}
           cart={cart}
           cartTotal={cartTotal}
+          rate={rate}
           onSubmit={handlePlaceOrder}
         />
       )}
@@ -643,6 +728,7 @@ function CustomerView({
   setSelectedCategory,
   searchQuery,
   setSearchQuery,
+  rate,
   onAddToCart,
   onOpenProductModal,
   currentOrderTracking,
@@ -781,6 +867,7 @@ function CustomerView({
             <ProductCard
               key={product.id}
               product={product}
+              rate={rate}
               onAddToCart={() => onAddToCart(product, 1)}
               onOpenDetail={() => onOpenProductModal(product)}
             />
@@ -791,7 +878,7 @@ function CustomerView({
   );
 }
 
-function ProductCard({ product, onAddToCart, onOpenDetail }) {
+function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
   const isOut = product.stock <= 0;
   const isLow = product.stock > 0 && product.stock <= 5;
 
@@ -851,8 +938,13 @@ function ProductCard({ product, onAddToCart, onOpenDetail }) {
           <div>
             <span className="text-xs text-slate-400 font-medium block">Precio</span>
             <span className="text-lg font-black text-white">
-              ${product.price.toLocaleString('es-AR')}
+              {formatUsd(product.price)}
             </span>
+            {rate?.rate > 0 && (
+              <span className="block text-[11px] font-bold text-teal-300/90 mt-0.5">
+                {formatBs(usdToBs(product.price, rate.rate))}
+              </span>
+            )}
           </div>
 
           <button
@@ -874,9 +966,11 @@ function ProductCard({ product, onAddToCart, onOpenDetail }) {
   );
 }
 
-function ProductDetailModal({ product, onClose, onAddToCart }) {
+function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
   const [quantity, setQuantity] = useState(1);
   const isOut = product.stock <= 0;
+  const unitBs = usdToBs(product.price, rate?.rate);
+  const lineTotal = product.price * quantity;
 
   // Handle ESC key press
   useEffect(() => {
@@ -937,7 +1031,12 @@ function ProductDetailModal({ product, onClose, onAddToCart }) {
           <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60">
             <div>
               <span className="text-xs text-slate-400 block">Precio Unitario</span>
-              <span className="text-2xl font-black text-white">${product.price.toLocaleString('es-AR')}</span>
+              <span className="text-2xl font-black text-white">{formatUsd(product.price)}</span>
+              {rate?.rate > 0 && (
+                <span className="block text-xs font-bold text-teal-300/90 mt-0.5">
+                  {formatBs(unitBs)}
+                </span>
+              )}
             </div>
 
             {/* Quantity Controls */}
@@ -971,7 +1070,9 @@ function ProductDetailModal({ product, onClose, onAddToCart }) {
           >
             <Icon name="shoppingBag" className="w-5 h-5" />
             <span>
-              {isOut ? 'Sin Stock Disponible' : `Agregar al Carrito • $${(product.price * quantity).toLocaleString('es-AR')}`}
+              {isOut
+                ? 'Sin Stock Disponible'
+                : `Agregar al Carrito • ${formatUsd(lineTotal)}${rate?.rate > 0 ? ` (${formatBs(usdToBs(lineTotal, rate.rate))})` : ''}`}
             </span>
           </button>
         </div>
@@ -980,7 +1081,7 @@ function ProductDetailModal({ product, onClose, onAddToCart }) {
   );
 }
 
-function CartDrawer({ isOpen, onClose, cart, cartTotal, onUpdateQty, onRemove, onProceedToCheckout }) {
+function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout }) {
   if (!isOpen) return null;
 
   return (
@@ -1028,7 +1129,12 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, onUpdateQty, onRemove, o
                     {item.product.name}
                   </h4>
                   <span className="text-xs text-teal-400 font-semibold block mt-1">
-                    ${item.product.price.toLocaleString('es-AR')} c/u
+                    {formatUsd(item.product.price)} c/u
+                    {rate?.rate > 0 && (
+                      <span className="block text-[10px] text-slate-400 font-medium">
+                        {formatBs(usdToBs(item.product.price, rate.rate))} c/u
+                      </span>
+                    )}
                   </span>
 
                   {/* Quantity bar */}
@@ -1071,7 +1177,14 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, onUpdateQty, onRemove, o
             <div className="space-y-2">
               <div className="flex justify-between text-xs text-slate-400">
                 <span>Subtotal</span>
-                <span>${cartTotal.toLocaleString('es-AR')}</span>
+                <span>
+                  {formatUsd(cartTotal)}
+                  {rate?.rate > 0 && (
+                    <span className="block text-[10px] text-slate-500 text-right">
+                      {formatBs(usdToBs(cartTotal, rate.rate))}
+                    </span>
+                  )}
+                </span>
               </div>
               <div className="flex justify-between text-xs text-slate-400">
                 <span>Costo de preparación</span>
@@ -1079,7 +1192,14 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, onUpdateQty, onRemove, o
               </div>
               <div className="flex justify-between text-base font-black text-white pt-2 border-t border-slate-800">
                 <span>Total a Pagar</span>
-                <span className="text-teal-400">${cartTotal.toLocaleString('es-AR')}</span>
+                <span className="text-teal-400 text-right">
+                  {formatUsd(cartTotal)}
+                  {rate?.rate > 0 && (
+                    <span className="block text-[11px] text-teal-300/90">
+                      {formatBs(usdToBs(cartTotal, rate.rate))}
+                    </span>
+                  )}
+                </span>
               </div>
             </div>
 
@@ -1097,10 +1217,11 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, onUpdateQty, onRemove, o
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, onSubmit }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit }) {
   const [formData, setFormData] = useState({
     customerName: '',
-    phone: '',
+    phoneCode: '0412',
+    phoneNumber: '',
     type: 'pickup', // 'pickup' | 'delivery'
     address: '',
     notes: ''
@@ -1111,7 +1232,7 @@ function CheckoutModal({ onClose, cart, cartTotal, onSubmit }) {
   const validate = () => {
     const newErrors = {};
     if (!formData.customerName.trim()) newErrors.customerName = 'Ingresa tu nombre completo';
-    if (!formData.phone.trim()) newErrors.phone = 'Ingresa un teléfono de contacto';
+    if (!/^\d{7}$/.test(formData.phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
     if (formData.type === 'delivery' && !formData.address.trim()) {
       newErrors.address = 'Ingresa la dirección de entrega';
     }
@@ -1122,8 +1243,16 @@ function CheckoutModal({ onClose, cart, cartTotal, onSubmit }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (validate()) {
-      onSubmit(formData);
+      onSubmit({
+        ...formData,
+        phone: `${formData.phoneCode} ${formData.phoneNumber}`
+      });
     }
+  };
+
+  const handlePhoneNumber = (value) => {
+    const digits = value.replace(/\D/g, '').slice(0, 7);
+    setFormData({ ...formData, phoneNumber: digits });
   };
 
   return (
@@ -1191,13 +1320,27 @@ function CheckoutModal({ onClose, cart, cartTotal, onSubmit }) {
               <label className="block text-xs font-semibold text-slate-300 mb-1">
                 Teléfono / WhatsApp *
               </label>
-              <input
-                type="tel"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                placeholder="Ej: +54 9 11 1234-5678"
-                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
-              />
+              <div className="flex gap-2">
+                <select
+                  value={formData.phoneCode}
+                  onChange={(e) => setFormData({ ...formData, phoneCode: e.target.value })}
+                  className="w-24 shrink-0 px-3 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm font-bold focus:border-teal-500 focus:outline-none"
+                >
+                  {PHONE_CODES.map((code) => (
+                    <option key={code} value={code}>{code}</option>
+                  ))}
+                </select>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={formData.phoneNumber}
+                  onChange={(e) => handlePhoneNumber(e.target.value)}
+                  placeholder="1234567"
+                  maxLength={7}
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                />
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">Código móvil + 7 dígitos (ej: {formData.phoneCode} 1234567)</p>
               {errors.phone && <p className="text-xs text-rose-400 mt-1">{errors.phone}</p>}
             </div>
 
@@ -1236,7 +1379,14 @@ function CheckoutModal({ onClose, cart, cartTotal, onSubmit }) {
             <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Resumen del Pedido</span>
             <div className="text-xs text-slate-300 flex justify-between">
               <span>Productos ({cart.length})</span>
-              <span className="font-bold text-white">${cartTotal.toLocaleString('es-AR')}</span>
+              <span className="font-bold text-white text-right">
+                {formatUsd(cartTotal)}
+                {rate?.rate > 0 && (
+                  <span className="block text-[11px] text-teal-300/90">
+                    {formatBs(usdToBs(cartTotal, rate.rate))}
+                  </span>
+                )}
+              </span>
             </div>
           </div>
 
@@ -1257,6 +1407,7 @@ function AdminView({
   products,
   categories,
   orders,
+  rate,
   adminTab,
   setAdminTab,
   onLogout,
@@ -1359,7 +1510,14 @@ function AdminView({
           </div>
           <div>
             <span className="text-xs text-slate-400 font-medium block">Ingresos Confirmados</span>
-            <span className="text-2xl font-black text-emerald-400">${totalRevenue.toLocaleString('es-AR')}</span>
+            <span className="text-2xl font-black text-emerald-400">
+              {formatUsd(totalRevenue)}
+              {rate?.rate > 0 && (
+                <span className="block text-[11px] text-slate-400 font-semibold">
+                  {formatBs(usdToBs(totalRevenue, rate.rate))}
+                </span>
+              )}
+            </span>
           </div>
         </div>
       </div>
@@ -1427,7 +1585,14 @@ function AdminView({
                           {p.category}
                         </span>
                       </td>
-                      <td className="p-4 font-bold text-white">${p.price.toLocaleString('es-AR')}</td>
+                      <td className="p-4 font-bold text-white">
+                        {formatUsd(p.price)}
+                        {rate?.rate > 0 && (
+                          <span className="block text-[10px] text-slate-400 font-semibold">
+                            {formatBs(usdToBs(p.price, rate.rate))}
+                          </span>
+                        )}
+                      </td>
                       <td className="p-4">
                         <span
                           className={`px-3 py-1 rounded-full text-xs font-bold ${
@@ -1509,12 +1674,26 @@ function AdminView({
                     {order.items.map((it, idx) => (
                       <div key={idx} className="flex justify-between">
                         <span>{it.quantity}x {it.name}</span>
-                        <span className="font-bold text-white">${(it.price * it.quantity).toLocaleString('es-AR')}</span>
+                        <span className="font-bold text-white">
+                          {formatUsd(it.price * it.quantity)}
+                          {rate?.rate > 0 && (
+                            <span className="block text-[10px] text-slate-500 text-right">
+                              {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
+                            </span>
+                          )}
+                        </span>
                       </div>
                     ))}
                     <div className="pt-2 border-t border-slate-800 flex justify-between font-bold text-white text-sm">
                       <span>Total</span>
-                      <span className="text-teal-400">${order.total.toLocaleString('es-AR')}</span>
+                      <span className="text-teal-400 text-right">
+                        {formatUsd(order.total)}
+                        {rate?.rate > 0 && (
+                          <span className="block text-[10px] text-teal-300/90">
+                            {formatBs(usdToBs(order.total, rate.rate))}
+                          </span>
+                        )}
+                      </span>
                     </div>
                   </div>
 

@@ -21,7 +21,7 @@ services:
         # Ej: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
 
   # Ambiente de pruebas: se despliega automáticamente con la rama develop.
-  # URL: https://kiosko-247-staging.onrender.com
+  # URL esperada: https://kiosko-247-staging.onrender.com
   - type: web
     name: kiosko-247-staging
     runtime: node
@@ -38,7 +38,7 @@ services:
         # Ej: staging247Aa
       - key: ADMIN_PHONES
         sync: false
-        # Teléfonos admin (iguales que producción si querés probar biometría).
+        # Teléfonos admin (mismos que producción si querés probar biometría).
       - key: DATABASE_URL
         sync: false
         # WARNING: temporalmente apunta a la misma BD que producción.

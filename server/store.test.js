@@ -238,4 +238,25 @@ describe('fileStore', () => {
     const customer = await store.getCustomerByPhone('41188889999');
     expect(Number(customer.balance)).toBe(0);
   });
+
+  it('programa y elimina cobros', async () => {
+    const store = await freshStore();
+    const before = await store.listCollections();
+    expect(Array.isArray(before)).toBe(true);
+
+    const created = await store.upsertCollection({
+      phone: '41133332222',
+      customerName: 'Deudor',
+      dueAt: new Date().toISOString(),
+      status: 'programado'
+    });
+    expect(created.item.id).toMatch(/^COB-/);
+    expect(created.list.some((c) => c.id === created.item.id)).toBe(true);
+
+    const same = await store.upsertCollection({ id: created.item.id, status: 'enviado' });
+    expect(same.list.find((c) => c.id === created.item.id).status).toBe('enviado');
+
+    const removed = await store.removeCollection(created.item.id);
+    expect(removed.list.some((c) => c.id === created.item.id)).toBe(false);
+  });
 });

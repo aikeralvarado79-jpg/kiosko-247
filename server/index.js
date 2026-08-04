@@ -310,6 +310,34 @@ app.put('/api/customers/:phone/benefited', requireAdmin, async (req, res) => {
   }
 });
 
+// Cobros programados (cuentas por cobrar programadas a enviar por WhatsApp).
+app.get('/api/collections', requireAdmin, async (req, res) => {
+  try {
+    res.json(await store.listCollections());
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudieron leer los cobros: ' + err.message });
+  }
+});
+
+// Crea o actualiza un cobro programado.
+app.post('/api/collections', requireAdmin, async (req, res) => {
+  try {
+    const result = await store.upsertCollection(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo guardar el cobro: ' + err.message });
+  }
+});
+
+app.delete('/api/collections/:id', requireAdmin, async (req, res) => {
+  try {
+    const result = await store.removeCollection(req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo eliminar el cobro: ' + err.message });
+  }
+});
+
 // Pexels proxy (used in production; in dev Vite proxies /pexels-api)
 app.use('/pexels-api', async (req, res) => {
   try {

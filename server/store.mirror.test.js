@@ -83,4 +83,19 @@ describe('refreshMirror', () => {
     expect(sqls.some((s) => s.includes('CREATE SCHEMA IF NOT EXISTS staging'))).toBe(true);
     expect(sqls.filter((s) => s.includes('INSERT INTO')).length).toBe(fakeTables.length);
   });
+
+  it('re-agrega columnas propias de staging tras copiar desde produccion', async () => {
+    process.env.DATABASE_URL = 'postgres://fake';
+    delete process.env.MIRROR_SOURCE_SCHEMA;
+    delete process.env.MIRROR_TARGET_SCHEMA;
+    const store = await import('./store.js');
+    const res = await store.refreshMirror();
+    expect(res.ok).toBe(true);
+
+    const client = h.getOrCreateClient();
+    const sqls = client.query.mock.calls.map((c) => String(c[0]));
+    expect(sqls.some((s) => s.includes('ALTER TABLE staging.customers ADD COLUMN IF NOT EXISTS balance'))).toBe(true);
+    expect(sqls.some((s) => s.includes('ALTER TABLE staging.customers ADD COLUMN IF NOT EXISTS "isBenefited"'))).toBe(true);
+    expect(sqls.some((s) => s.includes('ALTER TABLE staging.orders ADD COLUMN IF NOT EXISTS credit'))).toBe(true);
+  });
 });

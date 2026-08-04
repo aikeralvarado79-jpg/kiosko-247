@@ -493,6 +493,7 @@ export default function App() {
   const [deleteConfirmProduct, setDeleteConfirmProduct] = useState(null);
   const [orderDetailOrder, setOrderDetailOrder] = useState(null);
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState(null);
+  const [deleteOrderTarget, setDeleteOrderTarget] = useState(null);
 
   // Toast notifications
   const [toasts, setToasts] = useState([]);

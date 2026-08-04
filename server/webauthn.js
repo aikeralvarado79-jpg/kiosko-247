@@ -51,7 +51,10 @@ export const registrationOptions = async (req, res) => {
       attestationType: 'none',
       authenticatorSelection: {
         authenticatorAttachment: 'platform',
-        residentKey: 'required',
+        // Credencial local no-discoverable: exige solo la huella / Face ID del
+        // dispositivo. Con 'required' se creaba un passkey discoverable y, en
+        // Android, Google Credential Manager pedía una "llave de acceso" de Google.
+        residentKey: 'discouraged',
         userVerification: 'required'
       },
       preferredAuthenticatorType: 'localDevice'

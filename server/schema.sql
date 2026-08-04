@@ -45,3 +45,10 @@ CREATE TABLE IF NOT EXISTS customers (
   "createdAt" TEXT,
   "lastOrderAt" TEXT
 );
+
+CREATE TABLE IF NOT EXISTS admin_credentials (
+  phone TEXT PRIMARY KEY,
+  salt TEXT,
+  hash TEXT,
+  "createdAt" TEXT
+);

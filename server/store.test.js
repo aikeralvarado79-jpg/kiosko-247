@@ -43,6 +43,17 @@ describe('fileStore', () => {
     expect(state.settings.adminPassword).toBeUndefined();
   });
 
+  it('guarda y lee credenciales de admin por teléfono sin exponerlas', async () => {
+    const store = await freshStore();
+    await store.setAdminCredential('04129862577', { salt: 'sal', hash: 'hash' });
+    const cred = await store.getAdminCredential('04129862577');
+    expect(cred.salt).toBe('sal');
+    expect(cred.hash).toBe('hash');
+    expect(await store.getAdminCredential('04121112222')).toBeNull();
+    const state = await store.getState();
+    expect(state.settings.adminCredentials).toBeUndefined();
+  });
+
   it('crea un pedido y descuenta stock atómicamente', async () => {
     const store = await freshStore();
     const state = await store.getState();

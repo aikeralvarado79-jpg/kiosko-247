@@ -50,6 +50,7 @@ const fileStore = {
     this.persist();
     const state = { ...this.state, settings: { ...this.state.settings } };
     delete state.settings.adminPassword;
+    delete state.settings.adminCredentials;
     return state;
   },
 
@@ -79,6 +80,20 @@ const fileStore = {
 
   async setAdminPassword(entry) {
     this.state.settings = { ...this.state.settings, adminPassword: entry };
+    this.persist();
+  },
+
+  async getAdminCredential(phone) {
+    const key = normalizePhone(phone);
+    return this.state.settings?.adminCredentials?.[key] || null;
+  },
+
+  async setAdminCredential(phone, entry) {
+    const key = normalizePhone(phone);
+    this.state.settings = {
+      ...this.state.settings,
+      adminCredentials: { ...(this.state.settings.adminCredentials || {}), [key]: entry }
+    };
     this.persist();
   },
 
@@ -188,6 +203,12 @@ const pgStore = {
         credential_id TEXT,
         public_key BYTEA,
         counter INTEGER,
+        "createdAt" TEXT
+      );
+      CREATE TABLE IF NOT EXISTS admin_credentials (
+        phone TEXT PRIMARY KEY,
+        salt TEXT,
+        hash TEXT,
         "createdAt" TEXT
       );
     `);
@@ -300,6 +321,24 @@ const pgStore = {
       `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['adminPassword', JSON.stringify(entry)]
+    );
+  },
+
+  async getAdminCredential(phone) {
+    const key = normalizePhone(phone);
+    if (!key || key.length < 7) return null;
+    const { rows } = await this.pool.query('SELECT salt, hash FROM admin_credentials WHERE phone = $1', [key]);
+    if (!rows[0]) return null;
+    return { salt: rows[0].salt, hash: rows[0].hash };
+  },
+
+  async setAdminCredential(phone, entry) {
+    const key = normalizePhone(phone);
+    await this.pool.query(
+      `INSERT INTO admin_credentials (phone, salt, hash, "createdAt")
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (phone) DO UPDATE SET salt = EXCLUDED.salt, hash = EXCLUDED.hash`,
+      [key, entry.salt, entry.hash, new Date().toISOString()]
     );
   },
 
@@ -471,6 +510,10 @@ export const upsertCustomer = (customer) => store.upsertCustomer(customer);
 export const getWebAuthnByPhone = (phone) => store.getWebAuthnByPhone(phone);
 
 export const saveWebAuthn = (phone, credential) => store.saveWebAuthn(phone, credential);
+
+export const getAdminCredential = (phone) => store.getAdminCredential(phone);
+
+export const setAdminCredential = (phone, entry) => store.setAdminCredential(phone, entry);
 
 export const createOrder = async (orderData) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {

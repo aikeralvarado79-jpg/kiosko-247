@@ -504,8 +504,8 @@ export default function App() {
     }, 3500);
   };
 
-  const handleAdminLogin = async (password) => {
-    const res = await api.login(password);
+  const handleAdminLogin = async (phone, password) => {
+    const res = await api.login(phone, password);
     if (!res.ok) {
       addToast(res.data.error || 'Contraseña incorrecta', 'error');
       return false;
@@ -1204,25 +1204,55 @@ function AdminLoginView({ onLogin, onBack }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // Login state
+  const [loginPhone, setLoginPhone] = useState({ code: '0412', number: '' });
+
   // Recovery state
   const [recoverMode, setRecoverMode] = useState(false);
   const [recoverStep, setRecoverStep] = useState('phone'); // 'phone' | 'biometric' | 'newpass'
   const [recoverPhone, setRecoverPhone] = useState({ code: '0412', number: '' });
+  const [recoverOptions, setRecoverOptions] = useState(null);
   const [biometricResponse, setBiometricResponse] = useState(null);
   const [newPassword, setNewPassword] = useState({ a: '', b: '' });
   const [recoverError, setRecoverError] = useState('');
 
+  // Pre-carga los options de WebAuthn al completar el teléfono para que
+  // startAuthentication se llame de forma síncrona en el tap (requisito de iOS
+  // para mostrar el prompt de Face ID en lugar de solo la biometría).
+  useEffect(() => {
+    let cancelled = false;
+    if (recoverMode && recoverStep === 'phone' && /^\d{7}$/.test(recoverPhone.number)) {
+      const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
+      api
+        .webauthnLoginOptions({ phone: phoneKey })
+        .then((res) => {
+          if (!cancelled && res.ok) setRecoverOptions(res.data.options);
+        })
+        .catch(() => {});
+    } else {
+      setRecoverOptions(null);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [recoverMode, recoverStep, recoverPhone.code, recoverPhone.number]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!/^\d{7}$/.test(loginPhone.number)) {
+      setError('Ingresá tu teléfono de administrador.');
+      return;
+    }
     if (!password) {
       setError('Ingresá la contraseña de administrador.');
       return;
     }
     setIsSubmitting(true);
     setError('');
-    const ok = await onLogin(password);
+    const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
+    const ok = await onLogin(phoneKey, password);
     setIsSubmitting(false);
-    if (!ok) setError('Contraseña incorrecta. Probá con la configurada en server/config.json.');
+    if (!ok) setError('Contraseña incorrecta. Verificá tu teléfono y contraseña.');
   };
 
   const startRecovery = async () => {
@@ -1230,17 +1260,14 @@ function AdminLoginView({ onLogin, onBack }) {
       setRecoverError('Ingresá el número de teléfono de administrador.');
       return;
     }
-    const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
+    if (!recoverOptions) {
+      setRecoverError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
+      return;
+    }
     setRecoverStep('biometric');
     try {
-      const res = await api.webauthnLoginOptions({ phone: phoneKey });
-      if (!res.ok) {
-        setRecoverError(res.data.error || 'No se pudo iniciar la verificación biométrica.');
-        setRecoverStep('phone');
-        return;
-      }
-      const authResponse = await startAuthentication({ optionsJSON: res.data.options });
+      const authResponse = await startAuthentication({ optionsJSON: recoverOptions });
       setBiometricResponse(authResponse);
       setRecoverStep('newpass');
       setRecoverError('');
@@ -1379,6 +1406,27 @@ function AdminLoginView({ onLogin, onBack }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono de administrador</label>
+            <div className="flex gap-2">
+              <select
+                value={loginPhone.code}
+                onChange={(e) => setLoginPhone({ ...loginPhone, code: e.target.value })}
+                className="w-24 shrink-0 px-3 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm font-bold focus:border-cyan-500 focus:outline-none"
+              >
+                {PHONE_CODES.map((code) => (<option key={code} value={code}>{code}</option>))}
+              </select>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={loginPhone.number}
+                onChange={(e) => setLoginPhone({ ...loginPhone, number: e.target.value.replace(/\D/g, '').slice(0, 7) })}
+                placeholder="1234567"
+                maxLength={7}
+                className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
+              />
+            </div>
+          </div>
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Contraseña</label>
             <input

@@ -18,7 +18,7 @@ async function request(path, options = {}) {
 
 export const api = {
   getState: () => request('/api/state'),
-  login: (password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
+  login: (phone, password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ phone, password }) }),
   createOrder: (order) => request('/api/orders', { method: 'POST', body: JSON.stringify(order) }),
   createProduct: (product) => request('/api/products', { method: 'POST', body: JSON.stringify(product) }),
   updateProduct: (id, product) => request(`/api/products/${id}`, { method: 'PUT', body: JSON.stringify(product) }),

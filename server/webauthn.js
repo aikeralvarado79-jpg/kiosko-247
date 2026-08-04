@@ -51,7 +51,7 @@ export const registrationOptions = async (req, res) => {
       attestationType: 'none',
       authenticatorSelection: {
         authenticatorAttachment: 'platform',
-        residentKey: 'discouraged',
+        residentKey: 'required',
         userVerification: 'required'
       },
       preferredAuthenticatorType: 'localDevice'

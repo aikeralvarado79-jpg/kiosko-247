@@ -19,7 +19,8 @@ try {
   console.warn('[kiosko] No se pudo leer config.json, usando variables de entorno:', err.message);
 }
 
-// Contraseña base (config/env). Puede haber un override guardado en store.
+// Contraseña base (config/env). Cada administrador puede tener su propia
+// contraseña (store.adminCredentials[phone]); la base funciona como master.
 let adminPassword = process.env.ADMIN_PASSWORD || config.adminPassword;
 
 // Key de Pexels para sugerencias de imagen (env o config).
@@ -57,22 +58,37 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Compara contraseña: si hay override guardado (hash+salt), verifica contra él; sino usa la base.
-async function verifyAdminPassword(input) {
-  const stored = await store.getAdminPassword();
-  if (stored && stored.salt && stored.hash) {
-    const hash = crypto.createHash('sha256').update(stored.salt + input).digest('hex');
-    return hash === stored.hash;
+// Verifica contraseña de un admin. Si el teléfono tiene credencial propia,
+// valida contra ella; sino (o como fallback) usa la base (env > config).
+async function verifyAdminPassword(phone, input) {
+  const key = String(phone || '').replace(/\D/g, '').slice(-11);
+  if (key && ADMIN_PHONES.includes(key)) {
+    const cred = await store.getAdminCredential(key);
+    if (cred && cred.salt && cred.hash) {
+      const hash = crypto.createHash('sha256').update(cred.salt + input).digest('hex');
+      if (hash === cred.hash) return true;
+    }
   }
-  return input === adminPassword;
+  if (input === adminPassword) return true;
+  // Último recurso: override compartido legacy guardado en el store.
+  const legacy = await store.getAdminPassword();
+  if (legacy && legacy.salt && legacy.hash) {
+    const hash = crypto.createHash('sha256').update(legacy.salt + input).digest('hex');
+    return hash === legacy.hash;
+  }
+  return false;
 }
 
 // Auth
 app.post('/api/auth/login', async (req, res) => {
-  const { password } = req.body || {};
-  const ok = await verifyAdminPassword(password);
+  const { phone, password } = req.body || {};
+  const key = String(phone || '').replace(/\D/g, '').slice(-11);
+  if (key && !ADMIN_PHONES.includes(key)) {
+    return res.status(401).json({ error: 'Ese número no tiene acceso al panel' });
+  }
+  const ok = await verifyAdminPassword(key || phone, password);
   if (!ok) return res.status(401).json({ error: 'Contraseña incorrecta' });
-  const token = signToken({ role: 'admin', iat: Date.now() });
+  const token = signToken({ role: 'admin', phone: key || '', iat: Date.now() });
   res.json({ token });
 });
 
@@ -93,7 +109,7 @@ app.post('/api/auth/recover', async (req, res) => {
     }
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.createHash('sha256').update(salt + newPassword).digest('hex');
-    await store.setAdminPassword({ salt, hash });
+    await store.setAdminCredential(key, { salt, hash });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Error recuperando contraseña: ' + err.message });

@@ -17,7 +17,7 @@ App de kiosco con catálogo, pedidos con retiro o envío, y panel de administrac
 | Servicio   | Valor                                                                                                   |
 | ---------- | ------------------------------------------------------------------------------------------------------- |
 | URL pública | `https://kiosko-247.onrender.com`                                                                      |
-| Admin pass | `kiosko247Aa` (definida como `ADMIN_PASSWORD` en Render; localmente `server/config.json` → `kiosko123`) |
+| Admin pass | Master `kiosko247Aa` (`ADMIN_PASSWORD` en Render; localmente `server/config.json` → `kiosko123`). Cada admin puede tener su propia contraseña (login por teléfono + contraseña, configurada con "Recuperar contraseña"). |
 | Supabase   | ref `xhklvjvqhnnfpccqygti`; se conecta por **transaction pooler puerto 6543** (el directo 5432 es IPv6-only) |
 
 > Nota: el host directo de Supabase (`db.xhklvjvqhnnfpccqygti.supabase.co`) solo publica IPv6, inalcanzable desde redes IPv4 y desde Render. Usar siempre `aws-0-ca-central-1.pooler.supabase.com:6543`.
@@ -65,7 +65,7 @@ Sin `DATABASE_URL` configurada, el backend usa `server/data.json` como almacenam
 ## API
 
 - `GET /api/state` → `{ products, categories, orders }`
-- `POST /api/auth/login` → `{ token }` (body: `{ password }`)
+- `POST /api/auth/login` → `{ token }` (body: `{ phone, password }`; la master funciona para cualquier admin, y cada admin puede tener su propia contraseña por teléfono)
 - `POST /api/orders` → crea pedido, descuenta stock atómicamente (autenticado admin)
 - `PATCH /api/orders/:id/status` → cambia estado del pedido (autenticado admin)
 - `POST/PATCH/DELETE /api/products` → CRUD productos (autenticado admin)

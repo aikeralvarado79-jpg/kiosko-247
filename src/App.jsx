@@ -1602,6 +1602,7 @@ function CustomerView({
   lastOrderForCustomer,
   onRepeatLastOrder,
   customerOrders,
+  orders,
   customerProfile,
   onViewOrderDetail,
   onRequestCancelOrder
@@ -1611,6 +1612,7 @@ function CustomerView({
   const [myOrdersPage, setMyOrdersPage] = useState(1);
   const [orderDateFilter, setOrderDateFilter] = useState({ preset: 'all', date: null });
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showDebtDetail, setShowDebtDetail] = useState(false);
   const PAGE_SIZE = 5;
 
   const suggestions = useMemo(() => {
@@ -1759,14 +1761,18 @@ function CustomerView({
                 </span>
               )}
             </div>
-            <div className="text-right shrink-0">
+            <button
+              onClick={() => setShowDebtDetail(true)}
+              className="text-right shrink-0 flex flex-col items-end gap-1 hover:opacity-90 transition-opacity"
+              aria-label="Ver detalle de mi deuda"
+            >
               <span className="block text-lg sm:text-xl font-black text-white">
                 {formatUsd(Number(customerProfile.balance) || 0)}
               </span>
-              <span className="block text-[10px] uppercase tracking-wider text-slate-400 font-bold">
-                saldo
+              <span className="flex items-center gap-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                Ver saldo <Icon name="chevronRight" className="w-3 h-3" />
               </span>
-            </div>
+            </button>
           </div>
         </div>
       )}
@@ -2080,6 +2086,14 @@ function CustomerView({
             />
           ))}
         </div>
+      )}
+      {showDebtDetail && customerProfile && (
+        <CustomerDebtModal
+          customer={customerProfile}
+          orders={orders}
+          rate={rate}
+          onClose={() => setShowDebtDetail(false)}
+        />
       )}
     </div>
   );
@@ -4302,6 +4316,103 @@ function DebtDetailModal({
               Saldar deuda
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal que el cliente ve en "Mi Cuenta": desglose de su deuda con conversión
+// a bolívares según la tasa del día.
+function CustomerDebtModal({ customer, orders, rate, onClose }) {
+  const key = normalizePhoneDigits(customer.phone);
+  const debtOrders = orders
+    .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
+    .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
+  const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+  const balance = Number(customer.balance) || 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="creditCard" className="w-5 h-5 text-indigo-400" />
+              Mi deuda
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {customer.customerName || customer.phone} · Total {formatUsd(balance)}
+              {rate?.rate > 0 && <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(balance, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}</span>}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+          <div className="space-y-2">
+            <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+              <span>Detalle de la deuda ({debtOrders.length} pedidos)</span>
+              <span className="text-red-400 font-black text-sm">{formatUsd(debtTotal)}</span>
+            </span>
+            {debtOrders.length === 0 ? (
+              <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl">
+                No tienes pedidos a crédito registrados en este momento.
+              </p>
+            ) : (
+              debtOrders.map((o) => (
+                <div key={o.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-mono text-cyan-400">{o.id}</span>
+                    <span className="text-slate-500">{new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}</span>
+                  </div>
+                  {o.items.map((it, i) => (
+                    <div key={i} className="flex justify-between text-xs text-slate-300">
+                      <span>{it.quantity}x {it.name}</span>
+                      <span className="font-bold text-white">
+                        {formatUsd(it.price * it.quantity)}
+                        {rate?.rate > 0 && (
+                          <span className="block text-[10px] text-slate-500 text-right">
+                            {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs">
+                    <span className="text-slate-400">Total</span>
+                    <span className="text-amber-400 text-right">
+                      {formatUsd(o.total)}
+                      {rate?.rate > 0 && (
+                        <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(o.total, rate.rate))}</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-500">Total deuda en bolívares</span>
+            <span className="text-base font-black text-red-400">
+              {formatUsd(debtTotal)}
+              {rate?.rate > 0 && (
+                <span className="block text-[10px] font-bold text-slate-400 text-right">{formatBs(usdToBs(debtTotal, rate.rate))}</span>
+              )}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="mt-3 w-full py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm font-bold transition-all"
+          >
+            Entendido
+          </button>
         </div>
       </div>
     </div>

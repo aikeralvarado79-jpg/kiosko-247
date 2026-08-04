@@ -4329,7 +4329,7 @@ function buildAccountMessage(customer, orders) {
   const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
 
   const lines = [
-    `Hola ${customer.customerName || 'cliente'}, te enviamos el detalle de tu cuenta pendiente en *Kiosko 247*:`,
+    `Hola ${customer.customerName || 'cliente'}, te enviamos el detalle de tu cuenta pendiente en *Empresas Alvarados*:`,
     ''
   ];
   if (debtOrders.length > 0) {

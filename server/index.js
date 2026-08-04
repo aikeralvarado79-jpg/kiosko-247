@@ -246,6 +246,21 @@ app.put('/api/settings', requireAdmin, async (req, res) => {
   }
 });
 
+// Refresca el espejo de base de datos (copiar datos de producción hacia calidad).
+// Solo admin. Se usa desde el panel de administración en el entorno de staging.
+app.post('/api/db/refresh', requireAdmin, async (req, res) => {
+  if (!store.isMirrorEnabled()) {
+    return res.status(400).json({ error: 'Refresco no disponible sin DATABASE_URL' });
+  }
+  try {
+    const result = await store.refreshMirror();
+    if (!result.ok) return res.status(500).json({ error: result.error });
+    res.json({ ok: true, source: result.source, target: result.target, tables: result.tables });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo refrescar el espejo: ' + err.message });
+  }
+});
+
 // Pexels proxy (used in production; in dev Vite proxies /pexels-api)
 app.use('/pexels-api', async (req, res) => {
   try {
@@ -279,7 +294,35 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3500;
+
+// Refresco automático del espejo (producción -> calidad). Se activa solo si se
+// define KIOSKO_REFRESH_INTERVAL_MS (ms) y hay DATABASE_URL. En el plan free de
+// Render el servicio duerme tras ~15 min sin tráfico, por lo que el intervalo
+// real depende de que el proceso web esté activo.
+function scheduleAutoRefresh() {
+  const interval = Number(process.env.KIOSKO_REFRESH_INTERVAL_MS || 0);
+  if (!(interval > 0)) return;
+  if (!store.isMirrorEnabled()) return;
+
+  const tick = async () => {
+    try {
+      const result = await store.refreshMirror();
+      console.log(
+        `[kiosko] Refresco automático de espejo: ${result.ok ? 'ok' : 'fallo'} ` +
+          (result.ok ? JSON.stringify(result.tables) : result.error)
+      );
+    } catch (err) {
+      console.error('[kiosko] Error en el refresco automático del espejo:', err.message);
+    }
+  };
+
+  setInterval(tick, interval);
+  setTimeout(tick, 5000); // primer refresco poco después de arrancar
+  console.log(`[kiosko] Refresco automático del espejo cada ${interval} ms`);
+}
+
 store.initStore().then(() => {
+  scheduleAutoRefresh();
   app.listen(PORT, () => {
     console.log(`[kiosko] Servidor corriendo en http://localhost:${PORT}`);
   });

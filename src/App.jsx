@@ -344,6 +344,7 @@ export default function App() {
 
   // Admin session state
   const [isAdminAuthed, setIsAdminAuthed] = useState(() => Boolean(getToken()));
+  const [refreshingDb, setRefreshingDb] = useState(false);
 
   const loadState = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -829,6 +830,19 @@ export default function App() {
     return true;
   };
 
+  const handleRefreshDb = async () => {
+    setRefreshingDb(true);
+    const res = await api.refreshDb();
+    setRefreshingDb(false);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo refrescar el espejo de la base de datos', 'error');
+      return false;
+    }
+    addToast('Datos de producción copiados a calidad');
+    await loadState({ silent: true });
+    return true;
+  };
+
   // Derive live tracking order from current orders so status changes reflect in customer view
   const trackedOrder = currentOrderTracking
     ? orders.find((o) => o.id === currentOrderTracking) || null
@@ -1028,6 +1042,8 @@ export default function App() {
             adminTab={adminTab}
             setAdminTab={setAdminTab}
             onLogout={handleAdminLogout}
+            refreshingDb={refreshingDb}
+            onRefreshDb={handleRefreshDb}
             onOpenAddModal={() => {
               setProductToEdit(null);
               setIsAddEditModalOpen(true);
@@ -2935,6 +2951,8 @@ function AdminView({
   adminTab,
   setAdminTab,
   onLogout,
+  refreshingDb,
+  onRefreshDb,
   onOpenAddModal,
   onEditProduct,
   onDeleteProduct,
@@ -3021,6 +3039,19 @@ function AdminView({
           >
             <Icon name="plus" className="w-5 h-5" />
             <span>Nuevo Producto</span>
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm('¿Reemplazar los datos de calidad con una copia de producción? Esta acción no se puede deshacer.')) {
+                onRefreshDb();
+              }
+            }}
+            disabled={refreshingDb}
+            className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+            title="Copiar datos de producción hacia calidad (reemplaza el contenido actual de calidad)"
+          >
+            <Icon name="refresh" className="w-4 h-4" />
+            <span className="hidden sm:inline">{refreshingDb ? 'Refrescando…' : 'Refrescar datos'}</span>
           </button>
           <button
             onClick={onLogout}

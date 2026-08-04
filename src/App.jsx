@@ -1219,19 +1219,25 @@ function AdminLoginView({ onLogin, onBack }) {
   // Pre-carga los options de WebAuthn al completar el teléfono para que
   // startAuthentication se llame de forma síncrona en el tap (requisito de iOS
   // para mostrar el prompt de Face ID en lugar de solo la biometría).
+  // Solo se hace UN fetch por teléfono: prefetches solapados pisan el challenge
+  // en el server y rompen la verificación ("Unexpected authentication response challenge").
+  const recoveryFetchKeyRef = useRef('');
   useEffect(() => {
+    const valid = recoverMode && recoverStep === 'phone' && /^\d{7}$/.test(recoverPhone.number);
+    if (!valid) return undefined;
+    const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
+    if (recoveryFetchKeyRef.current === phoneKey) return undefined;
     let cancelled = false;
-    if (recoverMode && recoverStep === 'phone' && /^\d{7}$/.test(recoverPhone.number)) {
-      const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
-      api
-        .webauthnLoginOptions({ phone: phoneKey })
-        .then((res) => {
-          if (!cancelled && res.ok) setRecoverOptions(res.data.options);
-        })
-        .catch(() => {});
-    } else {
-      setRecoverOptions(null);
-    }
+    api
+      .webauthnLoginOptions({ phone: phoneKey })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          recoveryFetchKeyRef.current = phoneKey;
+          setRecoverOptions(res.data.options);
+        }
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -1260,8 +1266,9 @@ function AdminLoginView({ onLogin, onBack }) {
       setRecoverError('Ingresá el número de teléfono de administrador.');
       return;
     }
+    const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
-    if (!recoverOptions) {
+    if (recoveryFetchKeyRef.current !== phoneKey || !recoverOptions) {
       setRecoverError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
       return;
     }
@@ -1296,6 +1303,10 @@ function AdminLoginView({ onLogin, onBack }) {
     setRecoverMode(false);
     setRecoverStep('phone');
     setNewPassword({ a: '', b: '' });
+    recoveryFetchKeyRef.current = '';
+    setRecoverOptions(null);
+    setBiometricResponse(null);
+    setRecoverPhone({ code: '0412', number: '' });
     setError('Contraseña restablecida. Ahora podés iniciar sesión.');
   };
 
@@ -1384,7 +1395,7 @@ function AdminLoginView({ onLogin, onBack }) {
 
           <button
             type="button"
-            onClick={() => { setRecoverMode(false); setRecoverStep('phone'); setRecoverError(''); setNewPassword({ a: '', b: '' }); }}
+            onClick={() => { setRecoverMode(false); setRecoverStep('phone'); setRecoverError(''); setNewPassword({ a: '', b: '' }); recoveryFetchKeyRef.current = ''; setRecoverOptions(null); setBiometricResponse(null); setRecoverPhone({ code: '0412', number: '' }); }}
             className="w-full py-2 text-xs text-slate-400 hover:text-white transition-colors"
           >
             ← Volver al login

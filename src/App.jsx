@@ -20,6 +20,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     user: <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
     users: <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
     creditCard: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM2 10h20M6 15h4" />,
+    chevronRight: <path d="m9 18 6-6-6-6" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
     clock: <path d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
@@ -513,6 +514,35 @@ export default function App() {
   const loadCustomers = async () => {
     const res = await api.listCustomers();
     if (res.ok) setAllCustomers(res.data || []);
+  };
+
+  // Cobros programados (cuentas por cobrar a enviar por WhatsApp)
+  const [collections, setCollections] = useState([]);
+
+  const loadCollections = async () => {
+    const res = await api.getCollections();
+    if (res.ok) setCollections(res.data || []);
+  };
+
+  const handleUpsertCollection = async (data) => {
+    const res = await api.upsertCollection(data);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar el cobro', 'error');
+      return false;
+    }
+    setCollections(res.data.list || []);
+    addToast('Cobro programado', 'success');
+    return true;
+  };
+
+  const handleDeleteCollection = async (id) => {
+    const res = await api.deleteCollection(id);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo eliminar el cobro', 'error');
+      return;
+    }
+    setCollections(res.data.list || []);
+    addToast('Cobro eliminado', 'info');
   };
 
   // Toast notifications
@@ -1091,6 +1121,10 @@ export default function App() {
             onLoadCustomers={loadCustomers}
             onToggleBenefited={handleToggleBenefited}
             onAddToBlacklist={handleAddToBlacklist}
+            collections={collections}
+            onLoadCollections={loadCollections}
+            onUpsertCollection={handleUpsertCollection}
+            onDeleteCollection={handleDeleteCollection}
           />
         ) : (
           <AdminLoginView onLogin={handleAdminLogin} onBack={() => setActiveView('customer')} />
@@ -3057,7 +3091,11 @@ function AdminView({
   allCustomers,
   onLoadCustomers,
   onToggleBenefited,
-  onAddToBlacklist
+  onAddToBlacklist,
+  collections,
+  onLoadCollections,
+  onUpsertCollection,
+  onDeleteCollection
 }) {
   // Order status filter state
   const [statusFilter, setStatusFilter] = useState('todos');
@@ -3065,6 +3103,34 @@ function AdminView({
   // Promos editor state
   const [promoDraft, setPromoDraft] = useState(null);
   const [isPromoModalOpen, setIsPromoModalOpen] = useState(false);
+
+  // Auto-envío de cobros programados: mientras el panel admin esté abierto,
+  // cuando un cobro vence (programado -> vencido), abre WhatsApp con la cuenta
+  // y lo marca como "enviado" para no repetirlo. Requiere sesión activa.
+  useEffect(() => {
+    const check = async () => {
+      const now = Date.now();
+      const due = collections.filter(
+        (c) => c.status === 'programado' && c.phone && new Date(c.dueAt || 0).getTime() <= now
+      );
+      for (const c of due) {
+        const cust = (allCustomers || []).find((x) => normalizePhoneDigits(x.phone) === normalizePhoneDigits(c.phone)) || {
+          phone: c.phone,
+          customerName: c.customerName
+        };
+        const wa = formatPhoneWhatsApp(cust.phone);
+        if (wa) {
+          const msg = c.note ? `${buildAccountMessage(cust, orders)}\n\n_${c.note}_` : buildAccountMessage(cust, orders);
+          window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+        }
+        await onUpsertCollection({ id: c.id, status: 'enviado' });
+      }
+    };
+    check();
+    const timer = setInterval(check, 30000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collections, allCustomers, orders]);
 
   const filteredOrders = statusFilter === 'todos'
     ? orders
@@ -3228,6 +3294,7 @@ function AdminView({
             key={tab.key}
             onClick={() => {
               if (tab.key === 'benefited' || tab.key === 'blacklist') onLoadCustomers();
+              if (tab.key === 'blacklist') onLoadCollections();
               setAdminTab(tab.key);
             }}
             className={`pb-3 sm:pb-4 text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-all whitespace-nowrap shrink-0 ${
@@ -3793,8 +3860,13 @@ function AdminView({
       {adminTab === 'blacklist' && (
         <BlacklistAdminView
           customers={allCustomers}
+          orders={orders}
+          rate={rate}
           onLoadCustomers={onLoadCustomers}
           onAddToBlacklist={onAddToBlacklist}
+          collections={collections}
+          onUpsertCollection={onUpsertCollection}
+          onDeleteCollection={onDeleteCollection}
         />
       )}
 
@@ -3847,10 +3919,20 @@ function AdminView({
 
 const BEAUTY_CATEGORIES = ['higiene', 'limpieza', 'perfum', 'cosmetic', 'belleza', 'farmacia', 'salud', 'cuidado'];
 
-function BlacklistAdminView({ customers, onLoadCustomers, onAddToBlacklist }) {
+function BlacklistAdminView({
+  customers,
+  orders,
+  rate,
+  onLoadCustomers,
+  onAddToBlacklist,
+  collections,
+  onUpsertCollection,
+  onDeleteCollection
+}) {
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
+  const [selectedDebtor, setSelectedDebtor] = useState(null); // customer abierto
 
   const debtors = customers.filter((c) => (Number(c.balance) || 0) > 0);
 
@@ -3876,7 +3958,7 @@ function BlacklistAdminView({ customers, onLoadCustomers, onAddToBlacklist }) {
         <div>
           <h3 className="text-lg font-bold text-white">Lista Negra · Deudores</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Clientes con saldo pendiente (balance mayor a 0). El pedido a crédito se suma al entregar.
+            Clientes con saldo pendiente. Toca un deudor para ver el desglose, enviar la cuenta por WhatsApp o programar el cobro.
           </p>
         </div>
         <button
@@ -3937,7 +4019,11 @@ function BlacklistAdminView({ customers, onLoadCustomers, onAddToBlacklist }) {
       ) : (
         <div className="grid gap-2">
           {debtors.map((c) => (
-            <div key={c.phone} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60">
+            <div
+              key={c.phone}
+              className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60 hover:border-amber-500/40 cursor-pointer transition-all"
+              onClick={() => setSelectedDebtor(c)}
+            >
               <span className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
                 <Icon name="alertTriangle" className="w-4 h-4" />
               </span>
@@ -3945,25 +4031,322 @@ function BlacklistAdminView({ customers, onLoadCustomers, onAddToBlacklist }) {
                 <p className="text-sm font-bold text-slate-100 truncate">{c.customerName || 'Cliente'}</p>
                 <p className="text-[11px] text-slate-400">{c.phone}</p>
               </div>
-              <div className="text-right shrink-0">
+              <div className="text-right shrink-0 flex flex-col items-end gap-1">
                 <span className="block text-base font-black text-red-400">
                   {formatUsd(Number(c.balance) || 0)}
                 </span>
-                <button
-                  onClick={() => handleClearDebt(c)}
-                  className="text-[10px] text-slate-500 underline mt-1 hover:text-slate-300"
-                >
-                  Saldar deuda
-                </button>
+                <span className="text-[10px] text-amber-400/80 flex items-center gap-0.5">
+                  <Icon name="chevronRight" className="w-3 h-3" />
+                  Ver detalle
+                </span>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Modal de detalle de deuda */}
+      {selectedDebtor && (
+        <DebtDetailModal
+          customer={selectedDebtor}
+          orders={orders}
+          rate={rate}
+          onClose={() => setSelectedDebtor(null)}
+          onClearDebt={handleClearDebt}
+          collections={collections}
+          onUpsertCollection={onUpsertCollection}
+          onDeleteCollection={onDeleteCollection}
+        />
+      )}
+    </div>
+  );
+}
+
+// Desglosa los pedidos de un deudor y ofrece enviar la cuenta por WhatsApp
+// o programar el cobro (cuenta + fecha) para envío automático.
+function DebtDetailModal({
+  customer,
+  orders,
+  rate,
+  onClose,
+  onClearDebt,
+  collections,
+  onUpsertCollection,
+  onDeleteCollection
+}) {
+  const [showScheduler, setShowScheduler] = useState(false);
+
+  const key = normalizePhoneDigits(customer.phone);
+  // Pedidos del cliente que han sido entregados y a crédito = deuda contraída.
+  const debtOrders = orders
+    .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
+    .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
+  const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+
+  const wa = formatPhoneWhatsApp(customer.phone);
+
+  const accountMsg = buildAccountMessage(customer, orders);
+  const waLink = wa ? `https://wa.me/${wa}?text=${encodeURIComponent(accountMsg)}` : undefined;
+
+  const upcoming = collections
+    .filter((c) => normalizePhoneDigits(c.phone) === key && (c.status === 'programado' || c.status === 'pendiente'))
+    .sort((a, b) => new Date(a.dueAt || 0) - new Date(b.dueAt || 0));
+
+  const overdue = futureCollectionDue(upcoming); // helper para destacar vencidos
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="alertTriangle" className="w-5 h-5 text-amber-400" />
+              {customer.customerName || 'Cliente'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">{customer.phone} · Deuda total {formatUsd(Number(customer.balance) || 0)}</p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+          {/* Acciones principales */}
+          <div className="grid grid-cols-2 gap-2">
+            <a
+              href={waLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={waLink ? undefined : (e) => e.preventDefault()}
+              className="py-3 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5 text-center"
+            >
+              <Icon name="whatsapp" className="w-4 h-4" />
+              Enviar cuenta a WhatsApp
+            </a>
+            <button
+              onClick={() => setShowScheduler((v) => !v)}
+              className="py-3 rounded-xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-xs font-bold hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-1.5"
+            >
+              <Icon name="clock" className="w-4 h-4" />
+              {showScheduler ? 'Cerrar cobro' : 'Programar cobro'}
+            </button>
+          </div>
+
+          {/* Programador de cobro */}
+          {showScheduler && (
+            <CollectionScheduler
+              customer={customer}
+              orders={orders}
+              collections={upcoming}
+              onUpsertCollection={onUpsertCollection}
+              onDeleteCollection={onDeleteCollection}
+            />
+          )}
+
+          {/* Desglose de deuda */}
+          <div className="space-y-2">
+            <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+              <span>Desglose de la deuda ({debtOrders.length} pedidos)</span>
+              <span className="text-red-400 font-black text-sm">{formatUsd(debtTotal)}</span>
+            </span>
+            {debtOrders.length === 0 ? (
+              <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl">
+                Este deudor no tiene pedidos a crédito entregados registrados en el historial; la deuda se cargó manualmente.
+              </p>
+            ) : (
+              debtOrders.map((o) => (
+                <div key={o.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-mono text-cyan-400">{o.id}</span>
+                    <span className="text-slate-500">{new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}</span>
+                  </div>
+                  {o.items.map((it, i) => (
+                    <div key={i} className="flex justify-between text-xs text-slate-300">
+                      <span>{it.quantity}x {it.name}</span>
+                      <span className="font-bold text-white">
+                        {formatUsd(it.price * it.quantity)}
+                        {rate?.rate > 0 && (
+                          <span className="block text-[10px] text-slate-500 text-right">
+                            {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs">
+                    <span className="text-slate-400">Total</span>
+                    <span className="text-amber-400 text-right">
+                      {formatUsd(o.total)}
+                      {rate?.rate > 0 && (
+                        <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(o.total, rate.rate))}</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Pie */}
+        <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-500">
+              {overdue > 0 ? `${overdue} cobro(s) vencido(s)` : 'Sin cobros programados pendientes'}
+            </span>
+            <button
+              onClick={() => {
+                if (window.confirm(`¿Saldar la deuda de ${customer.customerName || customer.phone}?`)) {
+                  onClearDebt(customer);
+                  onClose();
+                }
+              }}
+              className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all"
+            >
+              Saldar deuda
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Formulario para programar una fecha/hora de cobro y listar los programados.
+function CollectionScheduler({ customer, orders, collections, onUpsertCollection, onDeleteCollection }) {
+  const [dueAt, setDueAt] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSchedule = async (e) => {
+    e.preventDefault();
+    if (!dueAt) return;
+    setSaving(true);
+    await onUpsertCollection({
+      phone: customer.phone,
+      customerName: customer.customerName || 'Cliente',
+      dueAt: new Date(dueAt).toISOString(),
+      note,
+      status: 'programado'
+    });
+    setSaving(false);
+    setDueAt('');
+    setNote('');
+  };
+
+  return (
+    <div className="p-4 rounded-2xl bg-slate-950 border border-cyan-500/30 space-y-3">
+      <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+        <Icon name="clock" className="w-3.5 h-3.5" />
+        Programar cobro automático
+      </span>
+      <form onSubmit={handleSchedule} className="space-y-2">
+        <label className="block text-[11px] text-slate-400 font-semibold">Fecha y hora del envío automático *</label>
+        <input
+          type="datetime-local"
+          value={dueAt}
+          onChange={(e) => setDueAt(e.target.value)}
+          className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-cyan-500 focus:outline-none"
+        />
+        <input
+          type="text"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Nota opcional (ej: recordatorio de tu compra pendiente)"
+          className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={saving || !dueAt}
+          className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 text-slate-950 text-xs font-bold hover:from-cyan-400 hover:to-teal-400 disabled:opacity-40 transition-all"
+        >
+          {saving ? 'Guardando...' : 'Programar envío'}
+        </button>
+      </form>
+
+      {collections.length > 0 && (
+        <div className="space-y-1.5 pt-1">
+          <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Cobros programados</span>
+          {collections.map((c) => {
+            const isPast = new Date(c.dueAt || 0) < new Date();
+            return (
+              <div key={c.id} className="flex items-center gap-2 p-2 rounded-xl bg-slate-900 border border-slate-800">
+                <span className="p-1.5 rounded-lg bg-cyan-500/15 text-cyan-400 shrink-0">
+                  <Icon name="clock" className="w-3.5 h-3.5" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-slate-100">
+                    {c.dueAt ? new Date(c.dueAt).toLocaleString('es-VE') : 'Sin fecha'}
+                    {isPast && c.status === 'programado' && <span className="text-rose-400"> · vencido</span>}
+                  </p>
+                  {c.note && <p className="text-[10px] text-slate-500 truncate">{c.note}</p>}
+                </div>
+                <div className="flex items-center gap-1">
+                  {isPast && c.status === 'programado' && (
+                    <button
+                      onClick={() => {
+                        const wa = formatPhoneWhatsApp(customer.phone);
+                        const msg = c.note
+                          ? `${buildAccountMessage(customer, orders)}\n\n_${c.note}_`
+                          : buildAccountMessage(customer, orders);
+                        if (wa) window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+                      }}
+                      className="px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 text-[10px] font-bold hover:bg-emerald-500/25"
+                    >
+                      Enviar ahora
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onDeleteCollection(c.id)}
+                    className="px-2 py-1 rounded-lg bg-rose-500/10 text-rose-300 text-[10px] font-bold hover:bg-rose-500/25"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
+// Cuenta los cobros programados vencidos (sin enviar).
+function futureCollectionDue(list) {
+  const now = new Date();
+  return list.filter((c) => c.status === 'programado' && new Date(c.dueAt || 0) < now).length;
+}
+
+// Construye el mensaje con el desglose de la deuda de un cliente, para enviar
+// por WhatsApp (transparencia ante discrepancias).
+function buildAccountMessage(customer, orders) {
+  const key = normalizePhoneDigits(customer.phone);
+  const debtOrders = orders
+    .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
+    .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
+  const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+
+  const lines = [
+    `Hola ${customer.customerName || 'cliente'}, te enviamos el detalle de tu cuenta pendiente en *Kiosko 247*:`,
+    ''
+  ];
+  if (debtOrders.length > 0) {
+    debtOrders.forEach((o) => {
+      lines.push(`▫️ Pedido ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}):`);
+      o.items.forEach((it) => lines.push(`   - ${it.quantity}x ${it.name} = ${formatUsd(it.price * it.quantity)}`));
+      lines.push(`   Total: ${formatUsd(o.total)}`);
+      lines.push('');
+    });
+  }
+  lines.push(`*Total a pagar: ${formatUsd(debtTotal)}*`);
+  lines.push('');
+  lines.push('Gracias por tu prontitud. 🙌');
+  return lines.join('\n');
+}
+
+// Recordatorio corto para un cobro programado que ya venció.
 const OPENFACTS_FIELDS = 'code,product_name,brands,image_front_url';
 
 const searchOpenFoodFacts = async (query, useBeauty) => {

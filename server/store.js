@@ -97,6 +97,15 @@ const fileStore = {
     this.persist();
   },
 
+  async listCollections() {
+    return this.state.settings?.collections || [];
+  },
+
+  async saveCollections(collections) {
+    this.state.settings = { ...this.state.settings, collections: Array.isArray(collections) ? collections : [] };
+    this.persist();
+  },
+
   async getCustomerByPhone(phone) {
     const key = normalizePhone(phone);
     return this.state.customers.find((c) => c.phone === key) || null;
@@ -450,6 +459,26 @@ const pgStore = {
     );
   },
 
+  async listCollections() {
+    const { rows } = await this.pool.query(`SELECT value FROM ${q('settings')} WHERE key = $1`, ['collections']);
+    if (!rows[0]) return [];
+    try {
+      const v = rows[0].value;
+      const arr = typeof v === 'string' ? JSON.parse(v) : v;
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async saveCollections(collections) {
+    await this.pool.query(
+      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      ['collections', JSON.stringify(Array.isArray(collections) ? collections : [])]
+    );
+  },
+
   async getCustomerByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
@@ -674,6 +703,35 @@ export const saveWebAuthn = (phone, credential) => store.saveWebAuthn(phone, cre
 export const getAdminCredential = (phone) => store.getAdminCredential(phone);
 
 export const setAdminCredential = (phone, entry) => store.setAdminCredential(phone, entry);
+
+export const listCollections = () => store.listCollections();
+
+export const saveCollections = (collections) => store.saveCollections(collections);
+
+// Programa (o actualiza) un cobro. Devuelve la lista actualizada.
+export const upsertCollection = async (collection) => {
+  const list = await store.listCollections();
+  const item = {
+    id: collection.id || `COB-${Math.floor(1000 + Math.random() * 9000)}`,
+    phone: collection.phone || '',
+    customerName: collection.customerName || '',
+    dueAt: collection.dueAt || null,
+    note: collection.note || '',
+    status: collection.status || 'programado', // programado | enviado | cancelado
+    createdAt: collection.createdAt || new Date().toISOString()
+  };
+  const idx = list.findIndex((c) => c.id === item.id);
+  if (idx >= 0) list[idx] = item;
+  else list.push(item);
+  await store.saveCollections(list);
+  return { list, item };
+};
+
+export const removeCollection = async (id) => {
+  const list = (await store.listCollections()).filter((c) => c.id !== id);
+  await store.saveCollections(list);
+  return { list };
+};
 
 export const createOrder = async (orderData) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {

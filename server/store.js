@@ -145,6 +145,12 @@ const fileStore = {
 // Backend Postgres (Supabase / producción). Se usa cuando existe DATABASE_URL.
 // ---------------------------------------------------------------------------
 const { Pool } = pg;
+
+// Schema donde vive el estado. Por defecto "public" (producción); staging usa un
+// schema aislado vía KIOSKO_DB_SCHEMA para no compartir datos con producción.
+const DB_SCHEMA = process.env.KIOSKO_DB_SCHEMA || 'public';
+const q = (table) => (DB_SCHEMA === 'public' ? table : `${DB_SCHEMA}.${table}`);
+
 const pgPool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
@@ -157,7 +163,7 @@ const pgStore = {
 
   async ensureSchema() {
     await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS products (
+      CREATE TABLE IF NOT EXISTS ${q('products')} (
         id TEXT PRIMARY KEY,
         code TEXT,
         name TEXT,
@@ -170,10 +176,10 @@ const pgStore = {
         "sizeUnit" TEXT,
         image TEXT
       );
-      CREATE TABLE IF NOT EXISTS categories (
+      CREATE TABLE IF NOT EXISTS ${q('categories')} (
         name TEXT PRIMARY KEY
       );
-      CREATE TABLE IF NOT EXISTS orders (
+      CREATE TABLE IF NOT EXISTS ${q('orders')} (
         id TEXT PRIMARY KEY,
         "customerName" TEXT,
         phone TEXT,
@@ -187,50 +193,50 @@ const pgStore = {
         "estimatedMinutes" INTEGER,
         "createdAt" TEXT
       );
-      CREATE TABLE IF NOT EXISTS settings (
+      CREATE TABLE IF NOT EXISTS ${q('settings')} (
         key TEXT PRIMARY KEY,
         value JSONB
       );
-      CREATE TABLE IF NOT EXISTS customers (
+      CREATE TABLE IF NOT EXISTS ${q('customers')} (
         phone TEXT PRIMARY KEY,
         "customerName" TEXT,
         addresses JSONB DEFAULT '[]',
         "createdAt" TEXT,
         "lastOrderAt" TEXT
       );
-      CREATE TABLE IF NOT EXISTS webauthn_credentials (
+      CREATE TABLE IF NOT EXISTS ${q('webauthn_credentials')} (
         phone TEXT PRIMARY KEY,
         credential_id TEXT,
         public_key BYTEA,
         counter INTEGER,
         "createdAt" TEXT
       );
-      CREATE TABLE IF NOT EXISTS admin_credentials (
+      CREATE TABLE IF NOT EXISTS ${q('admin_credentials')} (
         phone TEXT PRIMARY KEY,
         salt TEXT,
         hash TEXT,
         "createdAt" TEXT
       );
     `);
-    await this.pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
   },
 
   async seedIfEmpty() {
-    const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM products');
+    const { rows } = await this.pool.query(`SELECT COUNT(*)::int AS n FROM ${q('products')}`);
     if (rows[0].n > 0) return;
     for (const p of defaultState().products) {
       await this.pool.query(
-        `INSERT INTO products (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
+        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
         [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
       );
     }
     for (const c of defaultState().categories) {
-      await this.pool.query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT DO NOTHING', [c]);
+      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [c]);
     }
     for (const o of defaultState().orders) {
       await this.pool.query(
-        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes")
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes")
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
         [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes]
       );
@@ -239,10 +245,10 @@ const pgStore = {
 
   async getState() {
     const [productsRes, categoriesRes, ordersRes, settingsRes] = await Promise.all([
-      this.pool.query('SELECT * FROM products'),
-      this.pool.query('SELECT * FROM categories ORDER BY name'),
-      this.pool.query('SELECT * FROM orders'),
-      this.pool.query('SELECT key, value FROM settings')
+      this.pool.query(`SELECT * FROM ${q('products')}`),
+      this.pool.query(`SELECT * FROM ${q('categories')} ORDER BY name`),
+      this.pool.query(`SELECT * FROM ${q('orders')}`),
+      this.pool.query(`SELECT key, value FROM ${q('settings')}`)
     ]);
     const products = productsRes.rows.map((r) => ({
       id: r.id,
@@ -271,10 +277,10 @@ const pgStore = {
   },
 
   async saveProducts(products) {
-    await this.pool.query('DELETE FROM products');
+    await this.pool.query(`DELETE FROM ${q('products')}`);
     for (const p of products) {
       await this.pool.query(
-        `INSERT INTO products (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
+        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
       );
@@ -282,17 +288,17 @@ const pgStore = {
   },
 
   async saveCategories(categories) {
-    await this.pool.query('DELETE FROM categories');
+    await this.pool.query(`DELETE FROM ${q('categories')}`);
     for (const c of categories) {
-      await this.pool.query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT DO NOTHING', [c]);
+      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [c]);
     }
   },
 
   async saveOrders(orders) {
-    await this.pool.query('DELETE FROM orders');
+    await this.pool.query(`DELETE FROM ${q('orders')}`);
     for (const o of orders) {
       await this.pool.query(
-        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString()]
       );
@@ -301,7 +307,7 @@ const pgStore = {
 
   async saveSettings(settings) {
     await this.pool.query(
-      `INSERT INTO settings (key, value) VALUES ($1, $2)
+      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['promos', JSON.stringify(settings.promos || [])]
     );
@@ -309,7 +315,7 @@ const pgStore = {
 
   async getAdminPassword() {
     const { rows } = await this.pool.query(
-      `SELECT value FROM settings WHERE key = $1`,
+      `SELECT value FROM ${q('settings')} WHERE key = $1`,
       ['adminPassword']
     );
     if (!rows[0] || rows[0].value == null) return null;
@@ -318,7 +324,7 @@ const pgStore = {
 
   async setAdminPassword(entry) {
     await this.pool.query(
-      `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)
+      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['adminPassword', JSON.stringify(entry)]
     );
@@ -327,7 +333,7 @@ const pgStore = {
   async getAdminCredential(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query('SELECT salt, hash FROM admin_credentials WHERE phone = $1', [key]);
+    const { rows } = await this.pool.query(`SELECT salt, hash FROM ${q('admin_credentials')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return { salt: rows[0].salt, hash: rows[0].hash };
   },
@@ -335,7 +341,7 @@ const pgStore = {
   async setAdminCredential(phone, entry) {
     const key = normalizePhone(phone);
     await this.pool.query(
-      `INSERT INTO admin_credentials (phone, salt, hash, "createdAt")
+      `INSERT INTO ${q('admin_credentials')} (phone, salt, hash, "createdAt")
        VALUES ($1,$2,$3,$4)
        ON CONFLICT (phone) DO UPDATE SET salt = EXCLUDED.salt, hash = EXCLUDED.hash`,
       [key, entry.salt, entry.hash, new Date().toISOString()]
@@ -345,7 +351,7 @@ const pgStore = {
   async getCustomerByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query('SELECT * FROM customers WHERE phone = $1', [key]);
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('customers')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return { ...rows[0], addresses: rows[0].addresses || [] };
   },
@@ -353,7 +359,7 @@ const pgStore = {
   async getWebAuthnByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query('SELECT * FROM webauthn_credentials WHERE phone = $1', [key]);
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('webauthn_credentials')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return {
       phone: rows[0].phone,
@@ -367,7 +373,7 @@ const pgStore = {
   async saveWebAuthn(phone, credential) {
     const key = normalizePhone(phone);
     await this.pool.query(
-      `INSERT INTO webauthn_credentials (phone, credential_id, public_key, counter, "createdAt")
+      `INSERT INTO ${q('webauthn_credentials')} (phone, credential_id, public_key, counter, "createdAt")
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (phone) DO UPDATE SET
          credential_id = EXCLUDED.credential_id,
@@ -385,7 +391,7 @@ const pgStore = {
     if (address && !addresses.includes(address)) addresses.push(address);
     const now = new Date().toISOString();
     await this.pool.query(
-      `INSERT INTO customers (phone, "customerName", addresses, "createdAt", "lastOrderAt")
+      `INSERT INTO ${q('customers')} (phone, "customerName", addresses, "createdAt", "lastOrderAt")
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (phone) DO UPDATE SET
          "customerName" = EXCLUDED."customerName",
@@ -409,10 +415,10 @@ const pgStore = {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('LOCK TABLE orders IN EXCLUSIVE MODE');
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
 
       const stockRes = await client.query(
-        'SELECT id, stock FROM products WHERE id = ANY($1::text[]) FOR UPDATE',
+        `SELECT id, stock FROM ${q('products')} WHERE id = ANY($1::text[]) FOR UPDATE`,
         [orderData.items.map((it) => it.id)]
       );
       const stockMap = new Map(stockRes.rows.map((r) => [r.id, r.stock]));
@@ -427,12 +433,12 @@ const pgStore = {
       let id;
       do {
         id = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
-        const dup = await client.query('SELECT 1 FROM orders WHERE id = $1', [id]);
+        const dup = await client.query(`SELECT 1 FROM ${q('orders')} WHERE id = $1`, [id]);
         if (dup.rowCount > 0) id = null;
       } while (!id);
 
       for (const it of orderData.items) {
-        await client.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [it.quantity, it.id]);
+        await client.query(`UPDATE ${q('products')} SET stock = stock - $1 WHERE id = $2`, [it.quantity, it.id]);
       }
 
       const order = {
@@ -451,7 +457,7 @@ const pgStore = {
       };
 
       await client.query(
-        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt]
       );
@@ -459,13 +465,13 @@ const pgStore = {
       // Registrar/actualizar el cliente reconocido en la misma transacción
       const key = normalizePhone(order.phone);
       if (key && key.length >= 7) {
-        const existing = await client.query('SELECT * FROM customers WHERE phone = $1', [key]);
+        const existing = await client.query(`SELECT * FROM ${q('customers')} WHERE phone = $1`, [key]);
         const addresses = existing.rows[0]?.addresses || [];
         const address = order.type === 'delivery' && order.address ? order.address : undefined;
         if (address && !addresses.includes(address)) addresses.push(address);
         const now = new Date().toISOString();
         await client.query(
-          `INSERT INTO customers (phone, "customerName", addresses, "createdAt", "lastOrderAt")
+          `INSERT INTO ${q('customers')} (phone, "customerName", addresses, "createdAt", "lastOrderAt")
            VALUES ($1,$2,$3,$4,$5)
            ON CONFLICT (phone) DO UPDATE SET
              "customerName" = EXCLUDED."customerName",

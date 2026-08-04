@@ -127,6 +127,12 @@ const fileStore = {
     this.persist();
   },
 
+  async deleteWebAuthn(phone) {
+    const key = normalizePhone(phone);
+    this.state.webauthn = this.state.webauthn.filter((c) => c.phone !== key);
+    this.persist();
+  },
+
   async upsertCustomer({ phone, customerName, address }) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
@@ -317,6 +323,7 @@ const pgStore = {
         credential_id TEXT,
         public_key BYTEA,
         counter INTEGER,
+        rpID TEXT,
         "createdAt" TEXT
       );
       CREATE TABLE IF NOT EXISTS ${q('admin_credentials')} (
@@ -538,6 +545,7 @@ const pgStore = {
       credentialId: rows[0].credential_id,
       publicKey: rows[0].public_key,
       counter: rows[0].counter,
+      rpID: rows[0].rpID || null,
       createdAt: rows[0].createdAt
     };
   },
@@ -545,14 +553,20 @@ const pgStore = {
   async saveWebAuthn(phone, credential) {
     const key = normalizePhone(phone);
     await this.pool.query(
-      `INSERT INTO ${q('webauthn_credentials')} (phone, credential_id, public_key, counter, "createdAt")
-       VALUES ($1,$2,$3,$4,$5)
+      `INSERT INTO ${q('webauthn_credentials')} (phone, credential_id, public_key, counter, rpID, "createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (phone) DO UPDATE SET
          credential_id = EXCLUDED.credential_id,
          public_key = EXCLUDED.public_key,
-         counter = EXCLUDED.counter`,
-      [key, credential.credentialId, credential.publicKey, credential.counter, new Date().toISOString()]
+         counter = EXCLUDED.counter,
+         rpID = EXCLUDED.rpID`,
+      [key, credential.credentialId, credential.publicKey, credential.counter, credential.rpID || null, new Date().toISOString()]
     );
+  },
+
+  async deleteWebAuthn(phone) {
+    const key = normalizePhone(phone);
+    await this.pool.query(`DELETE FROM ${q('webauthn_credentials')} WHERE phone = $1`, [key]);
   },
 
   async upsertCustomer({ phone, customerName, address }) {
@@ -699,6 +713,8 @@ export const addOrderToAccount = (order) => store.addOrderToAccount(order);
 export const getWebAuthnByPhone = (phone) => store.getWebAuthnByPhone(phone);
 
 export const saveWebAuthn = (phone, credential) => store.saveWebAuthn(phone, credential);
+
+export const deleteWebAuthn = (phone) => store.deleteWebAuthn(phone);
 
 export const getAdminCredential = (phone) => store.getAdminCredential(phone);
 

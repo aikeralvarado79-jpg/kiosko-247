@@ -22,11 +22,24 @@ const phoneKey = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
 // Convierte el teléfono a un userID estable (WebAuthn requiere bytes únicos)
 const phoneToUserId = (key) => new Uint8Array(Buffer.from(key));
 
-// Deriva el origin/rpID correctos desde el request (dev localhost vs prod onrender)
+// Deriva el origin correcto desde el request y un rpID portable.
+// El rpID ES EL PROBLEMA CLAVE: las credenciales WebAuthn quedan atadas al
+// rpID con el que se registraron. Como staging y producción viven en subdominios
+// distintos de onrender.com (kiosko-247-staging.onrender.com vs kiosko-247.onrender.com),
+// si derivamos el rpID del host, una biometría registrada en uno NO es válida en el otro
+// y el navegador cancela la autenticación justo después del Face ID (NotAllowedError).
+// Al fijar el rpID al dominio registrable común (onrender.com), la credencial es
+// portable entre ambos entornos. En desarrollo local se usa 'localhost'.
 const deriveRp = (req) => {
   const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
   const proto = req.headers['x-forwarded-proto'] || (req.socket?.encrypted ? 'https' : 'http');
-  const rpID = host.split(':')[0];
+  const hostP = String(host).split(':')[0];
+  let rpID = hostP;
+  if (hostP === 'localhost' || hostP === '127.0.0.1') {
+    rpID = 'localhost';
+  } else if (hostP.endsWith('.onrender.com')) {
+    rpID = 'onrender.com';
+  }
   return { expectedOrigin: `${proto}://${host}`, rpID };
 };
 
@@ -37,10 +50,15 @@ export const registrationOptions = async (req, res) => {
     const key = phoneKey(phone);
     if (key.length < 7) return res.status(400).json({ error: 'Teléfono inválido' });
 
-    const existing = await store.getWebAuthnByPhone(key);
-    if (existing) return res.status(409).json({ error: 'Este teléfono ya tiene biometría registrada' });
-
     const { rpID } = deriveRp(req);
+    const existing = await store.getWebAuthnByPhone(key);
+    // Si la credencial se registró bajo otro rpID (por ej. antes de que el
+    // rpID fuera portable entre staging y producción), el dominio ya no la
+    // acepta. Permitimos re-registrar solo cuando el rpID almacenado existe y
+    // difiere del actual (datos legados sin rpID siguen bloqueados a mano).
+    if (existing && (!existing.rpID || existing.rpID === rpID)) {
+      return res.status(409).json({ error: 'Este teléfono ya tiene biometría registrada' });
+    }
 
     const options = await generateRegistrationOptions({
       rpName: 'Empresas Alvarados',
@@ -96,7 +114,8 @@ export const registrationVerify = async (req, res) => {
     await store.saveWebAuthn(key, {
       credentialId: credential.id,
       publicKey: Buffer.from(credential.publicKey),
-      counter: credential.counter
+      counter: credential.counter,
+      rpID
     });
 
     res.json({ ok: true });
@@ -163,7 +182,8 @@ export const verifyAuth = async (phone, response, req) => {
   await store.saveWebAuthn(key, {
     credentialId: credential.credentialId,
     publicKey: credential.publicKey,
-    counter: verification.authenticationInfo.newCounter
+    counter: verification.authenticationInfo.newCounter,
+    rpID: credential.rpID || rpID
   });
   return { ok: true };
 };

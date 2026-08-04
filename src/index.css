@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -33,37 +37,87 @@
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
-/* ---- Light theme (modo claro) ---- */
+/* ------------------------------------------------------------------ */
+/*  Light theme (modo claro)                                            */
+/*  Estrategia: invertir la paleta slate para las superficies y textos  */
+/*  claros, pero MANTENER oscuros los overlays, badges sobre fotos,     */
+/*  footer y barra de carrito flotante para preservar el contraste.     */
+/* ------------------------------------------------------------------ */
 html.light {
-  --color-slate-950: #e8edf5;
-  --color-slate-900: #ffffff;
-  --color-slate-800: #f1f5f9;
-  --color-slate-700: #e2e8f0;
-  --color-slate-600: #cbd5e1;
-  --color-slate-500: #94a3b8;
-  --color-slate-400: #64748b;
-  --color-slate-300: #475569;
+  --color-slate-950: #0f172a;        /* overlays/footer: se mantienen oscuros */
+  --color-slate-900: #ffffff;        /* fondo principal */
+  --color-slate-800: #f1f5f9;        /* tarjetas secundarias */
+  --color-slate-700: #e2e8f0;        /* bordes */
+  --color-slate-600: #cbd5e1;        /* bordes de input */
+  --color-slate-500: #94a3b8;        /* texto muy apagado */
+  --color-slate-400: #64748b;        /* texto secundario */
+  --color-slate-300: #475569;        /* texto del cuerpo */
   --color-slate-200: #334155;
   --color-slate-100: #1e293b;
   --color-slate-50: #0f172a;
   --color-white: #0f172a;
+  /* Acentos: versiones oscuras para contraste sobre superficies claras */
+  --color-teal-300: #0d9488;
+  --color-teal-400: #0f766e;
+  --color-cyan-300: #0e7490;
+  --color-cyan-400: #155e75;
+  --color-amber-300: #b45309;
+  --color-amber-400: #92400e;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #065f46;
+  --color-rose-300: #be123c;
+  --color-rose-400: #be123c;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #075985;
+  color-scheme: light;
 }
 
 html.light body {
   background-color: #f8fafc;
 }
 
-html.light .bg-slate-950\/80,
-html.light .bg-slate-950\/70 {
-  background-color: rgba(226, 232, 240, 0.85);
-}
-
-html.light .text-white {
-  color: #0f172a;
-}
-
+/* Textos sobre superficies claras -> oscuros */
+html.light .text-white { color: #0f172a; }
 html.light .text-slate-100 { color: #0f172a; }
 html.light .text-slate-200 { color: #1e293b; }
 html.light .text-slate-300 { color: #334155; }
 html.light .text-slate-400 { color: #475569; }
 html.light .text-slate-500 { color: #64748b; }
+
+/* Placeholders legibles sobre inputs claros */
+html.light .placeholder-slate-400::placeholder { color: #94a3b8; }
+html.light .placeholder-slate-500::placeholder { color: #94a3b8; }
+html.light .placeholder-slate-600::placeholder { color: #94a3b8; }
+
+/* Botones sólidos rojos: el texto blanco se mantiene blanco */
+html.light .bg-rose-500\/90.text-white,
+html.light .bg-rose-500.text-white,
+html.light .bg-rose-600.text-white {
+  color: #ffffff;
+}
+
+/* Superficies oscuras que conservan su oscuridad y su texto claro */
+/* Barra de carrito flotante (bg-slate-950/90) */
+html.light .bg-slate-950\/90 :is(.text-white, .text-slate-300, .text-slate-400) { color: #e2e8f0; }
+html.light .bg-slate-950\/90 .text-teal-300 { color: #5eead4; }
+html.light .bg-slate-950\/90 .text-teal-400 { color: #2dd4bf; }
+
+/* Footer, tarjeta de tasa y botones de cierre (bg-slate-950/60) */
+html.light .bg-slate-950\/60 :is(.text-white, .text-slate-300, .text-slate-400, .text-slate-500) { color: #cbd5e1; }
+html.light .bg-slate-950\/60 .text-teal-300 { color: #5eead4; }
+html.light .bg-slate-950\/60 .text-teal-400 { color: #2dd4bf; }
+
+/* Resumen de checkout y cabeceras de imagen (bg-slate-950 sólido) */
+html.light .bg-slate-950 :is(.text-white, .text-slate-200, .text-slate-300, .text-slate-400, .text-slate-500) { color: #cbd5e1; }
+html.light .bg-slate-950 .text-teal-300 { color: #5eead4; }
+html.light .bg-slate-950 .text-teal-400 { color: #2dd4bf; }
+
+/* Badges sobre imágenes de producto (bg-slate-950/80 con su propio texto) */
+html.light .bg-slate-950\/80.text-white { color: #ffffff; }
+html.light .bg-slate-950\/80.text-slate-200 { color: #e2e8f0; }
+html.light .bg-slate-950\/80.text-teal-300 { color: #5eead4; }
+
+/* Fondo degradado del logo: tonos legibles sobre header claro */
+html.light .bg-gradient-to-r.from-white {
+  background-image: linear-gradient(to right, #0f172a, #334155 50%, #0d9488);
+}

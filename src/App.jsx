@@ -3104,33 +3104,44 @@ function AdminView({
   const [promoDraft, setPromoDraft] = useState(null);
   const [isPromoModalOpen, setIsPromoModalOpen] = useState(false);
 
-  // Auto-envío de cobros programados: mientras el panel admin esté abierto,
-  // cuando un cobro vence (programado -> vencido), abre WhatsApp con la cuenta
-  // y lo marca como "enviado" para no repetirlo. Requiere sesión activa.
+  // Cobros vencidos pendientes de enviar: mientras el panel esté abierto se
+  // revisa cada 30s (y al montar) si algún cobro programado ya venció. El admin
+  // decide enviarlo o descartarlo; no se envía solo. Lo descartado se olvida
+  // al recargar la app, así que si estaba cerrada vuelve a aparecer.
+  const [overdueList, setOverdueList] = useState([]);
+  const dismissedOverdueRef = useRef([]);
+
   useEffect(() => {
-    const check = async () => {
+    const refresh = () => {
       const now = Date.now();
       const due = collections.filter(
         (c) => c.status === 'programado' && c.phone && new Date(c.dueAt || 0).getTime() <= now
       );
-      for (const c of due) {
-        const cust = (allCustomers || []).find((x) => normalizePhoneDigits(x.phone) === normalizePhoneDigits(c.phone)) || {
-          phone: c.phone,
-          customerName: c.customerName
-        };
-        const wa = formatPhoneWhatsApp(cust.phone);
-        if (wa) {
-          const msg = c.note ? `${buildAccountMessage(cust, orders)}\n\n_${c.note}_` : buildAccountMessage(cust, orders);
-          window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
-        }
-        await onUpsertCollection({ id: c.id, status: 'enviado' });
-      }
+      setOverdueList(due.filter((c) => !dismissedOverdueRef.current.includes(c.id)));
     };
-    check();
-    const timer = setInterval(check, 30000);
+    refresh();
+    const timer = setInterval(refresh, 30000);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collections, allCustomers, orders]);
+  }, [collections]);
+
+  const handleSendOverdue = async (c) => {
+    const cust = (allCustomers || []).find((x) => normalizePhoneDigits(x.phone) === normalizePhoneDigits(c.phone)) || {
+      phone: c.phone,
+      customerName: c.customerName
+    };
+    const wa = formatPhoneWhatsApp(cust.phone);
+    if (wa) {
+      const msg = c.note ? `${buildAccountMessage(cust, orders)}\n\n_${c.note}_` : buildAccountMessage(cust, orders);
+      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+    }
+    const ok = await onUpsertCollection({ id: c.id, status: 'enviado' });
+    if (ok) setOverdueList((prev) => prev.filter((x) => x.id !== c.id));
+  };
+
+  const handleDismissOverdue = (c) => {
+    dismissedOverdueRef.current.push(c.id);
+    setOverdueList((prev) => prev.filter((x) => x.id !== c.id));
+  };
 
   const filteredOrders = statusFilter === 'todos'
     ? orders
@@ -3913,11 +3924,95 @@ function AdminView({
           </div>
         </div>
       )}
+      {overdueList.length === 1 && (
+        <OverdueCollectionToast
+          collection={overdueList[0]}
+          onSend={() => handleSendOverdue(overdueList[0])}
+          onDismiss={() => handleDismissOverdue(overdueList[0])}
+        />
+      )}
+      {overdueList.length > 1 && (
+        <OverdueCollectionsModal
+          collections={overdueList}
+          onSend={handleSendOverdue}
+          onDismiss={handleDismissOverdue}
+        />
+      )}
     </div>
   );
 }
 
 const BEAUTY_CATEGORIES = ['higiene', 'limpieza', 'perfum', 'cosmetic', 'belleza', 'farmacia', 'salud', 'cuidado'];
+
+// Toast persistente de cobro vencido. No se quita solo; el admin debe pulsar
+// "Enviar cobro" (abre WhatsApp) o "✕" (descartar en esta sesión).
+function OverdueCollectionToast({ collection, onSend, onDismiss }) {
+  return (
+    <div className="fixed bottom-5 right-5 z-50 flex max-w-sm items-center gap-3 rounded-xl border border-amber-500/40 bg-slate-900/95 p-4 shadow-2xl backdrop-blur">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-bold uppercase tracking-wide text-amber-400">Cobro programado vencido</p>
+        <p className="mt-1 text-sm text-slate-200">
+          Envío de cobro programado para <span className="font-bold text-white">{collection.customerName || collection.phone}</span>
+        </p>
+      </div>
+      <button
+        onClick={onSend}
+        className="shrink-0 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-400"
+      >
+        Enviar cobro
+      </button>
+      <button
+        onClick={onDismiss}
+        aria-label="Descartar"
+        className="shrink-0 rounded-lg bg-slate-700 px-2 py-2 text-xs font-bold text-slate-200 hover:bg-slate-600"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// Modal con todos los cobros vencidos. El admin los envía uno a uno; al
+// enviar uno se quita de la lista. Si lo descarta, se oculta en esta sesión.
+function OverdueCollectionsModal({ collections, onSend, onDismiss }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        <div className="border-b border-slate-800 px-5 py-4 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-slate-100">Cobros programados vencidos</h3>
+            <p className="text-xs text-slate-400">Envía cada uno a WhatsApp manualmente.</p>
+          </div>
+        </div>
+        <ul className="max-h-[60vh] divide-y divide-slate-800 overflow-y-auto">
+          {collections.map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-3 px-5 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-200">{c.customerName || c.phone}</p>
+                <p className="text-xs text-slate-400">{c.id}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  onClick={() => onSend(c)}
+                  className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-400"
+                >
+                  Enviar cobro
+                </button>
+                <button
+                  onClick={() => onDismiss(c)}
+                  aria-label="Descartar"
+                  className="rounded-lg bg-slate-700 px-2 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-600"
+                >
+                  ✕
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 function BlacklistAdminView({
   customers,

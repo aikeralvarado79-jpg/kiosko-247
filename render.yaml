@@ -19,3 +19,28 @@ services:
         sync: false
         # Connection string de Supabase (Transaction pooler, puerto 6543).
         # Ej: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+
+  # Ambiente de pruebas: se despliega automáticamente con la rama develop.
+  # URL: https://kiosko-247-staging.onrender.com
+  - type: web
+    name: kiosko-247-staging
+    runtime: node
+    plan: free
+    branch: develop
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: ADMIN_PASSWORD
+        sync: false
+        # Contraseña distinta para staging (no usar la de producción).
+        # Ej: staging247Aa
+      - key: ADMIN_PHONES
+        sync: false
+        # Teléfonos admin (iguales que producción si querés probar biometría).
+      - key: DATABASE_URL
+        sync: false
+        # WARNING: temporalmente apunta a la misma BD que producción.
+        # Solo probá UI/navegación; NO crees pedidos ni modifiques stock desde
+        # staging, o ensuciarás los datos reales del kiosko.

@@ -322,6 +322,17 @@ export default function App() {
 
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
+  // Alto del header sticky: se pasa a la tienda para anclar el buscador justo debajo
+  const headerRef = useRef(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  useEffect(() => {
+    const measure = () => setHeaderHeight(headerRef.current?.offsetHeight || 0);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
   // Server state
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -876,7 +887,7 @@ export default function App() {
       </div>
 
       {/* Modern Glassmorphic Top Navbar */}
-      <header className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
+      <header ref={headerRef} className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -985,6 +996,7 @@ export default function App() {
           <CustomerView
             products={filteredProducts}
             allProducts={products}
+            stickyTop={headerHeight}
             categories={categories}
             selectedCategory={selectedCategory}
             setSelectedCategory={setSelectedCategory}
@@ -1493,6 +1505,7 @@ function CustomerView({
   setSearchQuery,
   sortOption,
   setSortOption,
+  stickyTop,
   rate,
   promos,
   onAddToCart,
@@ -1845,8 +1858,11 @@ function CustomerView({
         </div>
       )}
 
-      {/* Search Bar & Category Filter Bar */}
-      <div className="space-y-4">
+      {/* Search Bar & Category Filter Bar (fija debajo del header) */}
+      <div
+        className="sticky z-20 -mx-3 sm:-mx-6 lg:-mx-8 px-3 sm:px-6 lg:px-8 py-2 sm:py-3 bg-slate-900/95 backdrop-blur-lg border-b border-slate-800/60 space-y-4"
+        style={{ top: stickyTop }}
+      >
         <div className="relative">
           <Icon name="search" className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
           <input

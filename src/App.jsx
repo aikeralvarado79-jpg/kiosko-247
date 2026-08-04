@@ -18,6 +18,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     alertTriangle: <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3zM12 9v4M12 17h.01" />,
     trendingUp: <path d="m22 7-8.5 8.5-5-5L1 18M16 7h6v6" />,
     user: <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
+    users: <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
+    creditCard: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM2 10h20M6 15h4" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
     clock: <path d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
@@ -505,6 +507,14 @@ export default function App() {
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState(null);
   const [deleteOrderTarget, setDeleteOrderTarget] = useState(null);
 
+  // Clientes registrados (para Beneficiados / Lista Negra del panel admin)
+  const [allCustomers, setAllCustomers] = useState([]);
+
+  const loadCustomers = async () => {
+    const res = await api.listCustomers();
+    if (res.ok) setAllCustomers(res.data || []);
+  };
+
   // Toast notifications
   const [toasts, setToasts] = useState([]);
 
@@ -534,6 +544,27 @@ export default function App() {
     setActiveView('customer');
     setAdminTab('inventory');
     addToast('Sesión cerrada', 'info');
+  };
+
+  const handleToggleBenefited = async (phone, benefited) => {
+    const res = await api.setCustomerBenefited(phone, benefited);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el beneficio', 'error');
+      return;
+    }
+    await loadCustomers();
+    addToast(benefited ? 'Cliente añadido a beneficiados' : 'Beneficio revocado');
+  };
+
+  const handleAddToBlacklist = async (phone, name, amount) => {
+    const res = await api.addToBlacklist({ phone, name, amount });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo añadir a la lista negra', 'error');
+      return false;
+    }
+    await loadCustomers();
+    addToast('Cliente añadido a la lista negra', 'success');
+    return true;
   };
 
   const addToCart = (product, quantityToAdd = 1) => {
@@ -640,6 +671,7 @@ export default function App() {
         quantity: item.quantity
       })),
       total: cartTotal,
+      credit: Boolean(formData.credit),
       timestamp: formatTimestamp(),
       estimatedMinutes: formData.type === 'delivery' ? 25 : 10
     };
@@ -1055,6 +1087,10 @@ export default function App() {
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onDeleteOrder={(order) => setDeleteOrderTarget(order)}
+            allCustomers={allCustomers}
+            onLoadCustomers={loadCustomers}
+            onToggleBenefited={handleToggleBenefited}
+            onAddToBlacklist={handleAddToBlacklist}
           />
         ) : (
           <AdminLoginView onLogin={handleAdminLogin} onBack={() => setActiveView('customer')} />
@@ -1667,6 +1703,37 @@ function CustomerView({
             <Icon name="refresh" className="w-3.5 h-3.5" />
             <span className="hidden min-[360px]:inline">Repetir pedido</span>
           </button>
+        </div>
+      )}
+
+      {/* Mi Cuenta: saldo pendiente del cliente reconocido */}
+      {savedCustomer?.customerName && customerProfile && (
+        <div className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
+          <div className="p-3 sm:p-4 flex items-center gap-3">
+            <span className="p-2 sm:p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 shrink-0">
+              <Icon name="creditCard" className="w-4 h-4 sm:w-5 sm:h-5" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <span className="block text-sm sm:text-base font-bold text-white">Mi Cuenta</span>
+              {customerProfile.isBenefited ? (
+                <span className="block text-[11px] sm:text-xs text-teal-400">
+                  Beneficiado · puedes pedir a crédito
+                </span>
+              ) : (
+                <span className="block text-[11px] sm:text-xs text-slate-400">
+                  Pago a la entrega
+                </span>
+              )}
+            </div>
+            <div className="text-right shrink-0">
+              <span className="block text-lg sm:text-xl font-black text-white">
+                {formatUsd(Number(customerProfile.balance) || 0)}
+              </span>
+              <span className="block text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                saldo
+              </span>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2649,7 +2716,8 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
     phoneNumber: savedCustomer?.phoneNumber || '',
     type: savedCustomer?.type || 'pickup', // 'pickup' | 'delivery'
     address: savedCustomer?.address || '',
-    notes: ''
+    notes: '',
+    credit: false
   });
 
   const [errors, setErrors] = useState({});
@@ -2929,6 +2997,34 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
             </div>
           </div>
 
+          {/* Pedido a crédito (solo clientes beneficiados) */}
+          {customerProfile?.isBenefited && (
+            <div
+              className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${
+                formData.credit
+                  ? 'bg-indigo-500/10 border-indigo-400'
+                  : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+              }`}
+              onClick={() => setFormData({ ...formData, credit: !formData.credit })}
+            >
+              <div className="flex items-start gap-3">
+                <span
+                  className={`p-2 rounded-xl shrink-0 ${
+                    formData.credit ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  <Icon name="creditCard" className="w-4 h-4" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white">Enviar pedido a la cuenta</p>
+                  <p className="text-[11px] text-slate-400">
+                    Lo pagas luego; se suma a tu saldo. La tienda debe aceptarlo antes de prepararlo.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
             className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
@@ -2957,7 +3053,11 @@ function AdminView({
   onEditProduct,
   onDeleteProduct,
   onUpdateOrderStatus,
-  onDeleteOrder
+  onDeleteOrder,
+  allCustomers,
+  onLoadCustomers,
+  onToggleBenefited,
+  onAddToBlacklist
 }) {
   // Order status filter state
   const [statusFilter, setStatusFilter] = useState('todos');
@@ -3120,11 +3220,16 @@ function AdminView({
           { key: 'inventory', label: 'Inventario', full: 'Inventario de Productos', icon: 'package' },
           { key: 'orders', label: `Pedidos (${pendingOrders.length})`, full: `Pedidos en Vivo (${pendingOrders.length})`, icon: 'clock' },
           { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
+          { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
+          { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
           { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Negocio', icon: 'trendingUp' }
         ].map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setAdminTab(tab.key)}
+            onClick={() => {
+              if (tab.key === 'benefited' || tab.key === 'blacklist') onLoadCustomers();
+              setAdminTab(tab.key);
+            }}
             className={`pb-3 sm:pb-4 text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-all whitespace-nowrap shrink-0 ${
               adminTab === tab.key
                 ? 'border-teal-400 text-teal-300'
@@ -3341,6 +3446,12 @@ function AdminView({
                           <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
                           {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
                         </span>
+                        {order.credit && (
+                          <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
+                            <Icon name="creditCard" className="w-3 h-3" />
+                            A cuenta
+                          </span>
+                        )}
                       </div>
 
                       <div>
@@ -3433,6 +3544,26 @@ function AdminView({
                           </button>
                         ))}
                       </div>
+
+                      {/* Aprobar / Rechazar pedido a crédito (solo pendiente) */}
+                      {order.credit && order.status === 'pendiente' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => onUpdateOrderStatus(order.id, 'en_preparacion')}
+                            className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <Icon name="check" className="w-3.5 h-3.5" />
+                            Aceptar y preparar
+                          </button>
+                          <button
+                            onClick={() => onUpdateOrderStatus(order.id, 'cancelado')}
+                            className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <Icon name="x" className="w-3.5 h-3.5" />
+                            Rechazar
+                          </button>
+                        </div>
+                      )}
 
                       {/* Eliminar pedido cancelado (para no acumular en la lista) */}
                       {order.status === 'cancelado' && (
@@ -3603,7 +3734,71 @@ function AdminView({
         </div>
       )}
 
-      {/* Tab 4: Analytics */}
+      {/* Tab 4: Beneficiados */}
+      {adminTab === 'benefited' && (
+        <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h3 className="text-lg font-bold text-white">Clientes Beneficiados</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Los beneficiados pueden enviar pedidos a crédito (sumar a su cuenta).
+              </p>
+            </div>
+            <button
+              onClick={onLoadCustomers}
+              className="px-3 py-2 rounded-xl bg-slate-700 text-slate-100 text-xs font-bold hover:bg-slate-600 transition-colors"
+            >
+              Actualizar lista
+            </button>
+          </div>
+
+          {allCustomers.length === 0 ? (
+            <p className="text-sm text-slate-500 py-8 text-center">No hay clientes registrados aún.</p>
+          ) : (
+            <div className="grid gap-2">
+              {allCustomers.map((c) => (
+                <div
+                  key={c.phone}
+                  className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60"
+                >
+                  <span
+                    className={`p-2 rounded-xl shrink-0 ${
+                      c.isBenefited ? 'bg-teal-500/20 text-teal-400' : 'bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    <Icon name="user" className="w-4 h-4" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-100 truncate">{c.customerName || 'Cliente'}</p>
+                    <p className="text-[11px] text-slate-400">{c.phone}</p>
+                  </div>
+                  <button
+                    onClick={() => onToggleBenefited(c.phone, !c.isBenefited)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                      c.isBenefited
+                        ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                        : 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 hover:from-teal-400 hover:to-emerald-400'
+                    }`}
+                  >
+                    {c.isBenefited ? 'Revocar beneficio' : 'Dar beneficio'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 5: Lista Negra */}
+      {adminTab === 'blacklist' && (
+        <BlacklistAdminView
+          customers={allCustomers}
+          onLoadCustomers={onLoadCustomers}
+          onAddToBlacklist={onAddToBlacklist}
+        />
+      )}
+
+      {/* Tab 6: Analytics */}
       {adminTab === 'analytics' && (
         <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl space-y-5 sm:space-y-6 backdrop-blur-md">
           <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
@@ -3651,6 +3846,123 @@ function AdminView({
 }
 
 const BEAUTY_CATEGORIES = ['higiene', 'limpieza', 'perfum', 'cosmetic', 'belleza', 'farmacia', 'salud', 'cuidado'];
+
+function BlacklistAdminView({ customers, onLoadCustomers, onAddToBlacklist }) {
+  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [amount, setAmount] = useState('');
+
+  const debtors = customers.filter((c) => (Number(c.balance) || 0) > 0);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    const ok = await onAddToBlacklist(phone.replace(/\D/g, ''), name, amount);
+    if (ok) {
+      setPhone('');
+      setName('');
+      setAmount('');
+    }
+  };
+
+  const handleClearDebt = (customer) => {
+    if (window.confirm(`¿Saldar la deuda de ${customer.customerName || customer.phone}?`)) {
+      onAddToBlacklist(customer.phone.replace(/\D/g, ''), customer.customerName, '0');
+    }
+  };
+
+  return (
+    <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-bold text-white">Lista Negra · Deudores</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Clientes con saldo pendiente (balance mayor a 0). El pedido a crédito se suma al entregar.
+          </p>
+        </div>
+        <button
+          onClick={onLoadCustomers}
+          className="px-3 py-2 rounded-xl bg-slate-700 text-slate-100 text-xs font-bold hover:bg-slate-600 transition-colors"
+        >
+          Actualizar lista
+        </button>
+      </div>
+
+      <form
+        onSubmit={handleAdd}
+        className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end p-4 rounded-2xl bg-slate-900 border border-slate-700/60"
+      >
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono *</label>
+          <input
+            type="tel"
+            inputMode="numeric"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="0414 1234567"
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Nombre del deudor"
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1">Deuda (USD) *</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+          />
+        </div>
+        <button
+          type="submit"
+          className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 text-slate-950 text-sm font-bold hover:from-red-400 hover:to-amber-400 shadow-lg shadow-red-500/20 transition-all"
+        >
+          Añadir a la lista negra
+        </button>
+      </form>
+
+      {debtors.length === 0 ? (
+        <p className="text-sm text-slate-500 py-8 text-center">No hay deudores registrados.</p>
+      ) : (
+        <div className="grid gap-2">
+          {debtors.map((c) => (
+            <div key={c.phone} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60">
+              <span className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
+                <Icon name="alertTriangle" className="w-4 h-4" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-100 truncate">{c.customerName || 'Cliente'}</p>
+                <p className="text-[11px] text-slate-400">{c.phone}</p>
+              </div>
+              <div className="text-right shrink-0">
+                <span className="block text-base font-black text-red-400">
+                  {formatUsd(Number(c.balance) || 0)}
+                </span>
+                <button
+                  onClick={() => handleClearDebt(c)}
+                  className="text-[10px] text-slate-500 underline mt-1 hover:text-slate-300"
+                >
+                  Saldar deuda
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const OPENFACTS_FIELDS = 'code,product_name,brands,image_front_url';
 

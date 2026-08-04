@@ -129,6 +129,8 @@ const fileStore = {
       phone: key,
       customerName: customerName || existing?.customerName || 'Cliente',
       addresses,
+      balance: Number(existing?.balance) || 0,
+      isBenefited: Boolean(existing?.isBenefited),
       createdAt: existing?.createdAt || now,
       lastOrderAt: now
     };
@@ -138,6 +140,50 @@ const fileStore = {
     ];
     this.persist();
     return record;
+  },
+
+  async listCustomers() {
+    return this.state.customers
+      .map((c) => ({ ...c, balance: Number(c.balance) || 0, isBenefited: Boolean(c.isBenefited) }))
+      .sort((a, b) => normalizePhone(a.phone).localeCompare(normalizePhone(b.phone)));
+  },
+
+  async setCustomerBenefited(phone, benefited) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const existing = this.state.customers.find((c) => c.phone === key);
+    if (!existing) return null;
+    const updated = { ...existing, isBenefited: Boolean(benefited) };
+    this.state.customers = [
+      updated,
+      ...this.state.customers.filter((c) => c.phone !== key)
+    ];
+    this.persist();
+    return updated;
+  },
+
+  async setCustomerBalance(phone, amount) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const existing = this.state.customers.find((c) => c.phone === key);
+    if (!existing) return null;
+    const updated = { ...existing, balance: Number(amount) || 0 };
+    this.state.customers = [
+      updated,
+      ...this.state.customers.filter((c) => c.phone !== key)
+    ];
+    this.persist();
+    return updated;
+  },
+
+  async addOrderToAccount(order) {
+    if (!order || !order.phone) return null;
+    const key = normalizePhone(order.phone);
+    const existing = this.state.customers.find((c) => c.phone === key);
+    if (!existing) {
+      await this.upsertCustomer({ phone: order.phone, customerName: order.customerName });
+    }
+    return this.setCustomerBalance(key, Number(existing ? existing.balance : 0) + Number(order.total) || 0);
   }
 };
 
@@ -243,7 +289,9 @@ const pgStore = {
         "customerName" TEXT,
         addresses JSONB DEFAULT '[]',
         "createdAt" TEXT,
-        "lastOrderAt" TEXT
+        "lastOrderAt" TEXT,
+        balance NUMERIC DEFAULT 0,
+        "isBenefited" BOOLEAN DEFAULT false
       );
       CREATE TABLE IF NOT EXISTS ${q('webauthn_credentials')} (
         phone TEXT PRIMARY KEY,
@@ -260,6 +308,9 @@ const pgStore = {
       );
     `);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
+    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
   },
 
   async seedIfEmpty() {
@@ -339,9 +390,9 @@ const pgStore = {
     await this.pool.query(`DELETE FROM ${q('orders')}`);
     for (const o of orders) {
       await this.pool.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString()]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit)]
       );
     }
   },
@@ -395,6 +446,47 @@ const pgStore = {
     const { rows } = await this.pool.query(`SELECT * FROM ${q('customers')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return { ...rows[0], addresses: rows[0].addresses || [] };
+  },
+
+  async listCustomers() {
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('customers')} ORDER BY phone`);
+    return rows.map((r) => ({ ...r, balance: Number(r.balance) || 0, isBenefited: Boolean(r.isBenefited) }));
+  },
+
+  async setCustomerBenefited(phone, benefited) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('customers')} SET "isBenefited" = $2 WHERE phone = $1 RETURNING *`,
+      [key, Boolean(benefited)]
+    );
+    if (!rows[0]) return null;
+    return { ...rows[0], balance: Number(rows[0].balance) || 0 };
+  },
+
+  async setCustomerBalance(phone, amount) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('customers')} SET balance = $2 WHERE phone = $1 RETURNING *`,
+      [key, Number(amount) || 0]
+    );
+    if (!rows[0]) return null;
+    return { ...rows[0], balance: Number(rows[0].balance) || 0 };
+  },
+
+  async addOrderToAccount(order) {
+    if (!order || !order.phone) return null;
+    const key = normalizePhone(order.phone);
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) + $2, "customerName" = COALESCE(NULLIF($3, ''), "customerName")
+       WHERE phone = $1 RETURNING *`,
+      [key, Number(order.total) || 0, order.customerName || '']
+    );
+    if (rows[0]) return { ...rows[0], balance: Number(rows[0].balance) || 0 };
+    const created = await this.upsertCustomer({ phone: order.phone, customerName: order.customerName });
+    if (!created) return null;
+    return this.setCustomerBalance(key, Number(order.total) || 0);
   },
 
   async getWebAuthnByPhone(phone) {
@@ -494,13 +586,14 @@ const pgStore = {
         status: 'pendiente',
         timestamp: orderData.timestamp || '',
         estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
-        createdAt: orderData.createdAt || new Date().toISOString()
+        createdAt: orderData.createdAt || new Date().toISOString(),
+        credit: Boolean(orderData.credit)
       };
 
       await client.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit]
       );
 
       // Registrar/actualizar el cliente reconocido en la misma transacción
@@ -556,6 +649,14 @@ export const getCustomerByPhone = (phone) => store.getCustomerByPhone(phone);
 
 export const upsertCustomer = (customer) => store.upsertCustomer(customer);
 
+export const listCustomers = () => store.listCustomers();
+
+export const setCustomerBenefited = (phone, benefited) => store.setCustomerBenefited(phone, benefited);
+
+export const setCustomerBalance = (phone, amount) => store.setCustomerBalance(phone, amount);
+
+export const addOrderToAccount = (order) => store.addOrderToAccount(order);
+
 export const getWebAuthnByPhone = (phone) => store.getWebAuthnByPhone(phone);
 
 export const saveWebAuthn = (phone, credential) => store.saveWebAuthn(phone, credential);
@@ -604,7 +705,8 @@ export const createOrder = async (orderData) => {
     status: 'pendiente',
     timestamp: orderData.timestamp || '',
     estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
-    createdAt: orderData.createdAt || new Date().toISOString()
+    createdAt: orderData.createdAt || new Date().toISOString(),
+    credit: Boolean(orderData.credit)
   };
 
   const orders = [order, ...state.orders];
@@ -678,6 +780,11 @@ export const updateOrderStatus = async (id, status) => {
 
   const orders = state.orders.map((o) => (o.id === id ? { ...o, status } : o));
   await store.saveOrders(orders);
+
+  // Los pedidos a crédito se suman a la cuenta del cliente cuando se entregan.
+  if (existing.credit && status === 'entregado') {
+    await store.addOrderToAccount(existing);
+  }
 
   const newState = await store.getState();
   return { state: newState };

@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS orders (
   total NUMERIC,
   status TEXT,
   timestamp TEXT,
-  "estimatedMinutes" INTEGER
+  "estimatedMinutes" INTEGER,
+  credit BOOLEAN DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -43,7 +44,9 @@ CREATE TABLE IF NOT EXISTS customers (
   "customerName" TEXT,
   addresses JSONB DEFAULT '[]',
   "createdAt" TEXT,
-  "lastOrderAt" TEXT
+  "lastOrderAt" TEXT,
+  balance NUMERIC DEFAULT 0,
+  "isBenefited" BOOLEAN DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS admin_credentials (

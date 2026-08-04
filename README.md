@@ -44,6 +44,7 @@ Sin `DATABASE_URL` configurada, el backend usa `server/data.json` como almacenam
 | -------------------- | ------------------ | ------------------------------------------------------------------------- |
 | `PORT`               | Backend            | Puerto HTTP (default `3500`). Render lo define automáticamente.           |
 | `ADMIN_PASSWORD`     | Backend            | Contraseña del panel admin. En Render se setea en el Blueprint.           |
+| `ADMIN_PHONES`       | Backend            | Teléfonos admin separados por coma (recuperación de contraseña con biometría). Se combina con `server/config.json`. |
 | `DATABASE_URL`       | Backend            | Connection string de Postgres (transaction pooler de Supabase).          |
 | `PEXELS_API_KEY`     | Dev (proxy Vite)   | Key de Pexels para sugerencias de imagen al crear productos.              |
 | `VITE_POLL_INTERVAL` | Frontend           | Intervalo de polling en ms (default `5000`).                              |
@@ -79,12 +80,25 @@ npm run dev:all      # backend + frontend juntos
 npm run build        # build de producción
 npm start            # sirve el build + API (producción)
 npm run preview      # previsualiza el build
+npm run lint         # ESLint (código)
+npm run test         # tests unitarios (Vitest)
+npm run format       # Prettier: formatea todo
+npm run format:check # Prettier: verifica formato
+npm run check        # lint + test + build (gate de calidad local)
 ```
+
+## Calidad y flujo de trabajo
+
+- **CI (GitHub Actions):** `.github/workflows/ci.yml` corre `lint`, `test` y `build` en cada PR y push a `main`/`develop`. Producción (Render) solo despliega desde `main`.
+- **Ramas:** los cambios van por PR a `develop` y de ahí a `main`. `main` protegida (sin push directo).
+- **Tests:** `server/store.test.js` (stock/cancelación/eliminación de pedidos), `server/rate.test.js` (tasa BCV con fallbacks) y `src/data.test.js` (helpers). Los tests usan un archivo temporal (`KIOSKO_DATA_FILE`) para no tocar `server/data.json`.
+- Antes de pushear: `npm run check`.
 
 ## Estructura
 
 ```
 src/            Frontend (React + Tailwind)
-server/         Backend Express (index.js, store.js, schema.sql, config.json)
+server/         Backend Express (index.js, store.js, rate.js, webauthn.js, config.json)
+.github/workflows/  CI (lint + test + build)
 render.yaml     Blueprint de despliegue en Render
 ```

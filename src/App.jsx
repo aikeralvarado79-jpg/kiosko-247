@@ -75,8 +75,6 @@ const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
 // Administradores reconocidos por teléfono (formato 11 dígitos, sin espacios).
 const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'];
 
-const isAdminPhone = (phone) => ADMIN_PHONES.includes(normalizePhoneDigits(phone));
-
 const CUSTOMER_KEY = 'kiosko_customer';
 
 // Parse fecha de pedido: prioriza createdAt (ISO), fallback timestamp "DD/MM, HH:MM" asumiendo año actual.
@@ -1011,7 +1009,6 @@ export default function App() {
         ) : isAdminAuthed ? (
           <AdminView
             products={products}
-            categories={categories}
             orders={orders}
             rate={rate}
             promos={promos}
@@ -2856,7 +2853,6 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
 
 function AdminView({
   products,
-  categories,
   orders,
   rate,
   promos,

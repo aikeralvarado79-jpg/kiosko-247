@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { INITIAL_CATEGORIES, INITIAL_PRODUCTS, INITIAL_ORDERS } from '../src/data.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, 'data.json');
+const DATA_FILE = process.env.KIOSKO_DATA_FILE || path.join(__dirname, 'data.json');
 
 const defaultState = () => ({
   products: JSON.parse(JSON.stringify(INITIAL_PRODUCTS)),

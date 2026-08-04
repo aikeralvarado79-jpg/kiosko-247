@@ -12,7 +12,12 @@ const app = express();
 
 app.use(express.json({ limit: '2mb' }));
 
-const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+let config = {};
+try {
+  config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')) || {};
+} catch (err) {
+  console.warn('[kiosko] No se pudo leer config.json, usando variables de entorno:', err.message);
+}
 
 // Contraseña base (config/env). Puede haber un override guardado en store.
 let adminPassword = process.env.ADMIN_PASSWORD || config.adminPassword;
@@ -20,8 +25,14 @@ let adminPassword = process.env.ADMIN_PASSWORD || config.adminPassword;
 // Key de Pexels para sugerencias de imagen (env o config).
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || config.pexelsApiKey;
 
-// Teléfonos de administradores (normalizados a 11 dígitos)
-const ADMIN_PHONES = (config.adminPhones || []).map((p) => String(p).replace(/\D/g, '').slice(-11));
+// Teléfonos de administradores (normalizados a 11 dígitos). Se combinan env
+// (ADMIN_PHONES, separados por coma) y config para no romper si falta uno.
+const ADMIN_PHONES = String(process.env.ADMIN_PHONES || '')
+  .split(',')
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .concat(config.adminPhones || [])
+  .map((p) => String(p).replace(/\D/g, '').slice(-11));
 
 const signToken = (payload) => {
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');

@@ -40,7 +40,7 @@ export const registrationOptions = async (req, res) => {
     const existing = await store.getWebAuthnByPhone(key);
     if (existing) return res.status(409).json({ error: 'Este teléfono ya tiene biometría registrada' });
 
-    const { rpID, expectedOrigin } = deriveRp(req);
+    const { rpID } = deriveRp(req);
 
     const options = await generateRegistrationOptions({
       rpName: 'Empresas Alvarados',
@@ -110,7 +110,7 @@ export const authenticationOptions = async (req, res) => {
     const credential = await store.getWebAuthnByPhone(key);
     if (!credential) return res.status(404).json({ error: 'Este teléfono no tiene biometría registrada' });
 
-    const { rpID, expectedOrigin } = deriveRp(req);
+    const { rpID } = deriveRp(req);
 
     const options = await generateAuthenticationOptions({
       rpID,

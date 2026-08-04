@@ -11,6 +11,10 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
         # Contraseña del panel admin. Ej: kiosko247Aa
+      - key: ADMIN_PHONES
+        sync: false
+        # Teléfonos admin separados por coma (para recuperar contraseña con biometría).
+        # Ej: 04129862577,04141823718,04242980404,04242963490
       - key: DATABASE_URL
         sync: false
         # Connection string de Supabase (Transaction pooler, puerto 6543).

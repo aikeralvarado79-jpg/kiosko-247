@@ -10,7 +10,8 @@ const DATA_FILE = path.join(__dirname, 'data.json');
 const defaultState = () => ({
   products: JSON.parse(JSON.stringify(INITIAL_PRODUCTS)),
   categories: [...INITIAL_CATEGORIES],
-  orders: JSON.parse(JSON.stringify(INITIAL_ORDERS))
+  orders: JSON.parse(JSON.stringify(INITIAL_ORDERS)),
+  settings: { promos: [] }
 });
 
 const generateProductId = () => `p-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -58,6 +59,11 @@ const fileStore = {
 
   async saveOrders(orders) {
     this.state.orders = orders;
+    this.persist();
+  },
+
+  async saveSettings(settings) {
+    this.state.settings = settings;
     this.persist();
   }
 };
@@ -107,6 +113,10 @@ const pgStore = {
         timestamp TEXT,
         "estimatedMinutes" INTEGER
       );
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value JSONB
+      );
     `);
   },
 
@@ -133,10 +143,11 @@ const pgStore = {
   },
 
   async getState() {
-    const [productsRes, categoriesRes, ordersRes] = await Promise.all([
+    const [productsRes, categoriesRes, ordersRes, settingsRes] = await Promise.all([
       this.pool.query('SELECT * FROM products'),
       this.pool.query('SELECT * FROM categories ORDER BY name'),
-      this.pool.query('SELECT * FROM orders')
+      this.pool.query('SELECT * FROM orders'),
+      this.pool.query('SELECT key, value FROM settings')
     ]);
     const products = productsRes.rows.map((r) => ({
       id: r.id,
@@ -153,7 +164,15 @@ const pgStore = {
     }));
     const categories = categoriesRes.rows.map((r) => r.name);
     const orders = ordersRes.rows.map((r) => ({ ...r, items: r.items || [], total: Number(r.total) }));
-    return { products, categories, orders };
+    const settings = {
+      promos: []
+    };
+    for (const row of settingsRes.rows) {
+      try {
+        if (row.key === 'promos' && Array.isArray(row.value)) settings.promos = row.value;
+      } catch {}
+    }
+    return { products, categories, orders, settings };
   },
 
   async saveProducts(products) {
@@ -183,6 +202,14 @@ const pgStore = {
         [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes]
       );
     }
+  },
+
+  async saveSettings(settings) {
+    await this.pool.query(
+      `INSERT INTO settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      ['promos', JSON.stringify(settings.promos || [])]
+    );
   },
 
   async createOrderAtomic(orderData) {
@@ -260,6 +287,8 @@ export async function initStore() {
 }
 
 export const getState = () => store.getState();
+
+export const saveSettings = (settings) => store.saveSettings(settings);
 
 export const createOrder = async (orderData) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {

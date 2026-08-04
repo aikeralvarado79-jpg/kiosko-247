@@ -32,3 +32,8 @@ CREATE TABLE IF NOT EXISTS orders (
   timestamp TEXT,
   "estimatedMinutes" INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value JSONB
+);

@@ -122,6 +122,15 @@ app.patch('/api/orders/:id', requireAdmin, async (req, res) => {
   }
 });
 
+app.put('/api/settings', requireAdmin, async (req, res) => {
+  try {
+    await store.saveSettings(req.body || {});
+    res.json(await store.getState());
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudieron guardar los ajustes: ' + err.message });
+  }
+});
+
 // Pexels proxy (used in production; in dev Vite proxies /pexels-api)
 app.use('/pexels-api', async (req, res) => {
   try {

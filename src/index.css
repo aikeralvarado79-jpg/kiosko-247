@@ -32,3 +32,38 @@
 
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* ---- Light theme (modo claro) ---- */
+html.light {
+  --color-slate-950: #e8edf5;
+  --color-slate-900: #ffffff;
+  --color-slate-800: #f1f5f9;
+  --color-slate-700: #e2e8f0;
+  --color-slate-600: #cbd5e1;
+  --color-slate-500: #94a3b8;
+  --color-slate-400: #64748b;
+  --color-slate-300: #475569;
+  --color-slate-200: #334155;
+  --color-slate-100: #1e293b;
+  --color-slate-50: #0f172a;
+  --color-white: #0f172a;
+}
+
+html.light body {
+  background-color: #f8fafc;
+}
+
+html.light .bg-slate-950\/80,
+html.light .bg-slate-950\/70 {
+  background-color: rgba(226, 232, 240, 0.85);
+}
+
+html.light .text-white {
+  color: #0f172a;
+}
+
+html.light .text-slate-100 { color: #0f172a; }
+html.light .text-slate-200 { color: #1e293b; }
+html.light .text-slate-300 { color: #334155; }
+html.light .text-slate-400 { color: #475569; }
+html.light .text-slate-500 { color: #64748b; }

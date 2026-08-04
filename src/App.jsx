@@ -27,6 +27,10 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     refresh: <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />,
     sparkles: <path d="m12 3 1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />,
     upload: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />,
+    sun: <path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />,
+    moon: <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />,
+    whatsapp: <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.297-.497.1-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />,
+     arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
     image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
     xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />
   };
@@ -65,6 +69,46 @@ const formatBs = (n) => `Bs ${Number(n || 0).toLocaleString('es-AR', { minimumFr
 const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
 
 const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
+
+const formatPhoneWhatsApp = (phone) => {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('58')) return digits;
+  if (digits.startsWith('0')) return '58' + digits.slice(1);
+  return '58' + digits;
+};
+
+const STATUS_STYLES = {
+  pendiente: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40', ring: 'border-amber-500/50', dot: 'bg-amber-400' },
+  en_preparacion: { badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', ring: 'border-cyan-500/50', dot: 'bg-cyan-400' },
+  listo: { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', ring: 'border-emerald-500/50', dot: 'bg-emerald-400' },
+  entregado: { badge: 'bg-slate-500/20 text-slate-300 border-slate-500/40', ring: 'border-slate-500/50', dot: 'bg-slate-400' }
+};
+
+const playChime = (() => {
+  let ctx = null;
+  const note = (freq, start, dur, type = 'sine', gain = 0.12) => {
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0, ctx.currentTime + start);
+    g.gain.linearRampToValueAtTime(gain, ctx.currentTime + start + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(ctx.currentTime + start);
+    osc.stop(ctx.currentTime + start + dur + 0.05);
+  };
+  return () => {
+    try {
+      if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume();
+      note(880, 0, 0.22, 'sine', 0.1);
+      note(1320, 0.16, 0.3, 'sine', 0.08);
+    } catch {}
+  };
+})();
 
 const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'entregado'];
 
@@ -146,10 +190,21 @@ export default function App() {
   // App views: 'customer' | 'admin'
   const [activeView, setActiveView] = useState('customer');
 
+  // Theme: 'dark' | 'light'
+  const [theme, setTheme] = useState(() => localStorage.getItem('kiosko_theme') || 'dark');
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light');
+    localStorage.setItem('kiosko_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+
   // Server state
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [promos, setPromos] = useState([]);
   const [rate, setRate] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -173,6 +228,7 @@ export default function App() {
     setProducts(res.data.products || []);
     setCategories(res.data.categories || []);
     setOrders(res.data.orders || []);
+    if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
     if (res.data.rate) setRate(res.data.rate);
     setIsLoading(false);
   }, []);
@@ -199,12 +255,44 @@ export default function App() {
   }, [loadState]);
 
   // Cart State
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('kiosko_cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [isCartOpen, setIsCartOpen] = useState(false);
+
+  // Persist cart across reloads/navigation (per browser session)
+  useEffect(() => {
+    sessionStorage.setItem('kiosko_cart', JSON.stringify(cart));
+  }, [cart]);
+
+  // Reconcile restored cart with live products (fresh price/stock)
+  useEffect(() => {
+    if (products.length === 0) return;
+    setCart((prev) => {
+      const next = prev
+        .map((item) => {
+          const live = products.find((p) => p.id === item.product.id);
+          if (!live) return null; // product no longer exists
+          return {
+            product: live,
+            quantity: Math.min(item.quantity, Math.max(0, live.stock))
+          };
+        })
+        .filter(Boolean)
+        .filter((item) => item.quantity > 0);
+      return next.length === prev.length ? prev : next;
+    });
+  }, [products]);
 
   // Search & Filters
   const [selectedCategory, setSelectedCategory] = useState('Todas');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortOption, setSortOption] = useState('relevancia'); // relevancia | precio-asc | precio-desc | stock | popular
 
   // Modals state
   const [productDetailModal, setProductDetailModal] = useState(null); // Product object
@@ -308,7 +396,7 @@ export default function App() {
   }, [cart]);
 
   const filteredProducts = useMemo(() => {
-    return products.filter((p) => {
+    let list = products.filter((p) => {
       const matchesCategory = selectedCategory === 'Todas' || p.category === selectedCategory;
       const matchesSearch =
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -316,7 +404,25 @@ export default function App() {
         p.code.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesCategory && matchesSearch;
     });
-  }, [products, selectedCategory, searchQuery]);
+
+    if (sortOption === 'precio-asc') {
+      list = [...list].sort((a, b) => a.price - b.price);
+    } else if (sortOption === 'precio-desc') {
+      list = [...list].sort((a, b) => b.price - a.price);
+    } else if (sortOption === 'stock') {
+      list = [...list].sort((a, b) => b.stock - a.stock);
+    } else if (sortOption === 'popular') {
+      const demand = {};
+      orders.forEach((o) =>
+        o.items.forEach((it) => {
+          demand[it.id] = (demand[it.id] || 0) + it.quantity;
+        })
+      );
+      list = [...list].sort((a, b) => (demand[b.id] || 0) - (demand[a.id] || 0));
+    }
+
+    return list;
+  }, [products, selectedCategory, searchQuery, sortOption, orders]);
 
   const handlePlaceOrder = async (formData) => {
     if (cart.length === 0) return;
@@ -402,10 +508,43 @@ export default function App() {
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
   };
 
+  const handleSavePromos = async (newPromos) => {
+    const res = await api.saveSettings({ promos: newPromos });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudieron guardar los promos', 'error');
+      return false;
+    }
+    if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
+    addToast('Promociones guardadas correctamente');
+    return true;
+  };
+
   // Derive live tracking order from current orders so status changes reflect in customer view
   const trackedOrder = currentOrderTracking
     ? orders.find((o) => o.id === currentOrderTracking) || null
     : null;
+
+  // Sound notification when a tracked order advances to preparación or listo
+  const lastTrackedStatus = useRef(null);
+  useEffect(() => {
+    if (!trackedOrder) {
+      lastTrackedStatus.current = null;
+      return;
+    }
+    const status = trackedOrder.status;
+    if (lastTrackedStatus.current && status !== lastTrackedStatus.current) {
+      if (status === 'en_preparacion' || status === 'listo') {
+        playChime();
+        addToast(
+          status === 'en_preparacion'
+            ? `¡Tu pedido ${trackedOrder.id} está en preparación!`
+            : `¡Tu pedido ${trackedOrder.id} está listo para retirar!`,
+          'info'
+        );
+      }
+    }
+    lastTrackedStatus.current = status;
+  }, [trackedOrder?.status, trackedOrder?.id]);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
@@ -487,6 +626,16 @@ export default function App() {
             </button>
           </div>
 
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className="p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400"
+            aria-label="Cambiar tema claro/oscuro"
+            title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+          >
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="w-5 h-5" />
+          </button>
+
           {/* Customer Cart Quick Button */}
           {activeView === 'customer' && (
             <button
@@ -523,7 +672,10 @@ export default function App() {
             setSelectedCategory={setSelectedCategory}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            sortOption={sortOption}
+            setSortOption={setSortOption}
             rate={rate}
+            promos={promos}
             onAddToCart={addToCart}
             onOpenProductModal={(product) => setProductDetailModal(product)}
             currentOrderTracking={trackedOrder}
@@ -535,6 +687,8 @@ export default function App() {
             categories={categories}
             orders={orders}
             rate={rate}
+            promos={promos}
+            onSavePromos={handleSavePromos}
             adminTab={adminTab}
             setAdminTab={setAdminTab}
             onLogout={handleAdminLogout}
@@ -609,6 +763,16 @@ export default function App() {
           product={deleteConfirmProduct}
           onClose={() => setDeleteConfirmProduct(null)}
           onConfirm={() => handleDeleteProduct(deleteConfirmProduct.id)}
+        />
+      )}
+
+      {/* Fixed bottom cart bar */}
+      {activeView === 'customer' && cartCount > 0 && (
+        <CartFloatBar
+          cartCount={cartCount}
+          cartTotal={cartTotal}
+          rate={rate}
+          onOpen={() => setIsCartOpen(true)}
         />
       )}
 
@@ -728,30 +892,90 @@ function CustomerView({
   setSelectedCategory,
   searchQuery,
   setSearchQuery,
+  sortOption,
+  setSortOption,
   rate,
+  promos,
   onAddToCart,
   onOpenProductModal,
   currentOrderTracking,
   setCurrentOrderTracking
 }) {
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestions = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return allProducts
+      .filter((p) => p.name.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [allProducts, searchQuery]);
   return (
     <div className="space-y-8 animate-fade-in">
-      {/* Hero Welcome Banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 border border-slate-700/60 p-6 sm:p-10 shadow-2xl backdrop-blur-md">
-        <div className="relative z-10 max-w-2xl space-y-3">
-          <span className="px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-xs font-semibold uppercase tracking-wider">
-            ⚡ Pedidos al momento
-          </span>
-          <h2 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
-            ¿Qué se te antoja hoy?
-          </h2>
-          <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
-            Explora nuestros antojos, bebidas frías, snacks y artículos esenciales. Paga y retira sin hacer filas o recibe en tu puerta.
-          </p>
+      {/* Compact Hero Welcome Banner */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 border border-slate-700/60 p-6 sm:p-8 shadow-2xl backdrop-blur-md">
+        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+          <div className="space-y-3 max-w-xl">
+            <span className="px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-xs font-semibold uppercase tracking-wider">
+              ⚡ Pedidos al momento
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              ¿Qué se te antoja hoy?
+            </h2>
+            <p className="text-slate-300 text-sm leading-relaxed">
+              Explora nuestros antojos, bebidas frías y snacks. Paga y retira sin hacer filas o recibe en tu puerta.
+            </p>
+          </div>
+
+          {/* Tasa BCV card */}
+          <div className="w-full sm:w-auto shrink-0 p-4 rounded-2xl bg-slate-950/60 border border-teal-500/30 backdrop-blur-md">
+            <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+              <Icon name="dollarSign" className="w-3.5 h-3.5 text-teal-400" />
+              Tasa BCV
+            </span>
+            <span className="block text-xl font-black text-white mt-1">
+              1 US$ = <span className="text-teal-300">{rate?.rate ? rate.rate.toLocaleString('es-AR') : '—'} Bs</span>
+            </span>
+            {rate?.date && (
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                {rate.source} · {new Date(rate.date).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}
+              </span>
+            )}
+          </div>
         </div>
         {/* Decorative graphic background */}
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
       </div>
+
+      {/* Promos Banner */}
+      {promos.filter((p) => p.active).length > 0 && (
+        <div className="space-y-3">
+          {promos
+            .filter((p) => p.active)
+            .map((promo) => (
+              <div
+                key={promo.id}
+                className="flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-rose-500/10 border border-amber-500/30"
+              >
+                {promo.image && (
+                  <img
+                    src={promo.image}
+                    alt={promo.title}
+                    className="w-16 h-16 rounded-xl object-cover border border-amber-500/30 shrink-0"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                    <Icon name="sparkles" className="w-3 h-3" /> Promo
+                  </span>
+                  <h4 className="font-bold text-white text-sm truncate">{promo.title}</h4>
+                  {promo.subtitle && (
+                    <p className="text-xs text-slate-300 line-clamp-2">{promo.subtitle}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
 
       {/* Live Order Tracker Banner (If customer placed an order recently) */}
       {currentOrderTracking && (
@@ -822,7 +1046,12 @@ function CustomerView({
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setShowSuggestions(true);
+            }}
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
             placeholder="Buscar por nombre o descripción (ej: alfajor, gaseosa, sanguchito)..."
             className="w-full pl-12 pr-10 py-3.5 bg-slate-800/80 border border-slate-700/80 rounded-2xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all text-sm backdrop-blur-md"
           />
@@ -834,23 +1063,62 @@ function CustomerView({
               <Icon name="x" className="w-4 h-4" />
             </button>
           )}
+
+          {/* Autocomplete suggestions */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute left-0 right-0 top-full mt-2 z-20 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-scale-up">
+              {suggestions.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setSearchQuery(p.name);
+                    setShowSuggestions(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-800/80 transition-all text-left"
+                >
+                  <img src={p.image} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-800" />
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-xs font-semibold text-slate-200 truncate">{p.name}</span>
+                    <span className="text-[11px] text-teal-400 font-bold">{formatUsd(p.price)}</span>
+                  </div>
+                  <Icon name="arrowRight" className="w-4 h-4 text-slate-500" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Category Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-          {['Todas', ...categories].map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-4 py-2 rounded-2xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-300 border ${
-                selectedCategory === cat
-                  ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20 scale-105'
-                  : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          {/* Category Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none flex-1">
+            {['Todas', ...categories].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-4 py-2 rounded-2xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-300 border ${
+                  selectedCategory === cat
+                    ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20 scale-105'
+                    : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {/* Sort Selector */}
+          <select
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value)}
+            className="shrink-0 px-3 py-2 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-xs font-semibold text-slate-300 focus:border-teal-500 focus:outline-none"
+            aria-label="Ordenar productos"
+          >
+            <option value="relevancia">✨ Relevancia</option>
+            <option value="popular">🔥 Más vendidos</option>
+            <option value="precio-asc">💲 Precio: menor a mayor</option>
+            <option value="precio-desc">💲 Precio: mayor a menor</option>
+            <option value="stock">📦 Mayor stock</option>
+          </select>
         </div>
       </div>
 
@@ -1217,6 +1485,41 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
   );
 }
 
+function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
+  return (
+    <button
+      onClick={onOpen}
+      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-lg px-5 py-4 rounded-3xl bg-slate-950/90 border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-scale-up hover:border-teal-400/60 transition-all group"
+    >
+      <div className="flex items-center gap-3">
+        <span className="relative p-2.5 rounded-2xl bg-teal-500/15 text-teal-400">
+          <Icon name="shoppingBag" className="w-5 h-5" />
+          <span className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">
+            {cartCount}
+          </span>
+        </span>
+        <div className="text-left">
+          <span className="block text-[11px] text-slate-400 font-semibold">
+            {cartCount} {cartCount === 1 ? 'producto' : 'productos'} en tu carrito
+          </span>
+          <span className="block text-lg font-black text-white">
+            {formatUsd(cartTotal)}
+            {rate?.rate > 0 && (
+              <span className="text-[11px] font-bold text-teal-300/90 ml-2">
+                {formatBs(usdToBs(cartTotal, rate.rate))}
+              </span>
+            )}
+          </span>
+        </div>
+      </div>
+      <span className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-xs sm:text-sm shadow-lg shadow-teal-500/20 group-hover:from-teal-400 group-hover:to-emerald-400 transition-all flex items-center gap-1.5">
+        Ver Carrito
+        <Icon name="arrowRight" className="w-4 h-4" />
+      </span>
+    </button>
+  );
+}
+
 function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit }) {
   const [formData, setFormData] = useState({
     customerName: '',
@@ -1408,6 +1711,8 @@ function AdminView({
   categories,
   orders,
   rate,
+  promos,
+  onSavePromos,
   adminTab,
   setAdminTab,
   onLogout,
@@ -1416,11 +1721,47 @@ function AdminView({
   onDeleteProduct,
   onUpdateOrderStatus
 }) {
+  // Order status filter state
+  const [statusFilter, setStatusFilter] = useState('todos');
+
+  // Promos editor state
+  const [promoDraft, setPromoDraft] = useState(null);
+  const [isPromoModalOpen, setIsPromoModalOpen] = useState(false);
+
+  const filteredOrders = statusFilter === 'todos'
+    ? orders
+    : orders.filter((o) => o.status === statusFilter);
+
   // Calculated Analytics
   const lowStockProducts = products.filter((p) => p.stock <= 5);
   const completedOrders = orders.filter((o) => o.status === 'entregado');
   const totalRevenue = completedOrders.reduce((acc, o) => acc + o.total, 0);
   const pendingOrders = orders.filter((o) => o.status === 'pendiente' || o.status === 'en_preparacion');
+
+  const openNewPromo = () => {
+    setPromoDraft({ id: `promo-${Date.now()}`, title: '', subtitle: '', image: '', active: true });
+    setIsPromoModalOpen(true);
+  };
+
+  const openEditPromo = (promo) => {
+    setPromoDraft({ ...promo });
+    setIsPromoModalOpen(true);
+  };
+
+  const handleSavePromo = (data) => {
+    if (!data.id) return;
+    const exists = promos.some((p) => p.id === data.id);
+    const next = exists ? promos.map((p) => (p.id === data.id ? data : p)) : [...promos, data];
+    onSavePromos(next);
+    setIsPromoModalOpen(false);
+    setPromoDraft(null);
+  };
+
+  const handleDeletePromo = (id) => {
+    onSavePromos(promos.filter((p) => p.id !== id));
+    setIsPromoModalOpen(false);
+    setPromoDraft(null);
+  };
 
   const topByDemand = useMemo(() => {
     const counts = {};
@@ -1527,6 +1868,7 @@ function AdminView({
         {[
           { key: 'inventory', label: 'Inventario de Productos', icon: 'package' },
           { key: 'orders', label: `Pedidos en Vivo (${pendingOrders.length})`, icon: 'clock' },
+          { key: 'promos', label: 'Promos de Tienda', icon: 'sparkles' },
           { key: 'analytics', label: 'Estadísticas del Kiosco', icon: 'trendingUp' }
         ].map((tab) => (
           <button
@@ -1633,108 +1975,306 @@ function AdminView({
 
       {/* Tab 2: Orders */}
       {adminTab === 'orders' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {orders.length === 0 ? (
-            <div className="col-span-full py-16 text-center text-slate-500 space-y-2">
-              <Icon name="clock" className="w-12 h-12 text-slate-700 mx-auto" />
-              <p className="font-bold text-slate-400">Sin pedidos registrados aún</p>
-            </div>
-          ) : (
-            orders.map((order) => (
-              <div
-                key={order.id}
-                className="p-5 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-xl space-y-4 flex flex-col justify-between"
+        <div className="space-y-4">
+          {/* Status Quick Filters */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+            {[
+              { key: 'todos', label: 'Todos', count: orders.length },
+              { key: 'pendiente', label: 'Pendientes', count: orders.filter((o) => o.status === 'pendiente').length },
+              { key: 'en_preparacion', label: 'En Preparación', count: orders.filter((o) => o.status === 'en_preparacion').length },
+              { key: 'listo', label: 'Listos', count: orders.filter((o) => o.status === 'listo').length },
+              { key: 'entregado', label: 'Entregados', count: orders.filter((o) => o.status === 'entregado').length }
+            ].map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setStatusFilter(f.key)}
+                className={`px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap border transition-all ${
+                  statusFilter === f.key
+                    ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                }`}
               >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
-                    <span className="text-xs text-slate-400">{order.timestamp}</span>
-                  </div>
+                {f.label}
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{f.count}</span>
+              </button>
+            ))}
+          </div>
 
-                  <div>
-                    <h4 className="font-bold text-white text-base">{order.customerName}</h4>
-                    <p className="text-xs text-slate-300 flex items-center gap-1 mt-0.5">
-                      <Icon name="phone" className="w-3.5 h-3.5 text-slate-400" />
-                      {order.phone}
-                    </p>
-                    {order.type === 'delivery' ? (
-                      <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
-                        <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
-                        <span>Entrega: {order.address}</span>
-                      </p>
-                    ) : (
-                      <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
-                        🛍️ Retiro por Mostrador
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Order Line Items */}
-                  <div className="p-3 rounded-2xl bg-slate-900/80 space-y-1.5 text-xs text-slate-300">
-                    {order.items.map((it, idx) => (
-                      <div key={idx} className="flex justify-between">
-                        <span>{it.quantity}x {it.name}</span>
-                        <span className="font-bold text-white">
-                          {formatUsd(it.price * it.quantity)}
-                          {rate?.rate > 0 && (
-                            <span className="block text-[10px] text-slate-500 text-right">
-                              {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
-                            </span>
-                          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredOrders.length === 0 ? (
+              <div className="col-span-full py-16 text-center text-slate-500 space-y-2">
+                <Icon name="clock" className="w-12 h-12 text-slate-700 mx-auto" />
+                <p className="font-bold text-slate-400">No hay pedidos con este estado</p>
+              </div>
+            ) : (
+              filteredOrders.map((order) => {
+                const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
+                const wa = formatPhoneWhatsApp(order.phone);
+                return (
+                  <div
+                    key={order.id}
+                    className={`p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${st.ring}`}
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
+                        <span
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
+                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', entregado: 'Entregado' })[order.status]}
                         </span>
                       </div>
-                    ))}
-                    <div className="pt-2 border-t border-slate-800 flex justify-between font-bold text-white text-sm">
-                      <span>Total</span>
-                      <span className="text-teal-400 text-right">
-                        {formatUsd(order.total)}
-                        {rate?.rate > 0 && (
-                          <span className="block text-[10px] text-teal-300/90">
-                            {formatBs(usdToBs(order.total, rate.rate))}
+
+                      <div>
+                        <h4 className="font-bold text-white text-base">{order.customerName}</h4>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-xs text-slate-300 flex items-center gap-1">
+                            <Icon name="phone" className="w-3.5 h-3.5 text-slate-400" />
+                            {order.phone}
+                          </p>
+                          {wa && (
+                            <a
+                              href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${order.customerName}, sobre tu pedido ${order.id} en Kiosko 247`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+                            >
+                              <Icon name="whatsapp" className="w-3.5 h-3.5" />
+                              WhatsApp
+                            </a>
+                          )}
+                        </div>
+                        {order.type === 'delivery' ? (
+                          <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
+                            <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>Entrega: {order.address}</span>
+                          </p>
+                        ) : (
+                          <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
+                            🛍️ Retiro por Mostrador
                           </span>
                         )}
-                      </span>
+                      </div>
+
+                      {/* Order Line Items */}
+                      <div className="p-3 rounded-2xl bg-slate-900/80 space-y-1.5 text-xs text-slate-300">
+                        {order.items.map((it, idx) => (
+                          <div key={idx} className="flex justify-between">
+                            <span>{it.quantity}x {it.name}</span>
+                            <span className="font-bold text-white">
+                              {formatUsd(it.price * it.quantity)}
+                              {rate?.rate > 0 && (
+                                <span className="block text-[10px] text-slate-500 text-right">
+                                  {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="pt-2 border-t border-slate-800 flex justify-between font-bold text-white text-sm">
+                          <span>Total</span>
+                          <span className="text-teal-400 text-right">
+                            {formatUsd(order.total)}
+                            {rate?.rate > 0 && (
+                              <span className="block text-[10px] text-teal-300/90">
+                                {formatBs(usdToBs(order.total, rate.rate))}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      {order.notes && (
+                        <p className="text-xs text-slate-400 italic bg-slate-900/40 p-2 rounded-xl">
+                          "{order.notes}"
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Status Update Controls */}
+                    <div className="pt-3 border-t border-slate-700/60 space-y-2">
+                      <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { key: 'pendiente', label: 'Pendiente' },
+                          { key: 'en_preparacion', label: 'En Preparación' },
+                          { key: 'listo', label: 'Listo' },
+                          { key: 'entregado', label: 'Entregado' }
+                        ].map((stBtn) => (
+                          <button
+                            key={stBtn.key}
+                            onClick={() => onUpdateOrderStatus(order.id, stBtn.key)}
+                            className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
+                              order.status === stBtn.key
+                                ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
+                                : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
+                            }`}
+                          >
+                            {stBtn.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
 
-                  {order.notes && (
-                    <p className="text-xs text-slate-400 italic bg-slate-900/40 p-2 rounded-xl">
-                      "{order.notes}"
-                    </p>
+      {/* Tab 3: Promos */}
+      {adminTab === 'promos' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Icon name="sparkles" className="w-5 h-5 text-teal-400" />
+                Promos de la Tienda
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Estas ofertas se muestran como banner en la vista de clientes. Se guardan en la nube al instante.
+              </p>
+            </div>
+            <button
+              onClick={openNewPromo}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-teal-500 text-slate-950 text-sm font-bold hover:bg-teal-400 transition-all shadow-lg shadow-teal-500/20"
+            >
+              <Icon name="plus" className="w-4 h-4" />
+              Nueva Promo
+            </button>
+          </div>
+
+          {promos.length === 0 ? (
+            <div className="py-16 text-center text-slate-500 space-y-2 bg-slate-800/40 border border-slate-800 rounded-3xl">
+              <Icon name="sparkles" className="w-12 h-12 text-slate-700 mx-auto" />
+              <p className="font-bold text-slate-400">No hay promos activas</p>
+              <p className="text-xs">Crea tu primera oferta para destacarla en la tienda.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {promos.map((promo) => (
+                <div
+                  key={promo.id}
+                  className={`p-5 rounded-3xl bg-gradient-to-br border shadow-xl flex gap-4 items-center ${
+                    promo.active
+                      ? 'from-teal-500/15 to-slate-800/60 border-teal-500/40'
+                      : 'from-slate-800/40 to-slate-800/20 border-slate-700/50 opacity-70'
+                  }`}
+                >
+                  {promo.image ? (
+                    <img src={promo.image} alt={promo.title} className="w-16 h-16 rounded-2xl object-cover bg-slate-800 flex-shrink-0" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center flex-shrink-0">
+                      <Icon name="sparkles" className="w-6 h-6 text-slate-500" />
+                    </div>
                   )}
-                </div>
-
-                {/* Status Update Controls */}
-                <div className="pt-3 border-t border-slate-700/60 space-y-2">
-                  <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { key: 'pendiente', label: 'Pendiente' },
-                      { key: 'en_preparacion', label: 'En Preparación' },
-                      { key: 'listo', label: 'Listo' },
-                      { key: 'entregado', label: 'Entregado' }
-                    ].map((st) => (
-                      <button
-                        key={st.key}
-                        onClick={() => onUpdateOrderStatus(order.id, st.key)}
-                        className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
-                          order.status === st.key
-                            ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
-                            : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
-                        }`}
-                      >
-                        {st.label}
-                      </button>
-                    ))}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-white text-base truncate">{promo.title}</h4>
+                      {!promo.active && (
+                        <span className="px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 text-[10px] font-bold">Inactiva</span>
+                      )}
+                    </div>
+                    {promo.subtitle && <p className="text-xs text-slate-400 mt-0.5">{promo.subtitle}</p>}
+                  </div>
+                  <div className="flex flex-col gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => openEditPromo(promo)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-900/60 border border-slate-700 text-xs font-bold text-slate-200 hover:text-white"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => onSavePromos(promos.filter((p) => p.id !== promo.id))}
+                      className="px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs font-bold text-rose-400 hover:bg-rose-500/20"
+                    >
+                      Eliminar
+                    </button>
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+
+          {/* Promo Editor Modal */}
+          {isPromoModalOpen && promoDraft && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl animate-scale-up space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-white text-lg">{promoDraft.id.startsWith('promo-') ? 'Nueva Promo' : 'Editar Promo'}</h4>
+                  <button onClick={() => setIsPromoModalOpen(false)} className="text-slate-400 hover:text-white">
+                    <Icon name="x" className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Título *</label>
+                    <input
+                      type="text"
+                      value={promoDraft.title}
+                      onChange={(e) => setPromoDraft({ ...promoDraft, title: e.target.value })}
+                      placeholder="Ej: 2x1 en refrescos"
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Subtítulo</label>
+                    <input
+                      type="text"
+                      value={promoDraft.subtitle || ''}
+                      onChange={(e) => setPromoDraft({ ...promoDraft, subtitle: e.target.value })}
+                      placeholder="Ej: Válido solo por esta semana"
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Imagen (URL opcional)</label>
+                    <input
+                      type="text"
+                      value={promoDraft.image || ''}
+                      onChange={(e) => setPromoDraft({ ...promoDraft, image: e.target.value })}
+                      placeholder="https://..."
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={promoDraft.active}
+                      onChange={(e) => setPromoDraft({ ...promoDraft, active: e.target.checked })}
+                      className="w-4 h-4 accent-teal-500"
+                    />
+                    Promo activa
+                  </label>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => handleSavePromo(promoDraft)}
+                    disabled={!promoDraft.title.trim()}
+                    className="flex-1 py-3 rounded-2xl bg-teal-500 text-slate-950 font-bold text-sm hover:bg-teal-400 transition-all disabled:opacity-40"
+                  >
+                    Guardar Promo
+                  </button>
+                  {promoDraft.id.startsWith('promo-') && (
+                    <button
+                      onClick={() => handleDeletePromo(promoDraft.id)}
+                      className="px-4 py-3 rounded-2xl bg-rose-500/10 text-rose-400 font-bold text-sm border border-rose-500/30 hover:bg-rose-500/20"
+                    >
+                      Eliminar
+                    </button>
+                  )}
+                </div>
               </div>
-            ))
+            </div>
           )}
         </div>
       )}
 
-      {/* Tab 3: Analytics */}
+      {/* Tab 4: Analytics */}
       {adminTab === 'analytics' && (
         <div className="p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl space-y-6 backdrop-blur-md">
           <h3 className="text-xl font-bold text-white flex items-center gap-2">

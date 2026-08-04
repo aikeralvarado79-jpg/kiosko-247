@@ -319,6 +319,16 @@ export default function App() {
   // Cliente reconocido (pre-llenado automático del checkout)
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
 
+  // Identificación obligatoria: se abre al entrar como cliente sin datos guardados
+  const [isIdentityOpen, setIsIdentityOpen] = useState(() => !loadSavedCustomer());
+
+  // Reabrir la identificación si el usuario entra a la tienda sin estar identificado
+  useEffect(() => {
+    if (activeView === 'customer' && !savedCustomer) {
+      setIsIdentityOpen(true);
+    }
+  }, [activeView, savedCustomer]);
+
   // Perfil del cliente desde el servidor (direcciones guardadas, etc.)
   const [customerProfile, setCustomerProfile] = useState(null);
 
@@ -614,6 +624,38 @@ export default function App() {
     }
   };
 
+  // Identificación obligatoria del cliente al entrar
+  const handleIdentifyCustomer = async ({ customerName, phoneCode, phoneNumber }) => {
+    const record = {
+      customerName,
+      phoneCode,
+      phoneNumber,
+      address: savedCustomer?.address || '',
+      type: savedCustomer?.type || 'pickup'
+    };
+    saveCustomerData(record);
+    setSavedCustomer(record);
+    setIsIdentityOpen(false);
+    const known = buildKnownCustomers(orders, record);
+    const isReturning = known.some((c) => c.number === phoneNumber && c.code === phoneCode);
+    addToast(isReturning ? `¡Hola de nuevo, ${customerName.split(' ')[0]}!` : `¡Bienvenido, ${customerName.split(' ')[0]}!`);
+    // Registrar/actualizar el cliente en el servidor para que aparezca en el historial
+    const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
+    if (phoneKey.length >= 7) {
+      const res = await api.upsertCustomer(phoneKey, { customerName });
+      if (res.ok && res.data?.phone) setCustomerProfile(res.data);
+    }
+  };
+
+  // Cambiar de cliente: limpia la identidad y reabre el modal
+  const handleSwitchCustomer = () => {
+    localStorage.removeItem(CUSTOMER_KEY);
+    setSavedCustomer(null);
+    setCustomerProfile(null);
+    setCart([]);
+    setIsIdentityOpen(true);
+  };
+
   const handleSaveProduct = async (productData) => {
     if (productData.id) {
       // Edit existing
@@ -790,6 +832,23 @@ export default function App() {
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="w-5 h-5" />
           </button>
 
+          {/* Customer identity chip */}
+          {activeView === 'customer' && savedCustomer?.customerName && (
+            <button
+              onClick={() => setIsIdentityOpen(true)}
+              className="flex items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all shrink-0"
+              title="Cambiar de usuario"
+              aria-label="Cambiar de usuario"
+            >
+              <span className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-gradient-to-tr from-teal-500 to-emerald-400 text-slate-950 text-[10px] sm:text-xs font-black flex items-center justify-center shrink-0">
+                {savedCustomer.customerName.charAt(0).toUpperCase()}
+              </span>
+              <span className="hidden min-[380px]:block max-w-20 sm:max-w-28 truncate text-[11px] sm:text-xs font-semibold text-slate-200">
+                {savedCustomer.customerName.split(' ')[0]}
+              </span>
+            </button>
+          )}
+
           {/* Customer Cart Quick Button */}
           {activeView === 'customer' && (
             <button
@@ -938,6 +997,20 @@ export default function App() {
           cartTotal={cartTotal}
           rate={rate}
           onOpen={() => setIsCartOpen(true)}
+        />
+      )}
+
+      {/* Identity modal: obligatorio para consumir como cliente */}
+      {isIdentityOpen && activeView === 'customer' && (
+        <IdentityModal
+          knownCustomers={knownCustomers}
+          savedCustomer={savedCustomer}
+          onConfirm={handleIdentifyCustomer}
+          onSwitchCustomer={handleSwitchCustomer}
+          onGoToAdmin={() => {
+            setIsIdentityOpen(false);
+            setActiveView('admin');
+          }}
         />
       )}
 
@@ -1595,6 +1668,162 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
             </span>
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCustomer, onGoToAdmin }) {
+  const [customerName, setCustomerName] = useState('');
+  const [phoneCode, setPhoneCode] = useState('0412');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [errors, setErrors] = useState({});
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const suggestions = useMemo(() => {
+    if (phoneNumber.length < 3) return [];
+    return knownCustomers
+      .filter((c) => (c.number || '').startsWith(phoneNumber))
+      .slice(0, 3);
+  }, [knownCustomers, phoneNumber]);
+
+  const handlePhoneNumber = (value) => {
+    const digits = value.replace(/\D/g, '').slice(0, 7);
+    setPhoneNumber(digits);
+    setShowSuggestions(digits.length >= 3);
+  };
+
+  const applyCustomer = (customer) => {
+    setCustomerName(customer.name || customerName);
+    setPhoneCode(customer.code || phoneCode);
+    setPhoneNumber(customer.number || phoneNumber);
+    setShowSuggestions(false);
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const newErrors = {};
+    if (!customerName.trim()) newErrors.customerName = 'Ingresa tu nombre';
+    if (!/^\d{7}$/.test(phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
+    setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) return;
+    onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] overflow-y-auto">
+        {/* Header */}
+        <div className="p-5 sm:p-7 border-b border-slate-800 text-center">
+          <div className="mx-auto w-14 h-14 sm:w-16 sm:h-16 rounded-3xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 shadow-lg shadow-teal-500/25">
+            <Icon name="user" className="w-7 h-7 sm:w-8 sm:h-8" />
+          </div>
+          <h2 className="text-lg sm:text-xl font-black text-white mt-3">
+            {savedCustomer?.customerName ? 'Cambiar de usuario' : '¡Bienvenido al Kiosco!'}
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            Identifícate para pedir. Tu teléfono es tu tarjeta de cliente.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-4">
+          {/* Nombre */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Tu Nombre *</label>
+            <input
+              type="text"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder="Ej: Juan Pérez"
+              autoFocus
+              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+            />
+            {errors.customerName && <p className="text-xs text-rose-400 mt-1">{errors.customerName}</p>}
+          </div>
+
+          {/* Teléfono */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono / WhatsApp *</label>
+            <div className="flex gap-2">
+              <select
+                value={phoneCode}
+                onChange={(e) => setPhoneCode(e.target.value)}
+                className="w-24 shrink-0 px-3 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm font-bold focus:border-teal-500 focus:outline-none"
+              >
+                {PHONE_CODES.map((code) => (
+                  <option key={code} value={code}>{code}</option>
+                ))}
+              </select>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={phoneNumber}
+                onChange={(e) => handlePhoneNumber(e.target.value)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                placeholder="1234567"
+                maxLength={7}
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+              />
+            </div>
+
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="mt-2 space-y-1.5 animate-fade-in">
+                <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+                  Clientes conocidos — toca para autocompletar
+                </p>
+                {suggestions.map((c) => (
+                  <button
+                    key={c.phone}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      applyCustomer(c);
+                    }}
+                    className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-slate-800 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all text-left"
+                  >
+                    <span className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 shrink-0">
+                      <Icon name="user" className="w-3.5 h-3.5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-bold text-white truncate">{c.name}</span>
+                      <span className="block text-[10px] text-slate-400 truncate">{c.code} {c.number}</span>
+                    </span>
+                    <Icon name="arrowRight" className="w-3.5 h-3.5 text-teal-400 shrink-0 ml-auto" />
+                  </button>
+                ))}
+              </div>
+            )}
+            {errors.phone && <p className="text-xs text-rose-400 mt-1">{errors.phone}</p>}
+          </div>
+
+          {/* Acciones */}
+          <div className="space-y-2.5 pt-1">
+            <button
+              type="submit"
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <Icon name="check" className="w-4 h-4" />
+              Entrar al Kiosco
+            </button>
+            {savedCustomer?.customerName && (
+              <button
+                type="button"
+                onClick={onSwitchCustomer}
+                className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
+              >
+                Volver a {savedCustomer.customerName.split(' ')[0]}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onGoToAdmin}
+              className="w-full py-2 text-[11px] text-slate-500 hover:text-teal-300 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Icon name="layers" className="w-3.5 h-3.5" />
+              ¿Eres el administrador? Ir al panel
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

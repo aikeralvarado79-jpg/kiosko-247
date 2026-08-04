@@ -28,6 +28,7 @@ export const api = {
   deleteOrder: (id) => request(`/api/orders/${id}`, { method: 'DELETE' }),
   recoverPassword: (phone, response, newPassword) => request('/api/auth/recover', { method: 'POST', body: JSON.stringify({ phone, response, newPassword }) }),
   saveSettings: (settings) => request('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),
+  refreshDb: () => request('/api/db/refresh', { method: 'POST' }),
   getCustomer: (phone) => request(`/api/customers/${encodeURIComponent(phone)}`),
   upsertCustomer: (phone, data) => request(`/api/customers/${encodeURIComponent(phone)}`, { method: 'PUT', body: JSON.stringify(data) }),
   webauthnRegisterOptions: (data) => request('/api/webauthn/register-options', { method: 'POST', body: JSON.stringify(data) }),

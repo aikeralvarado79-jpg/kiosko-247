@@ -158,6 +158,47 @@ const pgPool = process.env.DATABASE_URL
     })
   : null;
 
+// Tablas que se copian en el espejo. Fuente = producción (public), destino = schema
+// aislado de calidad (staging). Reemplazo total por tabla (no hace merge).
+const MIRROR_SOURCE_SCHEMA = process.env.MIRROR_SOURCE_SCHEMA || 'public';
+const MIRROR_TARGET_SCHEMA = process.env.MIRROR_TARGET_SCHEMA || 'staging';
+const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers', 'webauthn_credentials'];
+
+// Refresca el espejo: copia el estado completo desde un schema fuente (producción)
+// hasta un schema destino (calidad), reemplazando su contenido por completo.
+// Ya que el pooler de Supabase descarta SET search_path, se califican los nombres
+// de schema explícitamente. Devuelve un resumen de filas copiadas por tabla.
+export async function refreshMirror() {
+  if (!pgPool) return { ok: false, error: 'Refresco disponible solo cuando hay DATABASE_URL' };
+  if (MIRROR_SOURCE_SCHEMA === MIRROR_TARGET_SCHEMA) {
+    return { ok: false, error: 'El schema fuente y destino deben ser distintos' };
+  }
+  const client = await pgPool.connect();
+  const tables = {};
+  try {
+    await client.query('BEGIN');
+    await client.query(`CREATE SCHEMA IF NOT EXISTS ${MIRROR_TARGET_SCHEMA}`);
+    for (const t of MIRROR_TABLES) {
+      const exists = await client.query('SELECT to_regclass($1) AS r', [`${MIRROR_SOURCE_SCHEMA}.${t}`]);
+      if (!exists.rows[0].r) {
+        tables[t] = -1;
+        continue;
+      }
+      await client.query(`DROP TABLE IF EXISTS ${MIRROR_TARGET_SCHEMA}.${t}`);
+      await client.query(`CREATE TABLE ${MIRROR_TARGET_SCHEMA}.${t} (LIKE ${MIRROR_SOURCE_SCHEMA}.${t} INCLUDING ALL)`);
+      const ins = await client.query(`INSERT INTO ${MIRROR_TARGET_SCHEMA}.${t} SELECT * FROM ${MIRROR_SOURCE_SCHEMA}.${t}`);
+      tables[t] = ins.rowCount;
+    }
+    await client.query('COMMIT');
+    return { ok: true, source: MIRROR_SOURCE_SCHEMA, target: MIRROR_TARGET_SCHEMA, tables };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    return { ok: false, error: err.message };
+  } finally {
+    client.release();
+  }
+}
+
 const pgStore = {
   pool: pgPool,
 
@@ -504,6 +545,8 @@ export async function initStore() {
     await pgStore.seedIfEmpty();
   }
 }
+
+export const isMirrorEnabled = () => Boolean(pgPool);
 
 export const getState = () => store.getState();
 

@@ -11,8 +11,11 @@ const defaultState = () => ({
   products: JSON.parse(JSON.stringify(INITIAL_PRODUCTS)),
   categories: [...INITIAL_CATEGORIES],
   orders: JSON.parse(JSON.stringify(INITIAL_ORDERS)),
+  customers: [],
   settings: { promos: [] }
 });
+
+const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
 
 const generateProductId = () => `p-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -65,6 +68,33 @@ const fileStore = {
   async saveSettings(settings) {
     this.state.settings = settings;
     this.persist();
+  },
+
+  async getCustomerByPhone(phone) {
+    const key = normalizePhone(phone);
+    return this.state.customers.find((c) => c.phone === key) || null;
+  },
+
+  async upsertCustomer({ phone, customerName, address }) {
+    const key = normalizePhone(phone);
+    if (!key || key.length < 7) return null;
+    const existing = this.state.customers.find((c) => c.phone === key);
+    const addresses = existing?.addresses || [];
+    if (address && !addresses.includes(address)) addresses.push(address);
+    const now = new Date().toISOString();
+    const record = {
+      phone: key,
+      customerName: customerName || existing?.customerName || 'Cliente',
+      addresses,
+      createdAt: existing?.createdAt || now,
+      lastOrderAt: now
+    };
+    this.state.customers = [
+      record,
+      ...this.state.customers.filter((c) => c.phone !== key)
+    ];
+    this.persist();
+    return record;
   }
 };
 
@@ -116,6 +146,13 @@ const pgStore = {
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value JSONB
+      );
+      CREATE TABLE IF NOT EXISTS customers (
+        phone TEXT PRIMARY KEY,
+        "customerName" TEXT,
+        addresses JSONB DEFAULT '[]',
+        "createdAt" TEXT,
+        "lastOrderAt" TEXT
       );
     `);
   },
@@ -212,6 +249,42 @@ const pgStore = {
     );
   },
 
+  async getCustomerByPhone(phone) {
+    const key = normalizePhone(phone);
+    if (!key || key.length < 7) return null;
+    const { rows } = await this.pool.query('SELECT * FROM customers WHERE phone = $1', [key]);
+    if (!rows[0]) return null;
+    return { ...rows[0], addresses: rows[0].addresses || [] };
+  },
+
+  async upsertCustomer({ phone, customerName, address }) {
+    const key = normalizePhone(phone);
+    if (!key || key.length < 7) return null;
+    const existing = await this.getCustomerByPhone(key);
+    const addresses = existing?.addresses || [];
+    if (address && !addresses.includes(address)) addresses.push(address);
+    const now = new Date().toISOString();
+    await this.pool.query(
+      `INSERT INTO customers (phone, "customerName", addresses, "createdAt", "lastOrderAt")
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (phone) DO UPDATE SET
+         "customerName" = EXCLUDED."customerName",
+         addresses = EXCLUDED.addresses,
+         "lastOrderAt" = EXCLUDED."lastOrderAt"`,
+      [key, customerName || existing?.customerName || 'Cliente', JSON.stringify(addresses), existing?.createdAt || now, now]
+    );
+    return { phone: key, customerName: customerName || existing?.customerName || 'Cliente', addresses, createdAt: existing?.createdAt || now, lastOrderAt: now };
+  },
+
+  async upsertCustomerFromOrder(order) {
+    if (!order || !order.phone) return null;
+    return this.upsertCustomer({
+      phone: order.phone,
+      customerName: order.customerName,
+      address: order.type === 'delivery' ? order.address : undefined
+    });
+  },
+
   async createOrderAtomic(orderData) {
     const client = await this.pool.connect();
     try {
@@ -262,6 +335,25 @@ const pgStore = {
         [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes]
       );
 
+      // Registrar/actualizar el cliente reconocido en la misma transacción
+      const key = normalizePhone(order.phone);
+      if (key && key.length >= 7) {
+        const existing = await client.query('SELECT * FROM customers WHERE phone = $1', [key]);
+        const addresses = existing.rows[0]?.addresses || [];
+        const address = order.type === 'delivery' && order.address ? order.address : undefined;
+        if (address && !addresses.includes(address)) addresses.push(address);
+        const now = new Date().toISOString();
+        await client.query(
+          `INSERT INTO customers (phone, "customerName", addresses, "createdAt", "lastOrderAt")
+           VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (phone) DO UPDATE SET
+             "customerName" = EXCLUDED."customerName",
+             addresses = EXCLUDED.addresses,
+             "lastOrderAt" = EXCLUDED."lastOrderAt"`,
+          [key, order.customerName || existing.rows[0]?.customerName || 'Cliente', JSON.stringify(addresses), existing.rows[0]?.createdAt || now, now]
+        );
+      }
+
       await client.query('COMMIT');
       return { state: await this.getState(), order };
     } catch (err) {
@@ -289,6 +381,10 @@ export async function initStore() {
 export const getState = () => store.getState();
 
 export const saveSettings = (settings) => store.saveSettings(settings);
+
+export const getCustomerByPhone = (phone) => store.getCustomerByPhone(phone);
+
+export const upsertCustomer = (customer) => store.upsertCustomer(customer);
 
 export const createOrder = async (orderData) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {
@@ -336,6 +432,15 @@ export const createOrder = async (orderData) => {
 
   await store.saveProducts(products);
   await store.saveOrders(orders);
+
+  const key = normalizePhone(order.phone);
+  if (key && key.length >= 7) {
+    await store.upsertCustomer({
+      phone: order.phone,
+      customerName: order.customerName,
+      address: order.type === 'delivery' ? order.address : undefined
+    });
+  }
 
   const newState = await store.getState();
   return { state: newState, order };

@@ -319,6 +319,35 @@ export default function App() {
   // Cliente reconocido (pre-llenado automático del checkout)
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
 
+  // Perfil del cliente desde el servidor (direcciones guardadas, etc.)
+  const [customerProfile, setCustomerProfile] = useState(null);
+
+  // Al reconocer un cliente con teléfono, buscar su perfil y direcciones guardadas
+  useEffect(() => {
+    let cancelled = false;
+    const phoneKey = savedCustomer?.phoneNumber
+      ? `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber}`.replace(/\D/g, '').slice(-11)
+      : '';
+    if (!phoneKey || phoneKey.length < 7) {
+      setCustomerProfile(null);
+      return;
+    }
+    api.getCustomer(phoneKey).then((res) => {
+      if (!cancelled && res.ok && res.data?.phone) setCustomerProfile(res.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [savedCustomer?.phoneCode, savedCustomer?.phoneNumber]);
+
+  // Historial de pedidos del cliente reconocido, para "Mis Pedidos"
+  const customerOrders = useMemo(() => {
+    if (!savedCustomer?.phoneNumber) return [];
+    const key = `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber}`.replace(/\D/g, '').slice(-11);
+    if (!key) return [];
+    return orders.filter((o) => normalizePhoneDigits(o.phone) === key);
+  }, [orders, savedCustomer]);
+
   // Registro de clientes conocidos derivado del historial de pedidos + datos locales
   const knownCustomers = useMemo(
     () => buildKnownCustomers(orders, savedCustomer),
@@ -573,6 +602,18 @@ export default function App() {
     );
   };
 
+  // Guarda una dirección en el perfil del cliente (servidor + local)
+  const handleSaveCustomerAddress = async (phone, customerName, address) => {
+    if (!phone || !address) return;
+    const res = await api.upsertCustomer(phone, { customerName, address });
+    if (res.ok && res.data?.phone) {
+      setCustomerProfile(res.data);
+      addToast('Dirección guardada en tu perfil', 'success');
+    } else {
+      addToast('No se pudo guardar la dirección', 'error');
+    }
+  };
+
   const handleSaveProduct = async (productData) => {
     if (productData.id) {
       // Edit existing
@@ -796,6 +837,8 @@ export default function App() {
             savedCustomer={savedCustomer}
             lastOrderForCustomer={lastOrderForCustomer}
             onRepeatLastOrder={handleRepeatLastOrder}
+            customerOrders={customerOrders}
+            customerProfile={customerProfile}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -863,6 +906,9 @@ export default function App() {
           savedCustomer={savedCustomer}
           knownCustomers={knownCustomers}
           onSaveCustomer={setSavedCustomer}
+          customerProfile={customerProfile}
+          onSaveAddress={handleSaveCustomerAddress}
+          addToast={addToast}
         />
       )}
 
@@ -1021,9 +1067,12 @@ function CustomerView({
   setCurrentOrderTracking,
   savedCustomer,
   lastOrderForCustomer,
-  onRepeatLastOrder
+  onRepeatLastOrder,
+  customerOrders,
+  customerProfile
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showMyOrders, setShowMyOrders] = useState(false);
   const suggestions = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
@@ -1120,6 +1169,62 @@ function CustomerView({
             <Icon name="refresh" className="w-3.5 h-3.5" />
             <span className="hidden min-[360px]:inline">Repetir pedido</span>
           </button>
+        </div>
+      )}
+
+      {/* Mis Pedidos: historial del cliente reconocido */}
+      {savedCustomer?.customerName && customerOrders.length > 0 && (
+        <div className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
+          <button
+            onClick={() => setShowMyOrders((v) => !v)}
+            className="w-full p-3 sm:p-4 flex items-center gap-3 hover:bg-slate-800/80 transition-colors text-left"
+          >
+            <span className="p-2 sm:p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 shrink-0">
+              <Icon name="package" className="w-4 h-4 sm:w-5 sm:h-5" />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm sm:text-base font-bold text-white">Mis Pedidos</span>
+              <span className="block text-[11px] sm:text-xs text-slate-400 truncate">
+                {customerOrders.length} pedido{customerOrders.length !== 1 ? 's' : ''}
+                {customerProfile && customerProfile.addresses?.length > 0 ? ' · direcciones guardadas' : ''}
+              </span>
+            </span>
+            <span className={`p-1.5 rounded-lg bg-slate-700/50 text-slate-300 transition-transform duration-300 ${showMyOrders ? 'rotate-180' : ''}`}>
+              <Icon name="minus" className="w-3.5 h-3.5" />
+            </span>
+          </button>
+
+          {showMyOrders && (
+            <div className="px-3 sm:px-4 pb-3 sm:pb-4 space-y-2 sm:space-y-2.5 animate-fade-in">
+              {customerOrders.slice(0, 10).map((o) => {
+                const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
+                return (
+                  <div
+                    key={o.id}
+                    className="p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border border-slate-700/50"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs sm:text-sm font-bold text-white">
+                        Pedido <span className="text-teal-400">#{o.id}</span>
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${style.badge}`}>
+                        {o.status === 'pendiente' && 'Pendiente'}
+                        {o.status === 'en_preparacion' && 'En preparación'}
+                        {o.status === 'listo' && 'Listo'}
+                        {o.status === 'entregado' && 'Entregado'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
+                      {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
+                    </p>
+                    <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
+                      {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en kiosco'}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1670,7 +1775,7 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer, knownCustomers, onSaveCustomer }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
   const [formData, setFormData] = useState({
     customerName: savedCustomer?.customerName || '',
     phoneCode: savedCustomer?.phoneCode || '0412',
@@ -1869,18 +1974,61 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
             </div>
 
             {formData.type === 'delivery' && (
-              <div className="animate-fade-in">
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Dirección Completa de Entrega *
-                </label>
-                <input
-                  type="text"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  placeholder="Calle, Número, Piso/Depto..."
-                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
-                />
-                {errors.address && <p className="text-xs text-rose-400 mt-1">{errors.address}</p>}
+              <div className="animate-fade-in space-y-2">
+                {customerProfile?.addresses?.length > 0 && (
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-300 mb-0.5">
+                      Tus direcciones guardadas
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {customerProfile.addresses.map((addr) => (
+                        <button
+                          key={addr}
+                          type="button"
+                          onClick={() => setFormData((prev) => ({ ...prev, address: addr }))}
+                          className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold border transition-all text-left ${
+                            formData.address === addr
+                              ? 'bg-teal-500/20 text-teal-300 border-teal-500/50'
+                              : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-teal-500/40'
+                          }`}
+                        >
+                          {addr}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Dirección Completa de Entrega *
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={formData.address}
+                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                      placeholder="Calle, Número, Piso/Depto..."
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const phone = `${formData.phoneCode}${formData.phoneNumber}`.replace(/\D/g, '').slice(-11);
+                        if (!formData.address.trim() || !/^\d{7}$/.test(formData.phoneNumber)) {
+                          addToast('Completa la dirección y el teléfono para guardarla', 'warning');
+                          return;
+                        }
+                        onSaveAddress?.(phone, formData.customerName, formData.address.trim());
+                      }}
+                      className="shrink-0 px-3 py-3 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-300 hover:bg-teal-500/30 transition-all flex items-center gap-1.5 text-xs font-bold"
+                      title="Guardar esta dirección en tu perfil"
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                      Guardar
+                    </button>
+                  </div>
+                  {errors.address && <p className="text-xs text-rose-400 mt-1">{errors.address}</p>}
+                </div>
               </div>
             )}
 

@@ -37,3 +37,11 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value JSONB
 );
+
+CREATE TABLE IF NOT EXISTS customers (
+  phone TEXT PRIMARY KEY,
+  "customerName" TEXT,
+  addresses JSONB DEFAULT '[]',
+  "createdAt" TEXT,
+  "lastOrderAt" TEXT
+);

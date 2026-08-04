@@ -77,6 +77,26 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
+// Clientes (público por número de teléfono, para pre-llenado y direcciones)
+app.get('/api/customers/:phone', async (req, res) => {
+  try {
+    const customer = await store.getCustomerByPhone(req.params.phone);
+    res.json(customer || {});
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo leer el cliente: ' + err.message });
+  }
+});
+
+app.put('/api/customers/:phone', async (req, res) => {
+  try {
+    const customer = await store.upsertCustomer({ ...(req.body || {}), phone: req.params.phone });
+    if (!customer) return res.status(400).json({ error: 'Número de teléfono inválido' });
+    res.json(customer);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo actualizar el cliente: ' + err.message });
+  }
+});
+
 // Admin
 app.post('/api/products', requireAdmin, async (req, res) => {
   try {

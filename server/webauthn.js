@@ -19,6 +19,9 @@ setInterval(cleanupChallenges, 5 * 60 * 1000).unref?.();
 
 const phoneKey = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
 
+// Convierte el teléfono a un userID estable (WebAuthn requiere bytes únicos)
+const phoneToUserId = (key) => new Uint8Array(Buffer.from(key));
+
 // Deriva el origin/rpID correctos desde el request (dev localhost vs prod onrender)
 const deriveRp = (req) => {
   const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
@@ -43,7 +46,7 @@ export const registrationOptions = async (req, res) => {
       rpName: 'Empresas Alvarados',
       rpID,
       userName: key,
-      userID: key,
+      userID: phoneToUserId(key),
       userDisplayName: customerName || 'Cliente',
       attestationType: 'none',
       authenticatorSelection: { residentKey: 'required', userVerification: 'required' }

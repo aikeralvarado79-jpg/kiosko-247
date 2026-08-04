@@ -144,6 +144,35 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
+// Lista negra: clientes con deuda (balance > 0). Definido antes de las rutas
+// /api/customers/:phone para que "blacklist" no se interprete como teléfono.
+app.get('/api/customers/blacklist', requireAdmin, async (req, res) => {
+  try {
+    const customers = await store.listCustomers();
+    res.json(customers.filter((c) => (Number(c.balance) || 0) > 0));
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudieron listar los deudores: ' + err.message });
+  }
+});
+
+// Añade un deudor a la lista negra (setea el balance inicial manualmente).
+app.post('/api/customers/blacklist', requireAdmin, async (req, res) => {
+  try {
+    const { phone, name, amount } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!key || key.length < 7) return res.status(400).json({ error: 'Número de teléfono inválido' });
+    let customer = await store.getCustomerByPhone(key);
+    if (!customer) {
+      customer = await store.upsertCustomer({ phone: key, customerName: name });
+    }
+    await store.setCustomerBalance(key, Number(amount) || 0);
+    if (name) await store.upsertCustomer({ phone: key, customerName: name });
+    res.json(await store.getCustomerByPhone(key));
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo añadir el deudor: ' + err.message });
+  }
+});
+
 // Clientes (público por número de teléfono, para pre-llenado y direcciones)
 app.get('/api/customers/:phone', async (req, res) => {
   try {
@@ -258,6 +287,26 @@ app.post('/api/db/refresh', requireAdmin, async (req, res) => {
     res.json({ ok: true, source: result.source, target: result.target, tables: result.tables });
   } catch (err) {
     res.status(500).json({ error: 'No se pudo refrescar el espejo: ' + err.message });
+  }
+});
+
+// Lista todos los clientes registrados (para "Beneficiados").
+app.get('/api/customers', requireAdmin, async (req, res) => {
+  try {
+    res.json(await store.listCustomers());
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudieron listar los clientes: ' + err.message });
+  }
+});
+
+// Concede o revoca el beneficio de pedir a crédito a un cliente.
+app.put('/api/customers/:phone/benefited', requireAdmin, async (req, res) => {
+  try {
+    const customer = await store.setCustomerBenefited(req.params.phone, Boolean(req.body?.benefited));
+    if (!customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+    res.json(customer);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo actualizar el beneficio: ' + err.message });
   }
 });
 

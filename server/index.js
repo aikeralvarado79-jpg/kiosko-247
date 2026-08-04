@@ -14,19 +14,25 @@ app.use(express.json({ limit: '2mb' }));
 
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || config.adminPassword;
+// Contraseña base (config/env). Puede haber un override guardado en store.
+let adminPassword = process.env.ADMIN_PASSWORD || config.adminPassword;
+
+// Key de Pexels para sugerencias de imagen (env o config).
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || config.pexelsApiKey;
+
+// Teléfonos de administradores (normalizados a 11 dígitos)
+const ADMIN_PHONES = (config.adminPhones || []).map((p) => String(p).replace(/\D/g, '').slice(-11));
 
 const signToken = (payload) => {
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig = crypto.createHmac('sha256', ADMIN_PASSWORD).update(data).digest('base64url');
+  const sig = crypto.createHmac('sha256', adminPassword).update(data).digest('base64url');
   return `${data}.${sig}`;
 };
 
 const verifyToken = (token) => {
   const [data, sig] = String(token).split('.');
   if (!data || !sig) return false;
-  const expected = crypto.createHmac('sha256', ADMIN_PASSWORD).update(data).digest('base64url');
+  const expected = crypto.createHmac('sha256', adminPassword).update(data).digest('base64url');
   if (sig.length !== expected.length) return false;
   return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
 };
@@ -40,14 +46,47 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Auth
-app.post('/api/auth/login', (req, res) => {
-  const { password } = req.body || {};
-  if (password === ADMIN_PASSWORD) {
-    const token = signToken({ role: 'admin', iat: Date.now() });
-    return res.json({ token });
+// Compara contraseña: si hay override guardado (hash+salt), verifica contra él; sino usa la base.
+async function verifyAdminPassword(input) {
+  const stored = await store.getAdminPassword();
+  if (stored && stored.salt && stored.hash) {
+    const hash = crypto.createHash('sha256').update(stored.salt + input).digest('hex');
+    return hash === stored.hash;
   }
-  return res.status(401).json({ error: 'Contraseña incorrecta' });
+  return input === adminPassword;
+}
+
+// Auth
+app.post('/api/auth/login', async (req, res) => {
+  const { password } = req.body || {};
+  const ok = await verifyAdminPassword(password);
+  if (!ok) return res.status(401).json({ error: 'Contraseña incorrecta' });
+  const token = signToken({ role: 'admin', iat: Date.now() });
+  res.json({ token });
+});
+
+// Recuperación de contraseña admin: verifica biometría del teléfono admin y guarda nueva contraseña
+app.post('/api/auth/recover', async (req, res) => {
+  try {
+    const { phone, response, newPassword } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!ADMIN_PHONES.includes(key)) {
+      return res.status(403).json({ error: 'Este número no es administrador' });
+    }
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+    const v = await webauthn.verifyAuth(key, response, req);
+    if (!v.ok) {
+      return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.createHash('sha256').update(salt + newPassword).digest('hex');
+    await store.setAdminPassword({ salt, hash });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Error recuperando contraseña: ' + err.message });
+  }
 });
 
 // Public
@@ -157,6 +196,17 @@ app.post('/api/orders/:id/cancel', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: 'No se pudo cancelar el pedido: ' + err.message });
+  }
+});
+
+// Eliminar pedido (solo admin, solo pedidos cancelados)
+app.delete('/api/orders/:id', requireAdmin, async (req, res) => {
+  try {
+    const result = await store.deleteOrder(req.params.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo eliminar el pedido: ' + err.message });
   }
 });
 

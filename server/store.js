@@ -48,7 +48,9 @@ const fileStore = {
 
   async getState() {
     this.persist();
-    return this.state;
+    const state = { ...this.state, settings: { ...this.state.settings } };
+    delete state.settings.adminPassword;
+    return state;
   },
 
   async saveProducts(products) {
@@ -68,6 +70,15 @@ const fileStore = {
 
   async saveSettings(settings) {
     this.state.settings = settings;
+    this.persist();
+  },
+
+  async getAdminPassword() {
+    return this.state.settings?.adminPassword || null;
+  },
+
+  async setAdminPassword(entry) {
+    this.state.settings = { ...this.state.settings, adminPassword: entry };
     this.persist();
   },
 
@@ -158,7 +169,8 @@ const pgStore = {
         total NUMERIC,
         status TEXT,
         timestamp TEXT,
-        "estimatedMinutes" INTEGER
+        "estimatedMinutes" INTEGER,
+        "createdAt" TEXT
       );
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -179,6 +191,7 @@ const pgStore = {
         "createdAt" TEXT
       );
     `);
+    await this.pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
   },
 
   async seedIfEmpty() {
@@ -258,9 +271,9 @@ const pgStore = {
     await this.pool.query('DELETE FROM orders');
     for (const o of orders) {
       await this.pool.query(
-        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes]
+        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString()]
       );
     }
   },
@@ -270,6 +283,23 @@ const pgStore = {
       `INSERT INTO settings (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['promos', JSON.stringify(settings.promos || [])]
+    );
+  },
+
+  async getAdminPassword() {
+    const { rows } = await this.pool.query(
+      `SELECT value FROM settings WHERE key = $1`,
+      ['adminPassword']
+    );
+    if (!rows[0] || rows[0].value == null) return null;
+    return typeof rows[0].value === 'string' ? rows[0].value : rows[0].value;
+  },
+
+  async setAdminPassword(entry) {
+    await this.pool.query(
+      `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      ['adminPassword', JSON.stringify(entry)]
     );
   },
 
@@ -377,13 +407,14 @@ const pgStore = {
         total: Number(orderData.total) || 0,
         status: 'pendiente',
         timestamp: orderData.timestamp || '',
-        estimatedMinutes: Number(orderData.estimatedMinutes) || 10
+        estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
+        createdAt: orderData.createdAt || new Date().toISOString()
       };
 
       await client.query(
-        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes]
+        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt]
       );
 
       // Registrar/actualizar el cliente reconocido en la misma transacción
@@ -480,7 +511,8 @@ export const createOrder = async (orderData) => {
     total: Number(orderData.total) || 0,
     status: 'pendiente',
     timestamp: orderData.timestamp || '',
-    estimatedMinutes: Number(orderData.estimatedMinutes) || 10
+    estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
+    createdAt: orderData.createdAt || new Date().toISOString()
   };
 
   const orders = [order, ...state.orders];
@@ -582,6 +614,20 @@ export const cancelOrder = async (id, phone) => {
   await store.saveProducts(products);
   await store.saveOrders(orders);
 
+  const newState = await store.getState();
+  return { state: newState };
+};
+
+// Elimina un pedido (solo si está cancelado). Para limpiar la lista del admin.
+export const deleteOrder = async (id) => {
+  const state = await store.getState();
+  const existing = state.orders.find((o) => o.id === id);
+  if (!existing) return { error: 'Pedido no encontrado' };
+  if (existing.status !== 'cancelado') {
+    return { error: 'Solo se pueden eliminar pedidos cancelados' };
+  }
+  const orders = state.orders.filter((o) => o.id !== id);
+  await store.saveOrders(orders);
   const newState = await store.getState();
   return { state: newState };
 };

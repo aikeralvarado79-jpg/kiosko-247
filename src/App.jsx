@@ -33,7 +33,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     whatsapp: <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.297-.497.1-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />,
      arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
     image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
-    xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />
+    xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
+     key: <path d="M12 2a9.92 9.92 0 0 0-7 2.82L2.82 7.01a1 1 0 0 0 0 1.42l2.59 2.59a1 1 0 0 0 1.42 0L12 5.34l6.17 6.17a1 1 0 0 0 1.42 0l2.59-2.59a1 1 0 0 0 0-1.42L13 4.83c-.35-.35-.5-.83-.5-1.31A5.5 5.5 0 0 0 12 2z" />
   };
 
   return (
@@ -77,6 +78,70 @@ const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'
 const isAdminPhone = (phone) => ADMIN_PHONES.includes(normalizePhoneDigits(phone));
 
 const CUSTOMER_KEY = 'kiosko_customer';
+
+// Parse fecha de pedido: prioriza createdAt (ISO), fallback timestamp "DD/MM, HH:MM" asumiendo año actual.
+const parseOrderDate = (o) => {
+  if (o.createdAt) { const d = new Date(o.createdAt); if (!isNaN(d)) return d; }
+  const m = String(o.timestamp || '').match(/^(\d{1,2})\/(\d{1,2})[,]?\s*(\d{1,2}):(\d{2})/);
+  if (!m) return new Date(NaN);
+  const year = new Date().getFullYear();
+  return new Date(year, Number(m[2]) - 1, Number(m[1]), Number(m[3]), Number(m[4]));
+};
+
+const toYMD = (d) => isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+// Mini calendario compacto (popover) para filtro de fecha
+function MiniCalendar({ value, onChange, onClose }) {
+  const [month, setMonth] = useState(new Date());
+  const today = new Date();
+  const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1);
+  const startOffset = (firstDay.getDay() + 6) % 7; // Lun=0
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth()+1, 0).getDate();
+  const prevMonthDays = new Date(month.getFullYear(), month.getMonth(), 0).getDate();
+  const weeks = [];
+  for (let i = 0; i < 6; i++) {
+    const week = [];
+    for (let d = 0; d < 7; d++) {
+      const idx = i * 7 + d - startOffset;
+      if (idx < 0) week.push({ day: prevMonthDays + idx + 1, muted: true, date: null });
+      else if (idx >= daysInMonth) week.push({ day: idx - daysInMonth + 1, muted: true, date: null });
+      else {
+        const date = new Date(month.getFullYear(), month.getMonth(), idx + 1);
+        week.push({ day: idx + 1, muted: false, date });
+      }
+    }
+    weeks.push(week);
+  }
+  const isSelected = (date) => value && date && toYMD(date) === value;
+  const isToday = (date) => date && toYMD(date) === toYMD(today);
+  return (
+    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-64 animate-fade-in">
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth()-1, 1))} className="p-1 text-slate-400 hover:text-white"><Icon name="minus" className="w-4 h-4" /></button>
+        <span className="font-semibold text-white text-sm">{monthNames[month.getMonth()]} {month.getFullYear()}</span>
+        <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth()+1, 1))} className="p-1 text-slate-400 hover:text-white"><Icon name="plus" className="w-4 h-4" /></button>
+      </div>
+      <div className="grid grid-cols-7 gap-0.5 text-[11px] mb-3">
+        {['Lu','Ma','Mi','Ju','Vi','Sá','Do'].map(d => <div key={d} className="text-center text-slate-500 font-semibold">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-0.5">
+        {weeks.map((week, wi) => week.map(({ day, muted, date }, di) => (
+          <button key={`${wi}-${di}`} onClick={() => date && (onChange(toYMD(date)), onClose())} className={`w-8 h-8 rounded-xl text-[11px] font-medium transition-all ${
+            muted ? 'text-slate-600 hover:bg-slate-800' : 'text-slate-100 hover:bg-slate-800'
+          } ${isSelected(date) ? 'bg-teal-500 text-white' : ''} ${isToday(date) && !isSelected(date) ? 'ring-2 ring-teal-500' : ''}`}>
+            {day}
+          </button>
+        )))}
+      </div>
+      <div className="flex items-center justify-center gap-2 mt-3 pt-2 border-t border-slate-800">
+        <button onClick={() => { onChange(toYMD(today)); onClose(); }} className="px-3 py-1.5 text-[11px] font-semibold text-teal-300 hover:text-teal-200">Hoy</button>
+        <button onClick={onClose} className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-slate-200">Cerrar</button>
+      </div>
+    </div>
+  );
+}
 
 const normalizePhoneDigits = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
 
@@ -732,6 +797,17 @@ export default function App() {
     addToast(`Pedido ${orderId} cancelado`, 'info');
   };
 
+  const handleDeleteOrder = async (orderId) => {
+    const res = await api.deleteOrder(orderId);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo eliminar el pedido', 'error');
+      return;
+    }
+    setOrders(res.data.state.orders || []);
+    setDeleteOrderTarget(null);
+    addToast(`Pedido ${orderId} eliminado`, 'info');
+  };
+
   const handleSavePromos = async (newPromos) => {
     const res = await api.saveSettings({ promos: newPromos });
     if (!res.ok) {
@@ -952,6 +1028,7 @@ export default function App() {
             }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onDeleteOrder={(order) => setDeleteOrderTarget(order)}
           />
         ) : (
           <AdminLoginView onLogin={handleAdminLogin} onBack={() => setActiveView('customer')} />
@@ -1047,6 +1124,15 @@ export default function App() {
         />
       )}
 
+      {/* 5d. Delete Order Confirm Modal (Admin) */}
+      {deleteOrderTarget && (
+        <DeleteOrderModal
+          order={deleteOrderTarget}
+          onClose={() => setDeleteOrderTarget(null)}
+          onConfirm={() => handleDeleteOrder(deleteOrderTarget.id)}
+        />
+      )}
+
       {/* Fixed bottom cart bar */}
       {activeView === 'customer' && cartCount > 0 && (
         <CartFloatBar
@@ -1120,6 +1206,14 @@ function AdminLoginView({ onLogin, onBack }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // Recovery state
+  const [recoverMode, setRecoverMode] = useState(false);
+  const [recoverStep, setRecoverStep] = useState('phone'); // 'phone' | 'biometric' | 'newpass'
+  const [recoverPhone, setRecoverPhone] = useState({ code: '0412', number: '' });
+  const [biometricResponse, setBiometricResponse] = useState(null);
+  const [newPassword, setNewPassword] = useState({ a: '', b: '' });
+  const [recoverError, setRecoverError] = useState('');
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!password) {
@@ -1132,6 +1226,148 @@ function AdminLoginView({ onLogin, onBack }) {
     setIsSubmitting(false);
     if (!ok) setError('Contraseña incorrecta. Probá con la configurada en server/config.json.');
   };
+
+  const startRecovery = async () => {
+    if (!/^\d{7}$/.test(recoverPhone.number)) {
+      setRecoverError('Ingresá el número de teléfono de administrador.');
+      return;
+    }
+    const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
+    setRecoverError('');
+    setRecoverStep('biometric');
+    try {
+      const res = await api.webauthnLoginOptions({ phone: phoneKey });
+      if (!res.ok) {
+        setRecoverError(res.data.error || 'No se pudo iniciar la verificación biométrica.');
+        setRecoverStep('phone');
+        return;
+      }
+      const authResponse = await startAuthentication({ optionsJSON: res.data.options });
+      setBiometricResponse(authResponse);
+      setRecoverStep('newpass');
+      setRecoverError('');
+    } catch (err) {
+      setRecoverError(err.message || 'No se pudo verificar la biometría.');
+      setRecoverStep('phone');
+    }
+  };
+
+  const submitNewPassword = async () => {
+    if (newPassword.a !== newPassword.b) {
+      setRecoverError('Las contraseñas no coinciden.');
+      return;
+    }
+    if (newPassword.a.length < 6) {
+      setRecoverError('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
+    setRecoverError('');
+    const res = await api.recoverPassword(phoneKey, biometricResponse, newPassword.a);
+    if (!res.ok) {
+      setRecoverError(res.data.error || 'No se pudo recuperar la contraseña.');
+      return;
+    }
+    setRecoverMode(false);
+    setRecoverStep('phone');
+    setNewPassword({ a: '', b: '' });
+    setError('Contraseña restablecida. Ahora podés iniciar sesión.');
+  };
+
+  if (recoverMode) {
+    return (
+      <div className="py-8 sm:py-16 flex items-center justify-center">
+        <div className="w-full max-w-md bg-slate-800/80 border border-slate-700/80 rounded-3xl p-5 sm:p-8 shadow-2xl backdrop-blur-md space-y-6">
+          <div className="text-center space-y-2">
+            <span className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/20">
+              <Icon name="key" className="w-7 h-7" />
+            </span>
+            <h2 className="text-xl font-black text-white">Recuperar Contraseña</h2>
+            <p className="text-xs text-slate-400">Verificá con biometría y creá una nueva contraseña.</p>
+          </div>
+
+          {recoverStep === 'phone' && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono de administrador</label>
+                <div className="flex gap-2">
+                  <select
+                    value={recoverPhone.code}
+                    onChange={(e) => setRecoverPhone({ ...recoverPhone, code: e.target.value })}
+                    className="w-24 shrink-0 px-3 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm font-bold focus:border-amber-500 focus:outline-none"
+                  >
+                    {PHONE_CODES.map((code) => (<option key={code} value={code}>{code}</option>))}
+                  </select>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    value={recoverPhone.number}
+                    onChange={(e) => setRecoverPhone({ ...recoverPhone, number: e.target.value.replace(/\D/g, '').slice(0, 7) })}
+                    placeholder="1234567"
+                    maxLength={7}
+                    className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              {recoverError && <p className="text-xs text-rose-400 mt-2">{recoverError}</p>}
+              <button
+                onClick={startRecovery}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-bold text-sm hover:from-amber-400 hover:to-rose-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
+              >
+                Verificar con biometría
+              </button>
+            </div>
+          )}
+
+          {recoverStep === 'biometric' && (
+            <div className="text-center space-y-3">
+              <p className="text-xs text-slate-400">Esperando verificación biométrica...</p>
+            </div>
+          )}
+
+          {recoverStep === 'newpass' && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Nueva contraseña</label>
+                <input
+                  type="password"
+                  value={newPassword.a}
+                  onChange={(e) => setNewPassword({ ...newPassword, a: e.target.value })}
+                  placeholder="Mínimo 6 caracteres"
+                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Repetir contraseña</label>
+                <input
+                  type="password"
+                  value={newPassword.b}
+                  onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
+                  placeholder="Repetí la contraseña"
+                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              {recoverError && <p className="text-xs text-rose-400 mt-2">{recoverError}</p>}
+              <button
+                onClick={submitNewPassword}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-bold text-sm hover:from-amber-400 hover:to-rose-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
+              >
+                Guardar nueva contraseña
+              </button>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => { setRecoverMode(false); setRecoverStep('phone'); setRecoverError(''); setNewPassword({ a: '', b: '' }); }}
+            className="w-full py-2 text-xs text-slate-400 hover:text-white transition-colors"
+          >
+            ← Volver al login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="py-8 sm:py-16 flex items-center justify-center">
@@ -1166,7 +1402,17 @@ function AdminLoginView({ onLogin, onBack }) {
             <Icon name="check" className="w-4 h-4" />
             {isSubmitting ? 'Verificando...' : 'Ingresar al Panel'}
           </button>
+        </form>
 
+        <div className="pt-2 border-t border-slate-800 space-y-2">
+          <button
+            type="button"
+            onClick={() => setRecoverMode(true)}
+            className="w-full py-2 text-xs text-amber-300 hover:text-amber-200 hover:bg-slate-800/60 rounded-xl transition-all flex items-center justify-center gap-1.5"
+          >
+            <Icon name="key" className="w-3.5 h-3.5" />
+            ¿Olvidaste tu contraseña? Recuperar con biometría
+          </button>
           <button
             type="button"
             onClick={onBack}
@@ -1174,7 +1420,7 @@ function AdminLoginView({ onLogin, onBack }) {
           >
             ← Volver a la tienda
           </button>
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -1206,6 +1452,11 @@ function CustomerView({
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
+  const [myOrdersPage, setMyOrdersPage] = useState(1);
+  const [orderDateFilter, setOrderDateFilter] = useState({ preset: 'all', date: null });
+  const [showCalendar, setShowCalendar] = useState(false);
+  const PAGE_SIZE = 5;
+
   const suggestions = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
@@ -1213,6 +1464,34 @@ function CustomerView({
       .filter((p) => p.name.toLowerCase().includes(q))
       .slice(0, 6);
   }, [allProducts, searchQuery]);
+
+  const filteredOrders = useMemo(() => {
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const dow = (todayStart.getDay() + 6) % 7; // 0 = Monday
+    const thisMon = new Date(todayStart); thisMon.setDate(thisMon.getDate() - dow);
+    const thisSun = new Date(thisMon); thisSun.setDate(thisSun.getDate() + 6);
+    const lastMon = new Date(thisMon); lastMon.setDate(lastMon.getDate() - 7);
+    const lastSun = new Date(thisMon); lastSun.setDate(lastSun.getDate() - 1);
+
+    return customerOrders.filter((o) => {
+      const d = parseOrderDate(o);
+      if (isNaN(d)) return true;
+      switch (orderDateFilter.preset) {
+        case 'today': return startOfDay(d).getTime() === todayStart.getTime();
+        case 'thisWeek': return d >= thisMon && d <= thisSun;
+        case 'lastWeek': return d >= lastMon && d <= lastSun;
+        case 'day': return orderDateFilter.date && toYMD(d) === orderDateFilter.date;
+        default: return true;
+      }
+    });
+  }, [customerOrders, orderDateFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+  const safePage = Math.min(myOrdersPage, totalPages);
+  const pagedOrders = filteredOrders.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  useEffect(() => { setMyOrdersPage(1); }, [orderDateFilter]);
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
       {/* Compact Hero Welcome Banner */}
@@ -1329,7 +1608,77 @@ function CustomerView({
 
           {showMyOrders && (
             <div className="px-3 sm:px-4 pb-3 sm:pb-4 space-y-2 sm:space-y-2.5 animate-fade-in">
-              {customerOrders.slice(0, 10).map((o) => {
+              {/* Filtro de fecha + Paginación */}
+              <div className="space-y-3">
+                {/* Chips rápidos + selector fecha */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { key: 'all', label: 'Todos' },
+                      { key: 'today', label: 'Hoy' },
+                      { key: 'thisWeek', label: 'Esta semana' },
+                      { key: 'lastWeek', label: 'Semana anterior' }
+                    ].map((f) => (
+                      <button
+                        key={f.key}
+                        onClick={() => { setOrderDateFilter({ preset: f.key, date: null }); setMyOrdersPage(1); }}
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                          orderDateFilter.preset === f.key
+                            ? 'bg-teal-500 text-slate-950 shadow-sm'
+                            : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-700/60'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowCalendar(!showCalendar)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-300 text-[11px] font-medium hover:bg-slate-700/60 flex items-center gap-1.5"
+                    >
+                      <Icon name="filter" className="w-3.5 h-3.5" />
+                      {orderDateFilter.preset === 'day' && orderDateFilter.date
+                        ? orderDateFilter.date
+                        : 'Calendario'}
+                    </button>
+                    {showCalendar && (
+                      <MiniCalendar
+                        value={orderDateFilter.date}
+                        onChange={(d) => { setOrderDateFilter({ preset: 'day', date: d }); setMyOrdersPage(1); }}
+                        onClose={() => setShowCalendar(false)}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Paginación */}
+                <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                  <span>
+                    Mostrando {pagedOrders.length > 0 ? ((myOrdersPage - 1) * PAGE_SIZE + 1) : 0}–{Math.min(myOrdersPage * PAGE_SIZE, filteredOrders.length)} de {filteredOrders.length}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setMyOrdersPage(p => Math.max(1, p - 1))}
+                      disabled={myOrdersPage === 1}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
+                    >
+                      <Icon name="minus" className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="px-2 font-semibold text-white">{myOrdersPage} / {totalPages}</span>
+                    <button
+                      onClick={() => setMyOrdersPage(p => Math.min(totalPages, p + 1))}
+                      disabled={myOrdersPage === totalPages}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista paginada */}
+              {pagedOrders.map((o) => {
                 const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                 const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
                 return (
@@ -2105,7 +2454,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
                       </button>
                     </div>
 
-                    <button
+<button
                       onClick={() => onRemove(item.product.id)}
                       className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors ml-auto"
                       title="Eliminar del carrito"
@@ -2517,7 +2866,8 @@ function AdminView({
   onOpenAddModal,
   onEditProduct,
   onDeleteProduct,
-  onUpdateOrderStatus
+  onUpdateOrderStatus,
+  onDeleteOrder
 }) {
   // Order status filter state
   const [statusFilter, setStatusFilter] = useState('todos');
@@ -2980,6 +3330,17 @@ function AdminView({
                           </button>
                         ))}
                       </div>
+
+                      {/* Eliminar pedido cancelado (para no acumular en la lista) */}
+                      {order.status === 'cancelado' && (
+                        <button
+                          onClick={() => onDeleteOrder(order)}
+                          className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <Icon name="trash" className="w-3.5 h-3.5" />
+                          Eliminar pedido
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -3713,6 +4074,39 @@ function DeleteConfirmModal({ product, onClose, onConfirm }) {
           <h3 className="text-lg font-bold text-white">¿Eliminar producto?</h3>
           <p className="text-xs text-slate-400 mt-1">
             Estás a punto de borrar <strong className="text-slate-200">{product.name}</strong> del catálogo. Esta acción no se puede deshacer.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <button
+            onClick={onClose}
+            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20"
+          >
+            Sí, Eliminar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteOrderModal({ order, onClose, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+        <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+          <Icon name="trash" className="w-6 h-6" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-white">¿Eliminar pedido #{order.id}?</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            Solo se eliminan pedidos <strong className="text-slate-200">cancelados</strong>. Esta acción no se puede deshacer y lo sacará de la lista de pedidos.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3 pt-2">

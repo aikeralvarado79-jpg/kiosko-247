@@ -1,4 +1,5 @@
 {
   "adminPassword": "kiosko123",
-  "pexelsApiKey": "tu_key_aqui"
+  "pexelsApiKey": "tu_key_aqui",
+  "adminPhones": ["04129862577", "04141823718", "04242980404", "04242963490"]
 }

@@ -130,42 +130,37 @@ export const authenticationOptions = async (req, res) => {
 export const authenticationVerify = async (req, res) => {
   try {
     const { phone, response } = req.body || {};
+    const v = await verifyAuth(phone, response, req);
+    if (!v.ok) return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
     const key = phoneKey(phone);
-    const stored = challengeStore.get(`auth-${key}`);
-    if (!stored) return res.status(400).json({ error: 'La sesión de autenticación expiró. Intenta de nuevo.' });
-
-    const credential = await store.getWebAuthnByPhone(key);
-    if (!credential) return res.status(404).json({ error: 'Credencial no encontrada' });
-
-    const { rpID, expectedOrigin } = deriveRp(req);
-
-    const verification = await verifyAuthenticationResponse({
-      response,
-      expectedChallenge: stored.challenge,
-      expectedOrigin,
-      expectedRPID: rpID,
-      credential: {
-        id: credential.credentialId,
-        publicKey: credential.publicKey,
-        counter: credential.counter
-      }
-    });
-
-    challengeStore.delete(`auth-${key}`);
-
-    if (!verification.verified) {
-      return res.status(400).json({ error: 'Biometría no verificada' });
-    }
-
-    await store.saveWebAuthn(key, {
-      credentialId: credential.credentialId,
-      publicKey: credential.publicKey,
-      counter: verification.authenticationInfo.newCounter
-    });
-
     const customer = await store.getCustomerByPhone(key);
     res.json({ ok: true, customer: customer || { phone: key } });
   } catch (err) {
     res.status(500).json({ error: 'Error verificando la autenticación: ' + err.message });
   }
+};
+
+// Función reutilizable: verifica biometría y devuelve { ok, error, status }
+export const verifyAuth = async (phone, response, req) => {
+  const key = phoneKey(phone);
+  const stored = challengeStore.get(`auth-${key}`);
+  if (!stored) return { ok: false, status: 400, error: 'La sesión de autenticación expiró. Intenta de nuevo.' };
+  const credential = await store.getWebAuthnByPhone(key);
+  if (!credential) return { ok: false, status: 404, error: 'Credencial no encontrada' };
+  const { rpID, expectedOrigin } = deriveRp(req);
+  const verification = await verifyAuthenticationResponse({
+    response,
+    expectedChallenge: stored.challenge,
+    expectedOrigin,
+    expectedRPID: rpID,
+    credential: { id: credential.credentialId, publicKey: credential.publicKey, counter: credential.counter }
+  });
+  challengeStore.delete(`auth-${key}`);
+  if (!verification.verified) return { ok: false, status: 400, error: 'Biometría no verificada' };
+  await store.saveWebAuthn(key, {
+    credentialId: credential.credentialId,
+    publicKey: credential.publicKey,
+    counter: verification.authenticationInfo.newCounter
+  });
+  return { ok: true };
 };

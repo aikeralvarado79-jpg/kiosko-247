@@ -422,7 +422,9 @@ export default function App() {
     }
   }, [activeView, savedCustomer]);
 
-  // Perfil del cliente desde el servidor (direcciones guardadas, etc.)
+  // Perfil del cliente desde el servidor (direcciones guardadas, balance, etc.)
+  // Se recarga también cuando cambia orders (polling) para que el saldo de Mi
+  // Cuenta se actualice al pasar un pedido a entregado o al saldar la deuda.
   const [customerProfile, setCustomerProfile] = useState(null);
 
   // Al reconocer un cliente con teléfono, buscar su perfil y direcciones guardadas
@@ -441,7 +443,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [savedCustomer?.phoneCode, savedCustomer?.phoneNumber]);
+  }, [savedCustomer?.phoneCode, savedCustomer?.phoneNumber, orders]);
 
   // Historial de pedidos del cliente reconocido, para "Mis Pedidos"
   const customerOrders = useMemo(() => {
@@ -4381,7 +4383,10 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
   const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
-  const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+  // El balance del cliente es la fuente autoritativa (lo actualiza el servidor al
+  // pasar un pedido a entregado o al saldar la deuda); el desglose por pedidos
+  // es solo un detalle informativo.
+  const debtTotal = Number(customer.balance) || 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
@@ -4411,7 +4416,9 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
             </span>
             {debtOrders.length === 0 ? (
               <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl">
-                No tienes pedidos a crédito registrados en este momento.
+                {debtTotal > 0
+                  ? 'Tu saldo deudor está registrado manualmente; no hay pedidos a crédito pendientes en el historial.'
+                  : 'No tienes deudas registradas en este momento.'}
               </p>
             ) : (
               debtOrders.map((o) => (

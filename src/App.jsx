@@ -2382,9 +2382,23 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
         setWebAuthnStep('login');
         const res = await api.webauthnLoginOptions({ phone: phoneKey });
         if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar la verificación');
-        const authResponse = await startAuthentication({ optionsJSON: res.data.options });
-        const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
-        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
+        try {
+          const authResponse = await startAuthentication({ optionsJSON: res.data.options });
+          const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
+          if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
+        } catch (authErr) {
+          // Si la credencial se registró bajo un rpID anterior (dominio distinto),
+          // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
+          // actual para que quede válida (el server permite el replace por rpID).
+          const isRpidMismatch = authErr?.name === 'NotAllowedError';
+          if (!isRpidMismatch) throw authErr;
+          setWebAuthnStep('register');
+          const rres = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: customerName.trim() });
+          if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
+          const regResponse = await startRegistration({ optionsJSON: rres.data.options });
+          const vRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
+          if (!vRes.ok) throw new Error(vRes.data.error || 'No se pudo guardar tu biometría');
+        }
       } else {
         // Registro: crear biometría
         setWebAuthnStep('register');

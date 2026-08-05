@@ -357,7 +357,7 @@ export default function App() {
     const res = await api.getState();
     if (!res.ok) {
       if (!silent) {
-        setLoadError('No se pudo conectar con el servidor. Asegurate de ejecutar "npm run dev:all".');
+        setLoadError('No se pudo conectar con el servidor. Verificá tu conexión a internet e intentá de nuevo.');
       }
       setIsLoading(false);
       return;
@@ -1379,8 +1379,8 @@ function AdminLoginView({ onLogin, onBack }) {
       setBiometricResponse(authResponse);
       setRecoverStep('newpass');
       setRecoverError('');
-    } catch (err) {
-      setRecoverError(err.message || 'No se pudo verificar la biometría.');
+    } catch {
+      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intentá de nuevo.');
       setRecoverStep('phone');
     }
   };
@@ -1602,8 +1602,8 @@ class ErrorBoundary extends Component {
               <Icon name="alertTriangle" className="w-6 h-6 text-red-400" />
             </div>
             <h3 className="text-base font-black text-white mb-1">Algo salió mal</h3>
-            <p className="text-xs text-slate-400 font-mono break-words mb-4">
-              {this.state.error?.message || String(this.state.error)}
+            <p className="text-xs text-slate-400 leading-relaxed mb-4">
+              Ocurrió un problema inesperado al cargar esta sección. Tocá Reintentar para intentarlo de nuevo.
             </p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
@@ -2453,7 +2453,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
       onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
     } catch (err) {
       setIsWorking(false);
-      setWebauthnError(err.message || 'No se pudo completar la verificación');
+      setWebauthnError(friendlyAuthError(err));
       setStep('form');
     }
   };
@@ -4610,6 +4610,31 @@ function buildAccountMessage(customer, orders) {
   return lines.join('\n');
 }
 
+// Traduce errores del navegador/WebAuthn a un mensaje amigable para el usuario.
+// Evita mostrar textos técnicos en inglés como "NotAllowedError".
+const friendlyAuthError = (err) => {
+  const name = err?.name || '';
+  // Errores lanzados manualmente (new Error(...)) ya traen un mensaje en español
+  // del servidor o un fallback amigable, así que se muestran tal cual.
+  if (name === 'Error' && err?.message) return err.message;
+  if (name === 'NotAllowedError') {
+    return 'Verificación cancelada. Para continuar, aceptá la huella o Face ID cuando tu teléfono lo pida.';
+  }
+  if (name === 'NotFoundError' || name === 'NotSupportedError') {
+    return 'Tu dispositivo no tiene biometría configurada. Activá la huella o Face ID en los ajustes y probá de nuevo.';
+  }
+  if (name === 'AbortError') {
+    return 'La verificación tardó demasiado y se canceló. Intentá de nuevo.';
+  }
+  if (name === 'TimeoutError') {
+    return 'El tiempo de espera se agotó. Intentá de nuevo.';
+  }
+  if (name === 'SecurityError' || name === 'InvalidStateError') {
+    return 'Tu dispositivo no pudo completar la verificación. Intentá de nuevo o usá un teléfono más reciente.';
+  }
+  return 'No se pudo completar la verificación. Intentá de nuevo.';
+};
+
 // Recordatorio corto para un cobro programado que ya venció.
 const OPENFACTS_FIELDS = 'code,product_name,brands,image_front_url';
 
@@ -4816,7 +4841,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     }
 
     setImageSearchError(
-      'No se pudieron cargar las sugerencias. Verificá tu conexión. Si la app corre como build de producción, iniciá "npm run dev" para habilitar la búsqueda de Pexels (Open Food Facts y Wikimedia funcionan igual).'
+      'No se pudieron cargar las sugerencias de imágenes. Verificá tu conexión a internet e intentá de nuevo.'
     );
   };
 

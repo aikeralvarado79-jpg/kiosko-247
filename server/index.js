@@ -124,6 +124,41 @@ app.post('/api/auth/recover', async (req, res) => {
   }
 });
 
+// Login admin por biometría: verifica huella/Face ID del teléfono admin y emite token.
+// El teléfono es obligatorio para saber qué admin está ingresando (evita la contraseña).
+app.post('/api/auth/admin/biometric-login', async (req, res) => {
+  try {
+    const { phone, response } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!ADMIN_PHONES.includes(key)) {
+      return res.status(403).json({ error: 'Este número no tiene acceso al panel' });
+    }
+    const v = await webauthn.verifyAuth(key, response, req);
+    if (!v.ok) return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
+    const token = signToken({ role: 'admin', phone: key, iat: Date.now() });
+    res.json({ token });
+  } catch (err) {
+    fail(res, err, 'No se pudo verificar la biometría. Intentá de nuevo.');
+  }
+});
+
+// Registro de biometría admin (primera vez): guarda huella/Face ID y emite token.
+app.post('/api/auth/admin/biometric-register', async (req, res) => {
+  try {
+    const { phone, response } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!ADMIN_PHONES.includes(key)) {
+      return res.status(403).json({ error: 'Este número no tiene acceso al panel' });
+    }
+    const v = await webauthn.verifyRegistration(phone, response, req);
+    if (!v.ok) return res.status(v.status || 400).json({ error: v.error || 'No se pudo guardar la biometría' });
+    const token = signToken({ role: 'admin', phone: key, iat: Date.now() });
+    res.json({ token });
+  } catch (err) {
+    fail(res, err, 'No se pudo guardar la biometría. Intentá de nuevo.');
+  }
+});
+
 // Public
 app.get('/api/state', async (req, res) => {
   try {
@@ -279,6 +314,34 @@ app.post('/api/orders/:id/cancel', async (req, res) => {
     res.json(result);
   } catch (err) {
     fail(res, err, 'No se pudo cancelar el pedido. Intentá de nuevo.');
+  }
+});
+
+// Reporta la posición en vivo del repartidor para un pedido a domicilio.
+// El admin (que es quien reparte) envía su GPS periódicamente mientras entrega.
+app.post('/api/orders/:id/courier-location', requireAdmin, async (req, res) => {
+  try {
+    const { lat, lng } = req.body || {};
+    if (lat == null || lng == null || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+      return res.status(400).json({ error: 'Coordenadas inválidas' });
+    }
+    const order = await store.updateCourierLocation(req.params.id, Number(lat), Number(lng));
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    res.json({ ok: true, order });
+  } catch (err) {
+    fail(res, err, 'No se pudo actualizar la ubicación del repartidor.');
+  }
+});
+
+// Rastreo público de un pedido: estado + destino + posición del repartidor.
+// Lo usa el cliente para ver en tiempo real cómo avanza su entrega a domicilio.
+app.get('/api/orders/:id/tracking', async (req, res) => {
+  try {
+    const tracking = await store.getOrderTracking(req.params.id);
+    if (!tracking) return res.status(404).json({ error: 'Pedido no encontrado' });
+    res.json(tracking);
+  } catch (err) {
+    fail(res, err, 'No se pudo obtener el rastreo del pedido.');
   }
 });
 

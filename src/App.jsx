@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Component } from 'react';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 // SVG Icons Helper Components for full visual depth without external dependencies
 const Icon = ({ name, className = "w-5 h-5", ...props }) => {
@@ -37,8 +39,9 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
      arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
     image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
     xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
-     key: <path d="M12 2a9.92 9.92 0 0 0-7 2.82L2.82 7.01a1 1 0 0 0 0 1.42l2.59 2.59a1 1 0 0 0 1.42 0L12 5.34l6.17 6.17a1 1 0 0 0 1.42 0l2.59-2.59a1 1 0 0 0 0-1.42L13 4.83c-.35-.35-.5-.83-.5-1.31A5.5 5.5 0 0 0 12 2z" />
-  };
+     key: <path d="M12 2a9.92 9.92 0 0 0-7 2.82L2.82 7.01a1 1 0 0 0 0 1.42l2.59 2.59a1 1 0 0 0 1.42 0L12 5.34l6.17 6.17a1 1 0 0 0 1.42 0l2.59-2.59a1 1 0 0 0 0-1.42L13 4.83c-.35-.35-.5-.83-.5-1.31A5.5 5.5 0 0 0 12 2z" />,
+     fingerprint: <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88M17.29 21.02c.12-.6.43-2.3.5-3.02M2 12a10 10 0 0 1 18-6M2 16h.01M21.8 16c.2-2 .131-5.354 0-6M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2M8.65 22c.21-.66.45-1.32.57-2M9 6.8a6 6 0 0 1 9 5.2v2" />,
+   };
 
   return (
     <svg
@@ -205,6 +208,7 @@ const STATUS_STYLES = {
   pendiente: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40', ring: 'border-amber-500/50', dot: 'bg-amber-400' },
   en_preparacion: { badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', ring: 'border-cyan-500/50', dot: 'bg-cyan-400' },
   listo: { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', ring: 'border-emerald-500/50', dot: 'bg-emerald-400' },
+  en_camino: { badge: 'bg-sky-500/20 text-sky-300 border-sky-500/40', ring: 'border-sky-500/50', dot: 'bg-sky-400' },
   entregado: { badge: 'bg-slate-500/20 text-slate-300 border-slate-500/40', ring: 'border-slate-500/50', dot: 'bg-slate-400' },
   cancelado: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', ring: 'border-rose-500/50', dot: 'bg-rose-400' }
 };
@@ -234,12 +238,13 @@ const playChime = (() => {
   };
 })();
 
-const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'entregado'];
+const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'en_camino', 'entregado'];
 
 const STATUS_LABELS = {
   pendiente: 'Pendiente',
   en_preparacion: 'En Preparación',
   listo: 'Listo',
+  en_camino: 'En Camino',
   entregado: 'Entregado',
   cancelado: 'Cancelado'
 };
@@ -341,6 +346,7 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [orders, setOrders] = useState([]);
   const [promos, setPromos] = useState([]);
+  const [storeLocation, setStoreLocation] = useState(null);
   const [rate, setRate] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -366,6 +372,7 @@ export default function App() {
     setCategories(res.data.categories || []);
     setOrders(res.data.orders || []);
     if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
+    if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.rate) setRate(res.data.rate);
     setIsLoading(false);
   }, []);
@@ -505,6 +512,7 @@ export default function App() {
   const [productDetailModal, setProductDetailModal] = useState(null); // Product object
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [currentOrderTracking, setCurrentOrderTracking] = useState(null); // Order id for customer view
+  const [liveTrackingOrder, setLiveTrackingOrder] = useState(null); // Order for re-open live tracking from Mis Pedidos
 
   // Admin Specific States
   const [adminTab, setAdminTab] = useState('inventory'); // 'inventory' | 'orders' | 'analytics'
@@ -574,26 +582,63 @@ export default function App() {
     // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
     // desde el cliente reconocido, la lista de clientes o el perfil en el server.
     const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
-    let adminName = '';
+    const adminName = await resolveAdminName(phoneKey);
+    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+    addToast('Sesión iniciada en el panel admin');
+    return true;
+  };
+
+  // Login admin por biometría (huella/Face ID): el teléfono identifica al admin
+  // y la biometría lo autentica sin contraseña. Solo para el panel admin.
+  const handleAdminBiometricLogin = async (phone, response) => {
+    const res = await api.adminBiometricLogin(phone, response);
+    if (!res.ok) {
+      addToast(res.data.error || 'La biometría no coincidió', 'error');
+      return false;
+    }
+    setToken(res.data.token);
+    setIsAdminAuthed(true);
+    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+    const adminName = await resolveAdminName(phoneKey);
+    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+    addToast('Sesión iniciada en el panel admin');
+    return true;
+  };
+
+  // Primer registro de biometría del admin: guarda huella/Face ID y emite token.
+  const handleAdminBiometricRegister = async (phone, response) => {
+    const res = await api.adminBiometricRegister(phone, response);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar tu biometría', 'error');
+      return false;
+    }
+    setToken(res.data.token);
+    setIsAdminAuthed(true);
+    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+    const adminName = await resolveAdminName(phoneKey);
+    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+    addToast('Sesión iniciada en el panel admin');
+    return true;
+  };
+
+  // Resuelve el nombre del admin desde el cliente guardado, los clientes conocidos
+  // o el perfil en el server. Devuelve '' si no se encuentra.
+  const resolveAdminName = async (phoneKey) => {
     const savedKey = savedCustomer
       ? `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber || ''}`.replace(/\D/g, '').slice(-11)
       : '';
     if (savedKey === phoneKey && savedCustomer?.customerName) {
-      adminName = savedCustomer.customerName;
-    } else {
-      const known = (allCustomers || []).find(
-        (c) => normalizePhoneDigits(c.phone) === phoneKey && c.customerName
-      );
-      if (known) {
-        adminName = known.customerName;
-      } else {
-        const profile = await api.getCustomer(phoneKey);
-        if (profile.ok && profile.data?.customerName) adminName = profile.data.customerName;
-      }
+      return savedCustomer.customerName;
     }
-    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
-    addToast('Sesión iniciada en el panel admin');
-    return true;
+    const known = (allCustomers || []).find(
+      (c) => normalizePhoneDigits(c.phone) === phoneKey && c.customerName
+    );
+    if (known) {
+      return known.customerName;
+    }
+    const profile = await api.getCustomer(phoneKey);
+    if (profile.ok && profile.data?.customerName) return profile.data.customerName;
+    return '';
   };
 
   const handleAdminLogout = () => {
@@ -733,6 +778,8 @@ export default function App() {
       phone: formData.phone,
       type: formData.type,
       address: formData.type === 'delivery' ? formData.address : undefined,
+      lat: formData.type === 'delivery' && formData.lat != null ? formData.lat : undefined,
+      lng: formData.type === 'delivery' && formData.lng != null ? formData.lng : undefined,
       notes: formData.notes,
       items: cart.map((item) => ({
         id: item.product.id,
@@ -903,6 +950,16 @@ export default function App() {
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
   };
 
+  // Envía la posición en vivo del repartidor (el admin que entrega) al servidor.
+  const handleUpdateCourierLocation = async (orderId, lat, lng) => {
+    const res = await api.updateCourierLocation(orderId, lat, lng);
+    if (!res.ok) {
+      addToast('No se pudo enviar la ubicación del repartidor', 'error');
+      return false;
+    }
+    return true;
+  };
+
   const handleCancelOrder = async (orderId, phone) => {
     const res = await api.cancelOrder(orderId, phone);
     if (!res.ok) {
@@ -933,6 +990,17 @@ export default function App() {
     }
     if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
     addToast('Promociones guardadas correctamente');
+    return true;
+  };
+
+  const handleSaveStoreLocation = async (location) => {
+    const res = await api.saveSettings({ promos, storeLocation: location });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar la ubicación del comercio', 'error');
+      return false;
+    }
+    if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
+    addToast('Ubicación del comercio guardada');
     return true;
   };
 
@@ -979,7 +1047,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
       {/* Toast Notification Container */}
-      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-50 flex flex-col gap-2 pointer-events-none">
+      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
         {toasts.map((toast) => (
           <div
             key={toast.id}
@@ -1138,6 +1206,8 @@ export default function App() {
             customerProfile={customerProfile}
             onViewOrderDetail={(order) => setOrderDetailOrder(order)}
             onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
+            onTrackLiveOrder={(order) => setLiveTrackingOrder(order)}
+            storeLocation={storeLocation}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -1161,6 +1231,7 @@ export default function App() {
             }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onUpdateCourierLocation={handleUpdateCourierLocation}
             onDeleteOrder={(order) => setDeleteOrderTarget(order)}
             allCustomers={allCustomers}
             onLoadCustomers={loadCustomers}
@@ -1171,9 +1242,17 @@ export default function App() {
             onLoadCollections={loadCollections}
             onUpsertCollection={handleUpsertCollection}
             onDeleteCollection={handleDeleteCollection}
+            addToast={addToast}
+            storeLocation={storeLocation}
+            onSaveStoreLocation={handleSaveStoreLocation}
           />
         ) : (
-          <AdminLoginView onLogin={handleAdminLogin} onBack={() => setActiveView('customer')} />
+          <AdminLoginView
+            onLogin={handleAdminLogin}
+            onBiometricLogin={handleAdminBiometricLogin}
+            onBiometricRegister={handleAdminBiometricRegister}
+            onBack={() => setActiveView('customer')}
+          />
         )}
       </main>
 
@@ -1247,10 +1326,23 @@ export default function App() {
           order={orderDetailOrder}
           rate={rate}
           onClose={() => setOrderDetailOrder(null)}
+          onTrackLiveOrder={(order) => {
+            setOrderDetailOrder(null);
+            setLiveTrackingOrder(order);
+          }}
           onRequestCancelOrder={(order) => {
             setOrderDetailOrder(null);
             setCancelConfirmOrder(order);
           }}
+        />
+      )}
+
+      {/* 5b2. Live Tracking Modal (cliente reabre el rastreo de una entrega) */}
+      {liveTrackingOrder && (
+        <LiveTrackingModal
+          order={liveTrackingOrder}
+          onClose={() => setLiveTrackingOrder(null)}
+          storeLocation={storeLocation}
         />
       )}
 
@@ -1388,13 +1480,19 @@ function LoadErrorScreen({ error, onRetry }) {
   );
 }
 
-function AdminLoginView({ onLogin, onBack }) {
+function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack }) {
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   // Login state
   const [loginPhone, setLoginPhone] = useState({ code: '0412', number: '' });
+
+  // Biometric login state
+  const [bioStatus, setBioStatus] = useState('idle'); // 'idle' | 'working' | 'register'
+  const [bioError, setBioError] = useState('');
+  const [bioOptions, setBioOptions] = useState(null);
+  const bioFetchKeyRef = useRef('');
 
   // Recovery state
   const [recoverMode, setRecoverMode] = useState(false);
@@ -1432,6 +1530,30 @@ function AdminLoginView({ onLogin, onBack }) {
     };
   }, [recoverMode, recoverStep, recoverPhone.code, recoverPhone.number]);
 
+  // Pre-carga las opciones de biometría del login admin al completar el teléfono.
+  // Solo se hace UN fetch por teléfono: prefetches solapados pisan el challenge
+  // en el server y rompen la verificación.
+  useEffect(() => {
+    const valid = !recoverMode && /^\d{7}$/.test(loginPhone.number);
+    if (!valid) return undefined;
+    const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
+    if (bioFetchKeyRef.current === phoneKey) return undefined;
+    let cancelled = false;
+    api
+      .webauthnLoginOptions({ phone: phoneKey })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          bioFetchKeyRef.current = phoneKey;
+          setBioOptions(res.data.options);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [recoverMode, loginPhone.code, loginPhone.number]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!/^\d{7}$/.test(loginPhone.number)) {
@@ -1448,6 +1570,51 @@ function AdminLoginView({ onLogin, onBack }) {
     const ok = await onLogin(phoneKey, password);
     setIsSubmitting(false);
     if (!ok) setError('Contraseña incorrecta. Verificá tu teléfono y contraseña.');
+  };
+
+  // Login admin con biometría (huella/Face ID). El teléfono es obligatorio y
+  // la biometría reemplaza la contraseña. Si no hay biometría registrada para
+  // ese teléfono, se registra en el momento (primera vez).
+  const handleBiometricLogin = async () => {
+    if (!/^\d{7}$/.test(loginPhone.number)) {
+      setError('Ingresá tu teléfono de administrador.');
+      return;
+    }
+    const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
+    setError('');
+    setBioError('');
+    if (bioFetchKeyRef.current !== phoneKey || !bioOptions) {
+      setBioError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
+      return;
+    }
+    setBioStatus('working');
+    try {
+      const authResponse = await startAuthentication({ optionsJSON: bioOptions });
+      const ok = await onBiometricLogin(phoneKey, authResponse);
+      if (!ok) setBioError('La biometría no coincidió. Verificá que tu número sea de administrador.');
+    } catch (err) {
+      // Si la credencial se registró bajo un rpID anterior (dominio distinto),
+      // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
+      // actual para que quede válida.
+      const isRpidMismatch = err?.name === 'NotAllowedError';
+      if (!isRpidMismatch) {
+        setBioError(friendlyAuthError(err));
+        setBioStatus('idle');
+        return;
+      }
+      try {
+        setBioStatus('register');
+        const rres = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: 'Administrador' });
+        if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
+        const regResponse = await startRegistration({ optionsJSON: rres.data.options });
+        const ok = await onBiometricRegister(phoneKey, regResponse);
+        if (!ok) setBioError('No se pudo guardar tu biometría. Intentá de nuevo.');
+      } catch (regErr) {
+        setBioError(friendlyAuthError(regErr));
+      }
+    } finally {
+      setBioStatus('idle');
+    }
   };
 
   const startRecovery = async () => {
@@ -1626,7 +1793,30 @@ function AdminLoginView({ onLogin, onBack }) {
                 className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
               />
             </div>
+            {error && <p className="text-xs text-rose-400 mt-2">{error}</p>}
+            {bioError && <p className="text-xs text-rose-400 mt-2">{bioError}</p>}
           </div>
+
+          <button
+            type="button"
+            onClick={handleBiometricLogin}
+            disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
+            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-sm hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
+          >
+            <Icon name="fingerprint" className="w-4 h-4" />
+            {bioStatus === 'working'
+              ? 'Esperando huella o Face ID...'
+              : bioStatus === 'register'
+                ? 'Registrando tu biometría...'
+                : 'Ingresar con huella o Face ID'}
+          </button>
+
+          <div className="flex items-center gap-3 py-1">
+            <span className="flex-1 h-px bg-slate-800" />
+            <span className="text-[10px] uppercase tracking-widest text-slate-500">o con contraseña</span>
+            <span className="flex-1 h-px bg-slate-800" />
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Contraseña</label>
             <input
@@ -1637,7 +1827,6 @@ function AdminLoginView({ onLogin, onBack }) {
               autoFocus
               className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
             />
-            {error && <p className="text-xs text-rose-400 mt-2">{error}</p>}
           </div>
 
           <button
@@ -1646,7 +1835,7 @@ function AdminLoginView({ onLogin, onBack }) {
             className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold text-sm hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
           >
             <Icon name="check" className="w-4 h-4" />
-            {isSubmitting ? 'Verificando...' : 'Ingresar al Panel'}
+            {isSubmitting ? 'Verificando...' : 'Ingresar con contraseña'}
           </button>
         </form>
 
@@ -1731,7 +1920,9 @@ function CustomerView({
   orders,
   customerProfile,
   onViewOrderDetail,
-  onRequestCancelOrder
+  onRequestCancelOrder,
+  onTrackLiveOrder,
+  storeLocation
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
@@ -2027,6 +2218,15 @@ function CustomerView({
                         <Icon name="eye" className="w-3 h-3" />
                         Ver detalle
                       </button>
+                      {o.type === 'delivery' && o.status !== 'cancelado' && o.status !== 'entregado' && (
+                        <button
+                          onClick={() => onTrackLiveOrder(o)}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1"
+                        >
+                          <Icon name="mapPin" className="w-3 h-3" />
+                          Rastrear
+                        </button>
+                      )}
                       {cancellable && (
                         <button
                           onClick={() => onRequestCancelOrder(o)}
@@ -2069,12 +2269,19 @@ function CustomerView({
           </div>
 
           {/* Stepper Status Bar */}
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-2 pt-1 sm:pt-2">
+          <div
+            className={`grid gap-1.5 sm:gap-2 pt-1 sm:pt-2 ${
+              currentOrderTracking.type === 'delivery' ? 'grid-cols-5' : 'grid-cols-4'
+            }`}
+          >
             {[
               { key: 'pendiente', label: '1. Recibido' },
               { key: 'en_preparacion', label: '2. Preparando' },
               { key: 'listo', label: '3. Listo' },
-              { key: 'entregado', label: '4. Entregado' }
+              ...(currentOrderTracking.type === 'delivery'
+                ? [{ key: 'en_camino', label: '4. En camino' }]
+                : []),
+              { key: 'entregado', label: currentOrderTracking.type === 'delivery' ? '5. Entregado' : '4. Entregado' }
             ].map((step, idx) => {
               const currentIdx = STATUS_FLOW.indexOf(currentOrderTracking.status);
               const isPassed = idx <= currentIdx;
@@ -2104,6 +2311,11 @@ function CustomerView({
               );
             })}
           </div>
+
+          {/* Mapa de entrega a domicilio (destino + repartidor en vivo) */}
+          {currentOrderTracking.type === 'delivery' && (
+            <DeliveryMap order={currentOrderTracking} storeLocation={storeLocation} />
+          )}
         </div>
       )}
 
@@ -2899,6 +3111,491 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
   );
 }
 
+// Marcador Leaflet personalizado (divIcon con SVG inline) para no depender de
+// imágenes externas. Evita que Leaflet intente cargar sus iconos por defecto.
+const makePinIcon = (color, label) =>
+  L.divIcon({
+    className: '',
+    html: `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">
+        <span style="font-size:10px;font-weight:800;color:${color};background:#0f172a;border:1px solid ${color};border-radius:999px;padding:0 6px;white-space:nowrap">${label || ''}</span>
+        <svg width="26" height="34" viewBox="0 0 26 34" style="overflow:visible">
+          <path d="M13 1C6.4 1 1 6.4 1 13c0 8.8 12 20 12 20s12-11.2 12-20C25 6.4 19.6 1 13 1z" fill="${color}" stroke="#fff" stroke-width="2"/>
+          <circle cx="13" cy="13" r="4.5" fill="#fff"/>
+        </svg>
+      </div>`,
+    iconSize: [26, 44],
+    iconAnchor: [13, 42]
+  });
+
+// Mapa interactivo (Leaflet + OpenStreetMap, sin API key) para la entrega a
+// domicilio. Muestra el comercio (origen), el destino del cliente, la posición
+// en vivo del repartidor y el camino sugerido repartidor → destino (OSRM).
+function DeliveryMap({ order, storeLocation }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layersRef = useRef(null);
+
+  const dest = order && order.lat != null && order.lng != null;
+  const courier = order && order.courier_lat != null && order.courier_lng != null;
+  const store = storeLocation && storeLocation.lat != null && storeLocation.lng != null;
+  const showMap = order && order.type === 'delivery' && (dest || courier || store);
+
+  const markers = useMemo(() => {
+    const list = [];
+    if (store) list.push({ lat: Number(storeLocation.lat), lng: Number(storeLocation.lng), kind: 'store' });
+    if (dest) list.push({ lat: Number(order.lat), lng: Number(order.lng), kind: 'dest' });
+    if (courier) list.push({ lat: Number(order.courier_lat), lng: Number(order.courier_lng), kind: 'courier' });
+    return list;
+  }, [store, dest, courier, storeLocation?.lat, storeLocation?.lng, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
+
+  // Crea el mapa una sola vez.
+  useEffect(() => {
+    if (!showMap || !containerRef.current || mapRef.current) return;
+    const map = L.map(containerRef.current, { zoomControl: false, attributionControl: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    mapRef.current = map;
+    layersRef.current = L.layerGroup().addTo(map);
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      layersRef.current = null;
+    };
+  }, [showMap]);
+
+  // Dibuja marcadores y la ruta OSRM cuando cambian los datos.
+  useEffect(() => {
+    const map = mapRef.current;
+    const layerGroup = layersRef.current;
+    if (!map || !layerGroup) return;
+    layerGroup.clearLayers();
+
+    if (markers.length === 0) return;
+    markers.forEach((m) => {
+      const icon =
+        m.kind === 'courier'
+          ? makePinIcon('#10b981', 'REPARTIDOR')
+          : m.kind === 'store'
+          ? makePinIcon('#22d3ee', 'COMERCIO')
+          : makePinIcon('#f43f5e', 'DESTINO');
+      L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+    });
+
+    // Línea recta provisional entre repartidor y destino.
+    let straight = null;
+    if (courier && dest) {
+      straight = L.polyline(
+        [
+          [Number(order.courier_lat), Number(order.courier_lng)],
+          [Number(order.lat), Number(order.lng)]
+        ],
+        { color: '#10b981', weight: 3, dashArray: '6 6', opacity: 0.7 }
+      ).addTo(layerGroup);
+    }
+
+    // Pedido de ruta real a OSRM (gratuito, sin key). Si responde, reemplaza la línea.
+    if (courier && dest) {
+      const url = `https://router.project-osrm.org/route/v1/driving/${Number(order.courier_lng)},${Number(order.courier_lat)};${Number(order.lng)},${Number(order.lat)}?overview=full&geometries=geojson`;
+      fetch(url)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => {
+          const coords = data?.routes?.[0]?.geometry?.coordinates;
+          if (!Array.isArray(coords) || coords.length < 2) return;
+          if (straight) layerGroup.removeLayer(straight);
+          L.polyline(
+            coords.map((c) => [c[1], c[0]]),
+            { color: '#10b981', weight: 5, opacity: 0.9 }
+          ).addTo(layerGroup);
+        })
+        .catch(() => {});
+    }
+
+    // Ajusta el viewport para abarcar todos los puntos.
+    const latLngs = markers.map((m) => [m.lat, m.lng]);
+    if (latLngs.length) {
+      map.fitBounds(L.latLngBounds(latLngs).pad(0.25), { animate: false });
+    }
+  }, [markers, courier, dest, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
+
+  const destUrl = dest ? `https://www.google.com/maps?q=${Number(order.lat)},${Number(order.lng)}` : null;
+  const courierUrl = courier ? `https://www.google.com/maps?q=${Number(order.courier_lat)},${Number(order.courier_lng)}` : null;
+  const storeUrl = store ? `https://www.google.com/maps?q=${Number(storeLocation.lat)},${Number(storeLocation.lng)}` : null;
+
+  if (!showMap) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+        <div ref={containerRef} className="w-full h-44 sm:h-52" />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {store && storeUrl && (
+          <a
+            href={storeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold hover:bg-cyan-500/25 transition-all"
+          >
+            <Icon name="store" className="w-3.5 h-3.5" />
+            Comercio
+          </a>
+        )}
+        {courier && courierUrl && (
+          <a
+            href={courierUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+          >
+            <Icon name="mapPin" className="w-3.5 h-3.5" />
+            Ubicación del repartidor
+          </a>
+        )}
+        {dest && destUrl && (
+          <a
+            href={destUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-[11px] font-bold hover:bg-teal-500/25 transition-all"
+          >
+            <Icon name="mapPin" className="w-3.5 h-3.5" />
+            Destino de la entrega
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Modal selector de punto en el mapa (Leaflet + OpenStreetMap). Lo usan el
+// cliente (para elegir dónde recibir distinto de su ubicación actual) y el
+// admin (para fijar la ubicación del comercio).
+function MapPickerModal({ title, initial, onPick, onClose }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const initialPointRef = useRef(initial?.lat != null && initial?.lng != null ? { lat: initial.lat, lng: initial.lng } : null);
+  const [point, setPoint] = useState(initialPointRef.current);
+  const [search, setSearch] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState('');
+
+  // Crea el mapa y coloca un marcador arrastrable.
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    const start = initialPointRef.current;
+    const defaultCenter = start ? [start.lat, start.lng] : [10.4806, -66.9036];
+    const map = L.map(containerRef.current, { zoomControl: true }).setView(defaultCenter, start ? 16 : 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    mapRef.current = map;
+
+    const marker = L.marker(defaultCenter, { icon: makePinIcon('#14b8a6', 'PUNTO'), draggable: true }).addTo(map);
+    markerRef.current = marker;
+    if (!initialPointRef.current) marker.setOpacity(0.6);
+
+    map.on('click', (e) => {
+      setPoint({ lat: e.latlng.lat, lng: e.latlng.lng });
+      marker.setLatLng(e.latlng);
+      marker.setOpacity(1);
+    });
+    marker.on('dragend', (e) => {
+      setPoint({ lat: e.target.getLatLng().lat, lng: e.target.getLatLng().lng });
+      marker.setOpacity(1);
+    });
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
+  }, []);
+
+  // Geocodificación con Nominatim (gratuita, sin key) para buscar direcciones.
+  const searchTimer = useRef(null);
+  const handleSearch = (e) => {
+    const q = e.target.value;
+    setSearch(q);
+    clearTimeout(searchTimer.current);
+    if (q.trim().length < 4) {
+      setSuggestions([]);
+      return;
+    }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q.trim())}&limit=6&addressdetails=1`);
+        const data = await res.json();
+        if (Array.isArray(data)) setSuggestions(data);
+      } catch {
+        setSuggestions([]);
+      }
+    }, 400);
+  };
+
+  const applySuggestion = (s) => {
+    const lat = Number(s.lat);
+    const lng = Number(s.lon);
+    setPoint({ lat, lng });
+    setSearch(s.display_name || s.name || '');
+    setSuggestions([]);
+    const map = mapRef.current;
+    if (map) {
+      map.setView([lat, lng], 17);
+      if (markerRef.current) {
+        markerRef.current.setLatLng([lat, lng]);
+        markerRef.current.setOpacity(1);
+      }
+    }
+  };
+
+  // Ubicación actual del dispositivo (con guía de permiso como en checkout).
+  const useMyLocation = () => {
+    setLocError('');
+    if (!navigator.geolocation) {
+      setLocError('Tu navegador no soporta geolocalización.');
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setPoint({ lat, lng });
+        const map = mapRef.current;
+        if (map) {
+          map.setView([lat, lng], 17);
+          if (markerRef.current) {
+            markerRef.current.setLatLng([lat, lng]);
+            markerRef.current.setOpacity(1);
+          }
+        }
+        setLocating(false);
+      },
+      (err) => {
+        setLocating(false);
+        setLocError(err && err.code === 1 ? 'Permiso de ubicación denegado. Activalo en los ajustes del navegador.' : 'No se pudo obtener la ubicación.');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+    );
+  };
+
+  const confirm = () => {
+    if (!point) {
+      setLocError('Tocá el mapa o buscá una dirección para elegir el punto.');
+      return;
+    }
+    onPick({ lat: Number(point.lat), lng: Number(point.lng), address: search.trim() || null });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-scale-up">
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <Icon name="mapPin" className="w-5 h-5 text-teal-400" />
+              {title || 'Elegir punto en el mapa'}
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Buscá una dirección, tocá el mapa o arrastrá el marcador.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1">
+          <div className="relative">
+            <input
+              type="text"
+              value={search}
+              onChange={handleSearch}
+              placeholder="Buscar dirección o lugar (ej: Av. Bolívar 123)"
+              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none pr-10"
+            />
+            <Icon name="search" className="w-4 h-4 text-slate-500 absolute right-3 top-3.5" />
+            {suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-1 rounded-xl bg-slate-800 border border-slate-700 shadow-2xl overflow-hidden z-20">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.place_id}
+                    type="button"
+                    onClick={() => applySuggestion(s)}
+                    className="w-full text-left px-3 py-2.5 text-xs text-slate-200 hover:bg-slate-700/70 transition-colors border-b border-slate-700/50 last:border-0"
+                  >
+                    {s.display_name || s.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={useMyLocation}
+            disabled={locating}
+            className="w-full px-4 py-2.5 rounded-xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-sm font-bold hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            <Icon name="mapPin" className="w-4 h-4" />
+            {locating ? 'Obteniendo ubicación...' : 'Usar mi ubicación actual'}
+          </button>
+
+          <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+            <div ref={containerRef} className="w-full h-56 sm:h-64" />
+          </div>
+
+          {point && (
+            <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Icon name="check" className="w-3.5 h-3.5 text-emerald-400" />
+              Punto elegido: <span className="text-white font-bold">{point.lat.toFixed(6)}, {point.lng.toFixed(6)}</span>
+            </p>
+          )}
+          {locError && (
+            <p className="text-xs text-rose-400 flex items-center gap-1.5">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5 flex-shrink-0" />
+              {locError}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={confirm}
+            className="w-full py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2"
+          >
+            <Icon name="check" className="w-4 h-4" />
+            Confirmar punto
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal de rastreo en vivo para el cliente: consulta el estado del pedido y la
+// posición del repartidor cada 5s mientras está abierto, mostrando el mapa.
+function LiveTrackingModal({ order, onClose, storeLocation }) {
+  const [track, setTrack] = useState(order);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const res = await api.getOrderTracking(order.id);
+      if (!alive) return;
+      if (res.ok && res.data) {
+        setTrack(res.data);
+        setError('');
+      } else {
+        setError(res.data?.error || 'No se pudo obtener el rastreo del pedido.');
+      }
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [order.id]);
+
+  const status = track?.status || order.status;
+  const style = STATUS_STYLES[status] || STATUS_STYLES.pendiente;
+  const currentIdx = STATUS_FLOW.indexOf(status);
+  const steps = [
+    { key: 'pendiente', label: '1. Recibido' },
+    { key: 'en_preparacion', label: '2. Preparando' },
+    { key: 'listo', label: '3. Listo' },
+    ...(order.type === 'delivery' ? [{ key: 'en_camino', label: '4. En camino' }] : []),
+    { key: 'entregado', label: order.type === 'delivery' ? '5. Entregado' : '4. Entregado' }
+  ];
+
+  const courierLive = track?.courier_lat != null && track?.courier_lng != null;
+  const updatedAt = track?.courier_updated_at
+    ? new Date(track.courier_updated_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-scale-up">
+        <div className="p-5 sm:p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <Icon name="mapPin" className="w-5 h-5 text-emerald-400" />
+              Rastreo en vivo <span className="text-teal-400">#{order.id}</span>
+            </h3>
+            <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${style.badge}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${style.dot} ${status === 'en_camino' ? 'animate-pulse' : ''}`} />
+              {STATUS_LABELS[status] || 'Pendiente'}
+            </span>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 sm:p-6 space-y-4">
+          {/* Stepper de estados */}
+          <div className={`grid gap-1.5 sm:gap-2 pt-1 ${order.type === 'delivery' ? 'grid-cols-5' : 'grid-cols-4'}`}>
+            {steps.map((step, idx) => {
+              const isPassed = idx <= currentIdx;
+              const isCurrent = idx === currentIdx;
+              return (
+                <div key={step.key} className="flex flex-col items-center gap-1.5 sm:gap-2">
+                  <div className={`w-full h-1.5 sm:h-2 rounded-full transition-all duration-500 ${isPassed ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50' : 'bg-slate-700/60'}`} />
+                  <span className={`text-[9px] sm:text-xs font-semibold text-center leading-tight ${isCurrent ? 'text-emerald-300 font-bold scale-105' : isPassed ? 'text-slate-300' : 'text-slate-500'}`}>
+                    {step.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Mapa: destino + repartidor en vivo */}
+          <DeliveryMap order={track} storeLocation={storeLocation} />
+
+          {/* Estado del repartidor */}
+          <div className="rounded-xl bg-slate-800/60 p-3 text-xs space-y-1">
+            <div className="flex items-center gap-2">
+              <Icon name="mapPin" className="w-3.5 h-3.5 text-emerald-400" />
+              {courierLive ? (
+                <span className="text-emerald-300 font-bold flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Repartidor en camino {updatedAt ? `· ${updatedAt}` : ''}
+                </span>
+              ) : (
+                <span className="text-slate-400">
+                  {status === 'en_camino' ? 'Buscando la posición del repartidor…' : 'El repartidor aún no inició el envío.'}
+                </span>
+              )}
+            </div>
+            {order.address && <p className="text-slate-400">Destino: <span className="text-white font-bold">{order.address}</span></p>}
+            <p className="text-slate-500">La posición se actualiza automáticamente cada 5 segundos.</p>
+          </div>
+
+          {error && (
+            <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+              {error} Se seguirá intentando.
+            </p>
+          )}
+
+          <button
+            onClick={onClose}
+            className="w-full py-3 rounded-2xl bg-slate-800 text-slate-300 font-bold text-sm hover:bg-slate-700 transition-all"
+          >
+            Cerrar rastreo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
   const [formData, setFormData] = useState({
     customerName: savedCustomer?.customerName || '',
@@ -2907,11 +3604,71 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
     type: savedCustomer?.type || 'pickup', // 'pickup' | 'delivery'
     address: savedCustomer?.address || '',
     notes: '',
-    credit: false
+    credit: false,
+    lat: null,
+    lng: null,
+    mapAddress: null
   });
 
   const [errors, setErrors] = useState({});
   const [showPhoneSuggestions, setShowPhoneSuggestions] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState('');
+  const [showMapPicker, setShowMapPicker] = useState(false);
+
+  // Comprueba el estado del permiso de ubicación (si el navegador lo soporta).
+  const getGeoPermission = () =>
+    navigator.permissions && navigator.permissions.query
+      ? navigator.permissions.query({ name: 'geolocation' })
+      : null;
+
+  // Captura la ubicación GPS del cliente para entregas a domicilio (sin usar
+  // Google Maps API; solo se guardan lat/lng y se muestra un enlace a Maps).
+  const handleUseMyLocation = async () => {
+    setLocError('');
+    if (!navigator.geolocation) {
+      setLocError('Tu navegador no soporta geolocalización. Ingresá la dirección manualmente.');
+      addToast('Tu navegador no soporta geolocalización', 'error');
+      return;
+    }
+    // Si el navegador ya guardó "denegado", no volverá a preguntar; lo avisamos
+    // con instrucciones para habilitarlo en lugar de pedirlo en silencio.
+    try {
+      const perm = getGeoPermission();
+      if (perm) {
+        const state = await perm;
+        if (state && state.state === 'denied') {
+          setLocError(
+            'El navegador tiene la ubicación bloqueada. Para que pregunte de nuevo, activá el permiso de ubicación para este sitio en los ajustes del navegador (icono del candado junto a la URL) y recargá la página.'
+          );
+          addToast('Permiso de ubicación bloqueado en el navegador', 'error');
+          return;
+        }
+      }
+    } catch {}
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setFormData((prev) => ({
+          ...prev,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        }));
+        setLocating(false);
+        addToast('Ubicación capturada. La entrega se hará en este punto.', 'success');
+      },
+      (err) => {
+        setLocating(false);
+        const denied = err && err.code === 1;
+        const msg = denied
+          ? 'Permiso de ubicación denegado. Activalo en los ajustes del navegador (candado junto a la URL) y recargá, o ingresá la dirección manualmente.'
+          : 'No se pudo obtener la ubicación. Ingresá la dirección manualmente.';
+        setLocError(msg);
+        addToast(msg, 'error');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+    );
+  };
 
   // Autocompletado por teléfono: busca clientes conocidos cuyos 7 dígitos coincidan
   const phoneSuggestions = useMemo(() => {
@@ -2938,8 +3695,8 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
     const newErrors = {};
     if (!formData.customerName.trim()) newErrors.customerName = 'Ingresa tu nombre completo';
     if (!/^\d{7}$/.test(formData.phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
-    if (formData.type === 'delivery' && !formData.address.trim()) {
-      newErrors.address = 'Ingresa la dirección de entrega';
+    if (formData.type === 'delivery' && !formData.address.trim() && (formData.lat == null || formData.lng == null)) {
+      newErrors.address = 'Ingresa la dirección o comparte tu ubicación';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -3123,16 +3880,59 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
                     </div>
                   </div>
                 )}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Dirección Completa de Entrega *
-                  </label>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Dirección de Entrega
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <button
+                        type="button"
+                        onClick={handleUseMyLocation}
+                        disabled={locating}
+                        className={`px-2 py-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                          formData.lat != null && formData.lng != null
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : 'bg-teal-500/15 border-teal-500/40 text-teal-300 hover:bg-teal-500/25'
+                        } ${locating ? 'opacity-60 pointer-events-none' : ''}`}
+                      >
+                        <Icon name="mapPin" className="w-3.5 h-3.5 shrink-0" />
+                        {locating ? 'Obteniendo...' : 'Mi ubicación (GPS)'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowMapPicker(true)}
+                        className={`px-2 py-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                          formData.mapAddress
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : 'bg-sky-500/15 border-sky-500/40 text-sky-300 hover:bg-sky-500/25'
+                        }`}
+                      >
+                        <Icon name="search" className="w-3.5 h-3.5 shrink-0" />
+                        Elegir punto en el mapa
+                      </button>
+                    </div>
+                    {(formData.lat != null || formData.mapAddress) && (
+                      <a
+                        href={`https://www.google.com/maps?q=${formData.lat},${formData.lng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-[11px] text-sky-300 underline mb-2"
+                      >
+                        Ver punto en Google Maps
+                      </a>
+                    )}
+                  {locError && (
+                    <p className="text-xs text-rose-400 mb-2 flex items-center gap-1.5">
+                      <Icon name="alertTriangle" className="w-3.5 h-3.5 flex-shrink-0" />
+                      {locError}
+                    </p>
+                  )}
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={formData.address}
                       onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                      placeholder="Calle, Número, Piso/Depto..."
+                      placeholder="Calle, Número, Piso/Depto (opcional si compartiste ubicación)"
                       className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
                     />
                     <button
@@ -3223,6 +4023,26 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
             <span>Confirmar y Enviar Pedido</span>
           </button>
         </form>
+
+        {showMapPicker && (
+          <MapPickerModal
+            title="¿Dónde recibís el pedido?"
+            initial={formData.lat != null ? { lat: formData.lat, lng: formData.lng } : null}
+            onPick={(p) => {
+              setFormData((prev) => ({
+                ...prev,
+                lat: p.lat,
+                lng: p.lng,
+                address: p.address || prev.address || '',
+                mapAddress: p.address || prev.address || ''
+              }));
+              setLocError('');
+              setShowMapPicker(false);
+              addToast('Punto de entrega elegido en el mapa', 'success');
+            }}
+            onClose={() => setShowMapPicker(false)}
+          />
+        )}
       </div>
     </div>
   );
@@ -3243,6 +4063,7 @@ function AdminView({
   onEditProduct,
   onDeleteProduct,
   onUpdateOrderStatus,
+  onUpdateCourierLocation,
   onDeleteOrder,
   allCustomers,
   onLoadCustomers,
@@ -3252,10 +4073,70 @@ function AdminView({
   collections,
   onLoadCollections,
   onUpsertCollection,
-  onDeleteCollection
+  onDeleteCollection,
+  addToast,
+  storeLocation,
+  onSaveStoreLocation
 }) {
   // Order status filter state
   const [statusFilter, setStatusFilter] = useState('todos');
+  const [showStorePicker, setShowStorePicker] = useState(false);
+
+  // Modo Repartidor: cuando un pedido a domicilio está en "En Camino", el admin
+  // (que reparte) comparte su GPS en vivo para que el cliente lo rastree.
+  const [courierActive, setCourierActive] = useState(false);
+  const [courierOrderId, setCourierOrderId] = useState(null);
+  const courierPosRef = useRef(null);
+  const courierWatchIdRef = useRef(null);
+
+  const stopCourierTracking = () => {
+    if (courierWatchIdRef.current != null) {
+      navigator.geolocation.clearWatch(courierWatchIdRef.current);
+      courierWatchIdRef.current = null;
+    }
+    courierPosRef.current = null;
+    setCourierActive(false);
+    setCourierOrderId(null);
+  };
+
+  // Inicia el seguimiento GPS y lo reporta periódicamente al servidor.
+  const startCourierTracking = (orderId) => {
+    if (!navigator.geolocation) {
+      addToast('Tu navegador no soporta geolocalización', 'error');
+      return;
+    }
+    setCourierActive(true);
+    setCourierOrderId(orderId);
+    addToast('Modo Repartidor activo: compartiendo tu ubicación en vivo', 'success');
+    courierWatchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        courierPosRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
+    );
+  };
+
+  // Reporta la posición cada 5s mientras el modo repartidor esté activo.
+  const onUpdateCourierLocationRef = useRef(onUpdateCourierLocation);
+  useEffect(() => {
+    onUpdateCourierLocationRef.current = onUpdateCourierLocation;
+  }, [onUpdateCourierLocation]);
+
+  useEffect(() => {
+    if (!courierActive || !courierOrderId) return;
+    const report = () => {
+      const pos = courierPosRef.current;
+      if (pos) onUpdateCourierLocationRef.current?.(courierOrderId, pos.lat, pos.lng);
+    };
+    const timer = setInterval(report, 5000);
+    return () => clearInterval(timer);
+  }, [courierActive, courierOrderId]);
+
+  // Detiene el seguimiento al desmontar el panel.
+  useEffect(() => () => {
+    if (courierWatchIdRef.current != null) navigator.geolocation.clearWatch(courierWatchIdRef.current);
+  }, []);
 
   // Promos editor state
   const [promoDraft, setPromoDraft] = useState(null);
@@ -3458,6 +4339,7 @@ function AdminView({
           { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
           { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
           { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
+          { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
           { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Negocio', icon: 'trendingUp' }
         ].map((tab) => (
           <button
@@ -3641,6 +4523,7 @@ function AdminView({
               { key: 'pendiente', label: 'Pendientes', count: orders.filter((o) => o.status === 'pendiente').length },
               { key: 'en_preparacion', label: 'Preparación', count: orders.filter((o) => o.status === 'en_preparacion').length },
               { key: 'listo', label: 'Listos', count: orders.filter((o) => o.status === 'listo').length },
+              { key: 'en_camino', label: 'En Camino', count: orders.filter((o) => o.status === 'en_camino').length },
               { key: 'entregado', label: 'Entregados', count: orders.filter((o) => o.status === 'entregado').length },
               { key: 'cancelado', label: 'Cancelados', count: orders.filter((o) => o.status === 'cancelado').length }
             ].map((f) => (
@@ -3681,7 +4564,7 @@ function AdminView({
                           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
-                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
+                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
                         </span>
                         {order.credit && (
                           <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
@@ -3714,6 +4597,22 @@ function AdminView({
                           <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
                             <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
                             <span>Entrega: {order.address}</span>
+                            {order.lat != null && order.lng != null && (
+                              <a
+                                href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
+                              >
+                                <Icon name="mapPin" className="w-3 h-3" />
+                                Abrir en Maps
+                              </a>
+                            )}
+                            {order.courier_lat != null && order.courier_lng != null && (
+                              <span className="text-[10px] font-bold text-emerald-300 ml-auto">
+                                Repartidor en vivo
+                              </span>
+                            )}
                           </p>
                         ) : (
                           <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
@@ -3765,6 +4664,7 @@ function AdminView({
                           { key: 'pendiente', label: 'Pendiente' },
                           { key: 'en_preparacion', label: 'En Prep.' },
                           { key: 'listo', label: 'Listo' },
+                          ...(order.type === 'delivery' ? [{ key: 'en_camino', label: 'En Camino' }] : []),
                           { key: 'entregado', label: 'Entregado' },
                           { key: 'cancelado', label: 'Cancelado' }
                         ].map((stBtn) => (
@@ -3781,6 +4681,29 @@ function AdminView({
                           </button>
                         ))}
                       </div>
+
+                      {/* Modo Repartidor: comparte el GPS mientras el pedido va en camino */}
+                      {order.type === 'delivery' && order.status === 'en_camino' && (
+                        <div className="pt-1">
+                          {courierOrderId === order.id && courierActive ? (
+                            <button
+                              onClick={stopCourierTracking}
+                              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Icon name="mapPin" className="w-3.5 h-3.5" />
+                              Detener rastreo en vivo
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => startCourierTracking(order.id)}
+                              className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Icon name="mapPin" className="w-3.5 h-3.5" />
+                              Comenzar entrega (GPS en vivo)
+                            </button>
+                          )}
+                        </div>
+                      )}
 
                       {/* Aprobar / Rechazar pedido a crédito (solo pendiente) */}
                       {order.credit && order.status === 'pendiente' && (
@@ -4040,6 +4963,72 @@ function AdminView({
           onUpsertCollection={onUpsertCollection}
           onDeleteCollection={onDeleteCollection}
         />
+      )}
+
+      {/* Tab: Tienda — ubicación fija del comercio */}
+      {adminTab === 'tienda' && (
+        <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md space-y-4">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="store" className="w-5 h-5 text-teal-400" />
+              Ubicación del Comercio
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Esta es la dirección fija del negocio. Aparece en el rastreo del cliente como punto de origen
+              de la entrega. Cualquier administrador puede actualizarla.
+            </p>
+          </div>
+
+          {storeLocation ? (
+            <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+              <span className="p-2.5 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+                <Icon name="store" className="w-5 h-5" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-400">Comercio configurado</p>
+                {storeLocation.address && (
+                  <p className="text-sm font-bold text-white truncate">{storeLocation.address}</p>
+                )}
+                <p className="text-[11px] text-slate-500">
+                  {Number(storeLocation.lat).toFixed(6)}, {Number(storeLocation.lng).toFixed(6)}
+                </p>
+              </div>
+              <a
+                href={`https://www.google.com/maps?q=${Number(storeLocation.lat)},${Number(storeLocation.lng)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold hover:bg-sky-500/25 transition-all inline-flex items-center gap-1.5"
+              >
+                <Icon name="mapPin" className="w-3.5 h-3.5" />
+                Abrir en Maps
+              </a>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
+              Aún no configuraste la ubicación del comercio. Usá el botón para elegirla en el mapa.
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowStorePicker(true)}
+            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all inline-flex items-center gap-2"
+          >
+            <Icon name="mapPin" className="w-4 h-4" />
+            {storeLocation ? 'Cambiar ubicación del comercio' : 'Configurar ubicación'}
+          </button>
+
+          {showStorePicker && (
+            <MapPickerModal
+              title="Ubicación del comercio"
+              initial={storeLocation?.lat != null ? { lat: storeLocation.lat, lng: storeLocation.lng } : null}
+              onPick={async (p) => {
+                const ok = await onSaveStoreLocation(p);
+                if (ok) setShowStorePicker(false);
+              }}
+              onClose={() => setShowStorePicker(false)}
+            />
+          )}
+        </div>
       )}
 
       {/* Tab 6: Analytics */}
@@ -5565,9 +6554,10 @@ function DeleteOrderModal({ order, onClose, onConfirm }) {
   );
 }
 
-function OrderDetailModal({ order, rate, onClose, onRequestCancelOrder }) {
+function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder }) {
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
+  const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
   return (
     <div className="fixed inset-0 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
@@ -5605,11 +6595,28 @@ function OrderDetailModal({ order, rate, onClose, onRequestCancelOrder }) {
               <>
                 <Icon name="mapPin" className="w-3.5 h-3.5 text-amber-300" />
                 <span className="text-amber-300 font-bold">{order.address || 'Domicilio'}</span>
+                {order.lat != null && order.lng != null && (
+                  <a
+                    href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
+                  >
+                    <Icon name="mapPin" className="w-3 h-3" />
+                    Abrir en Maps
+                  </a>
+                )}
+                {order.courier_lat != null && order.courier_lng != null && (
+                  <span className="text-[10px] font-bold text-emerald-300 ml-auto">Repartidor en vivo</span>
+                )}
               </>
             ) : (
               <span className="text-teal-300 font-bold">Retiro por mostrador</span>
             )}
           </div>
+
+          {/* Mapa de entrega a domicilio */}
+          <DeliveryMap order={order} />
 
           <div className="rounded-2xl bg-slate-800/40 p-3 space-y-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block">Artículos</span>
@@ -5640,6 +6647,16 @@ function OrderDetailModal({ order, rate, onClose, onRequestCancelOrder }) {
               <span className="text-slate-500 font-semibold text-[10px] uppercase tracking-wider">Notas</span>
               <p className="text-slate-300 italic mt-1">"{order.notes}"</p>
             </div>
+          )}
+
+          {trackable && onTrackLiveOrder && (
+            <button
+              onClick={() => onTrackLiveOrder(order)}
+              className="w-full py-3 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold text-sm hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-2"
+            >
+              <Icon name="mapPin" className="w-4 h-4" />
+              Rastrear en vivo
+            </button>
           )}
 
           {cancellable && (

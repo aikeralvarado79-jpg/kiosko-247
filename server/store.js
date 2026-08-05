@@ -69,8 +69,18 @@ const fileStore = {
     this.persist();
   },
 
+  async updateCourierLocation(id, lat, lng) {
+    const now = new Date().toISOString();
+    this.state.orders = this.state.orders.map((o) =>
+      o.id === id ? { ...o, courier_lat: Number(lat), courier_lng: Number(lng), courier_updated_at: now } : o
+    );
+    this.persist();
+    return this.state.orders.find((o) => o.id === id) || null;
+  },
+
   async saveSettings(settings) {
-    this.state.settings = settings;
+    // Merge para no pisar adminPassword/adminCredentials al guardar otros ajustes.
+    this.state.settings = { ...this.state.settings, ...settings };
     this.persist();
   },
 
@@ -272,6 +282,10 @@ export async function refreshMirror() {
   if (MIRROR_SOURCE_SCHEMA === MIRROR_TARGET_SCHEMA) {
     return { ok: false, error: 'El schema fuente y destino deben ser distintos' };
   }
+  // Seguridad: nunca permitir reemplazar el schema donde vive la app (producción).
+  if (MIRROR_TARGET_SCHEMA === DB_SCHEMA || MIRROR_TARGET_SCHEMA === 'public') {
+    return { ok: false, error: 'El schema destino del espejo no puede ser public ni el de la app' };
+  }
   const client = await pgPool.connect();
   const tables = {};
   try {
@@ -295,6 +309,11 @@ export async function refreshMirror() {
       }
       if (t === 'orders') {
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS lat NUMERIC`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS lng NUMERIC`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_lat" NUMERIC`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_lng" NUMERIC`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_updated_at" TEXT`);
       }
       tables[t] = ins.rowCount;
     }
@@ -342,7 +361,13 @@ const pgStore = {
         status TEXT,
         timestamp TEXT,
         "estimatedMinutes" INTEGER,
-        "createdAt" TEXT
+        "createdAt" TEXT,
+        credit BOOLEAN DEFAULT false,
+        lat NUMERIC,
+        lng NUMERIC,
+        "courier_lat" NUMERIC,
+        "courier_lng" NUMERIC,
+        "courier_updated_at" TEXT
       );
       CREATE TABLE IF NOT EXISTS ${q('settings')} (
         key TEXT PRIMARY KEY,
@@ -377,6 +402,11 @@ const pgStore = {
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('webauthn_credentials')} ADD COLUMN IF NOT EXISTS rpID TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lat NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lng NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lat" NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lng" NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_updated_at" TEXT`);
   },
 
   async seedIfEmpty() {
@@ -429,6 +459,7 @@ const pgStore = {
     for (const row of settingsRes.rows) {
       try {
         if (row.key === 'promos' && Array.isArray(row.value)) settings.promos = row.value;
+        if (row.key === 'storeLocation' && row.value && typeof row.value === 'object') settings.storeLocation = row.value;
       } catch {}
     }
     return { products, categories, orders, settings };
@@ -456,9 +487,9 @@ const pgStore = {
     await this.pool.query(`DELETE FROM ${q('orders')}`);
     for (const o of orders) {
       await this.pool.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit)]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "courier_lat", "courier_lng", "courier_updated_at")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit), o.lat != null ? Number(o.lat) : null, o.lng != null ? Number(o.lng) : null, o.courier_lat != null ? Number(o.courier_lat) : null, o.courier_lng != null ? Number(o.courier_lng) : null, o.courier_updated_at || null]
       );
     }
   },
@@ -469,6 +500,13 @@ const pgStore = {
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['promos', JSON.stringify(settings.promos || [])]
     );
+    if (settings.storeLocation && typeof settings.storeLocation === 'object') {
+      await this.pool.query(
+        `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        ['storeLocation', JSON.stringify(settings.storeLocation)]
+      );
+    }
   },
 
   async getAdminPassword() {
@@ -731,13 +769,15 @@ const pgStore = {
         timestamp: orderData.timestamp || '',
         estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
         createdAt: orderData.createdAt || new Date().toISOString(),
-        credit: Boolean(orderData.credit)
+        credit: Boolean(orderData.credit),
+        lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
+        lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null
       };
 
       await client.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit, order.lat, order.lng]
       );
 
       // Registrar/actualizar el cliente reconocido en la misma transacción
@@ -767,6 +807,138 @@ const pgStore = {
     } finally {
       client.release();
     }
+  },
+
+  async updateCourierLocation(id, lat, lng) {
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('orders')} SET "courier_lat" = $2, "courier_lng" = $3, "courier_updated_at" = $4
+       WHERE id = $1 RETURNING *`,
+      [id, Number(lat), Number(lng), new Date().toISOString()]
+    );
+    return rows[0] || null;
+  },
+
+  async withTx(fn) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
+  // Actualiza el estado de un pedido de forma atómica (UPDATE por id, sin
+  // reescribir toda la tabla). Evita que requests concurrentes borren pedidos.
+  async atomicUpdateOrderStatus(id, status) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT * FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      const existing = rows[0];
+      if (!existing) return { error: 'Pedido no encontrado' };
+      await client.query(`UPDATE ${q('orders')} SET status = $2 WHERE id = $1`, [id, status]);
+      if (existing.credit && status === 'entregado') {
+        await client.query(
+          `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) + $2, "customerName" = COALESCE(NULLIF($3, ''), "customerName")
+           WHERE phone = $1`,
+          [existing.phone, Number(existing.total) || 0, existing.customerName || '']
+        );
+      }
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
+  // Cancela un pedido devolviendo stock, todo en una transacción con lock.
+  async atomicCancelOrder(id, phone) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT * FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      const existing = rows[0];
+      if (!existing) return { error: 'Pedido no encontrado' };
+      if (normalizePhone(existing.phone) !== normalizePhone(phone)) {
+        return { error: 'No autorizado para cancelar este pedido' };
+      }
+      if (existing.status === 'cancelado') return { error: 'El pedido ya fue cancelado' };
+      if (existing.status === 'listo' || existing.status === 'entregado') {
+        return { error: 'Este pedido ya no puede cancelarse' };
+      }
+      await client.query(`UPDATE ${q('orders')} SET status = 'cancelado' WHERE id = $1`, [id]);
+      for (const it of existing.items || []) {
+        await client.query(
+          `UPDATE ${q('products')} SET stock = stock + $1 WHERE id = $2`,
+          [Number(it.quantity) || 0, it.id]
+        );
+      }
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
+  // Elimina un pedido solo si está cancelado (DELETE por id).
+  async atomicDeleteOrder(id) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT status FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      if (!rows[0]) return { error: 'Pedido no encontrado' };
+      if (rows[0].status !== 'cancelado') return { error: 'Solo se pueden eliminar pedidos cancelados' };
+      await client.query(`DELETE FROM ${q('orders')} WHERE id = $1`, [id]);
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
+  // Crea un producto con INSERT puntual (no borra ni reescribe la tabla).
+  async atomicCreateProduct(data) {
+    const product = {
+      ...data,
+      id: generateProductId(),
+      code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`
+    };
+    await this.pool.query(
+      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [product.id, product.code, product.name, product.brand, product.description, product.price, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '']
+    );
+    if (product.category) {
+      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [product.category]);
+    }
+    return { state: await this.getState() };
+  },
+
+  // Actualiza un producto con UPDATE puntual (sin tocar otras filas).
+  async atomicUpdateProduct(id, data) {
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('products')} WHERE id = $1 FOR UPDATE`, [id]);
+    if (!rows[0]) return { error: 'Producto no encontrado' };
+    const p = { ...rows[0], ...data, id };
+    await this.pool.query(
+      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11 WHERE id=$1`,
+      [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
+    );
+    if (p.category) {
+      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [p.category]);
+    }
+    return { state: await this.getState() };
+  },
+
+  // Elimina un producto con DELETE puntual.
+  async atomicDeleteProduct(id) {
+    await this.pool.query(`DELETE FROM ${q('products')} WHERE id = $1`, [id]);
+    return { state: await this.getState() };
+  },
+
+  // Agrega una categoría con INSERT idempotente.
+  async atomicAddCategory(name) {
+    await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
+    return { state: await this.getState() };
   }
 };
 
@@ -802,6 +974,30 @@ export const setCustomerBalance = (phone, amount) => store.setCustomerBalance(ph
 export const addOrderToAccount = (order) => store.addOrderToAccount(order);
 
 export const addDebtToCustomer = (data) => store.addDebtToCustomer(data);
+
+export const updateCourierLocation = (id, lat, lng) => store.updateCourierLocation(id, lat, lng);
+
+// Devuelve los datos públicos de rastreo de un pedido (destino + posición del
+// repartidor), sin exponer datos sensibles de otros pedidos.
+export const getOrderTracking = async (id) => {
+  const state = await store.getState();
+  const order = state.orders.find((o) => o.id === id);
+  if (!order) return null;
+  return {
+    id: order.id,
+    status: order.status,
+    type: order.type,
+    address: order.address || '',
+    lat: order.lat != null ? Number(order.lat) : null,
+    lng: order.lng != null ? Number(order.lng) : null,
+    courier_lat: order.courier_lat != null ? Number(order.courier_lat) : null,
+    courier_lng: order.courier_lng != null ? Number(order.courier_lng) : null,
+    courier_updated_at: order.courier_updated_at || null,
+    estimatedMinutes: Number(order.estimatedMinutes) || 10,
+    timestamp: order.timestamp || '',
+    storeLocation: (state.settings && state.settings.storeLocation) || null
+  };
+};
 
 export const getWebAuthnByPhone = (phone) => store.getWebAuthnByPhone(phone);
 
@@ -883,7 +1079,9 @@ export const createOrder = async (orderData) => {
     timestamp: orderData.timestamp || '',
     estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
     createdAt: orderData.createdAt || new Date().toISOString(),
-    credit: Boolean(orderData.credit)
+    credit: Boolean(orderData.credit),
+    lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
+    lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null
   };
 
   const orders = [order, ...state.orders];
@@ -905,6 +1103,7 @@ export const createOrder = async (orderData) => {
 };
 
 export const createProduct = async (data) => {
+  if (pgPool) return pgStore.atomicCreateProduct(data);
   const state = await store.getState();
   const product = {
     ...data,
@@ -922,6 +1121,7 @@ export const createProduct = async (data) => {
 };
 
 export const updateProduct = async (id, data) => {
+  if (pgPool) return pgStore.atomicUpdateProduct(id, data);
   const state = await store.getState();
   const existing = state.products.find((p) => p.id === id);
   if (!existing) return { error: 'Producto no encontrado' };
@@ -937,6 +1137,7 @@ export const updateProduct = async (id, data) => {
 };
 
 export const deleteProduct = async (id) => {
+  if (pgPool) return pgStore.atomicDeleteProduct(id);
   const state = await store.getState();
   await store.saveProducts(state.products.filter((p) => p.id !== id));
   const newState = await store.getState();
@@ -944,6 +1145,7 @@ export const deleteProduct = async (id) => {
 };
 
 export const addCategory = async (name) => {
+  if (pgPool) return pgStore.atomicAddCategory(name);
   const state = await store.getState();
   await store.saveCategories(maybeAddCategory(state.categories, name));
   const newState = await store.getState();
@@ -951,6 +1153,7 @@ export const addCategory = async (name) => {
 };
 
 export const updateOrderStatus = async (id, status) => {
+  if (pgPool) return pgStore.atomicUpdateOrderStatus(id, status);
   const state = await store.getState();
   const existing = state.orders.find((o) => o.id === id);
   if (!existing) return { error: 'Pedido no encontrado' };
@@ -970,6 +1173,7 @@ export const updateOrderStatus = async (id, status) => {
 // Cancela un pedido devolviendo el stock de sus artículos. Solo permite cancelar
 // pedidos pendientes o en preparación que pertenezcan al teléfono que los cancela.
 export const cancelOrder = async (id, phone) => {
+  if (pgPool) return pgStore.atomicCancelOrder(id, phone);
   const state = await store.getState();
   const existing = state.orders.find((o) => o.id === id);
   if (!existing) return { error: 'Pedido no encontrado' };
@@ -996,6 +1200,7 @@ export const cancelOrder = async (id, phone) => {
 
 // Elimina un pedido (solo si está cancelado). Para limpiar la lista del admin.
 export const deleteOrder = async (id) => {
+  if (pgPool) return pgStore.atomicDeleteOrder(id);
   const state = await store.getState();
   const existing = state.orders.find((o) => o.id === id);
   if (!existing) return { error: 'Pedido no encontrado' };

@@ -282,6 +282,10 @@ export async function refreshMirror() {
   if (MIRROR_SOURCE_SCHEMA === MIRROR_TARGET_SCHEMA) {
     return { ok: false, error: 'El schema fuente y destino deben ser distintos' };
   }
+  // Seguridad: nunca permitir reemplazar el schema donde vive la app (producción).
+  if (MIRROR_TARGET_SCHEMA === DB_SCHEMA || MIRROR_TARGET_SCHEMA === 'public') {
+    return { ok: false, error: 'El schema destino del espejo no puede ser public ni el de la app' };
+  }
   const client = await pgPool.connect();
   const tables = {};
   try {
@@ -812,6 +816,129 @@ const pgStore = {
       [id, Number(lat), Number(lng), new Date().toISOString()]
     );
     return rows[0] || null;
+  },
+
+  async withTx(fn) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
+  // Actualiza el estado de un pedido de forma atómica (UPDATE por id, sin
+  // reescribir toda la tabla). Evita que requests concurrentes borren pedidos.
+  async atomicUpdateOrderStatus(id, status) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT * FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      const existing = rows[0];
+      if (!existing) return { error: 'Pedido no encontrado' };
+      await client.query(`UPDATE ${q('orders')} SET status = $2 WHERE id = $1`, [id, status]);
+      if (existing.credit && status === 'entregado') {
+        await client.query(
+          `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) + $2, "customerName" = COALESCE(NULLIF($3, ''), "customerName")
+           WHERE phone = $1`,
+          [existing.phone, Number(existing.total) || 0, existing.customerName || '']
+        );
+      }
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
+  // Cancela un pedido devolviendo stock, todo en una transacción con lock.
+  async atomicCancelOrder(id, phone) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT * FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      const existing = rows[0];
+      if (!existing) return { error: 'Pedido no encontrado' };
+      if (normalizePhone(existing.phone) !== normalizePhone(phone)) {
+        return { error: 'No autorizado para cancelar este pedido' };
+      }
+      if (existing.status === 'cancelado') return { error: 'El pedido ya fue cancelado' };
+      if (existing.status === 'listo' || existing.status === 'entregado') {
+        return { error: 'Este pedido ya no puede cancelarse' };
+      }
+      await client.query(`UPDATE ${q('orders')} SET status = 'cancelado' WHERE id = $1`, [id]);
+      for (const it of existing.items || []) {
+        await client.query(
+          `UPDATE ${q('products')} SET stock = stock + $1 WHERE id = $2`,
+          [Number(it.quantity) || 0, it.id]
+        );
+      }
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
+  // Elimina un pedido solo si está cancelado (DELETE por id).
+  async atomicDeleteOrder(id) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT status FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      if (!rows[0]) return { error: 'Pedido no encontrado' };
+      if (rows[0].status !== 'cancelado') return { error: 'Solo se pueden eliminar pedidos cancelados' };
+      await client.query(`DELETE FROM ${q('orders')} WHERE id = $1`, [id]);
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
+  // Crea un producto con INSERT puntual (no borra ni reescribe la tabla).
+  async atomicCreateProduct(data) {
+    const product = {
+      ...data,
+      id: generateProductId(),
+      code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`
+    };
+    await this.pool.query(
+      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [product.id, product.code, product.name, product.brand, product.description, product.price, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '']
+    );
+    if (product.category) {
+      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [product.category]);
+    }
+    return { state: await this.getState() };
+  },
+
+  // Actualiza un producto con UPDATE puntual (sin tocar otras filas).
+  async atomicUpdateProduct(id, data) {
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('products')} WHERE id = $1 FOR UPDATE`, [id]);
+    if (!rows[0]) return { error: 'Producto no encontrado' };
+    const p = { ...rows[0], ...data, id };
+    await this.pool.query(
+      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11 WHERE id=$1`,
+      [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
+    );
+    if (p.category) {
+      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [p.category]);
+    }
+    return { state: await this.getState() };
+  },
+
+  // Elimina un producto con DELETE puntual.
+  async atomicDeleteProduct(id) {
+    await this.pool.query(`DELETE FROM ${q('products')} WHERE id = $1`, [id]);
+    return { state: await this.getState() };
+  },
+
+  // Agrega una categoría con INSERT idempotente.
+  async atomicAddCategory(name) {
+    await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
+    return { state: await this.getState() };
   }
 };
 
@@ -976,6 +1103,7 @@ export const createOrder = async (orderData) => {
 };
 
 export const createProduct = async (data) => {
+  if (pgPool) return pgStore.atomicCreateProduct(data);
   const state = await store.getState();
   const product = {
     ...data,
@@ -993,6 +1121,7 @@ export const createProduct = async (data) => {
 };
 
 export const updateProduct = async (id, data) => {
+  if (pgPool) return pgStore.atomicUpdateProduct(id, data);
   const state = await store.getState();
   const existing = state.products.find((p) => p.id === id);
   if (!existing) return { error: 'Producto no encontrado' };
@@ -1008,6 +1137,7 @@ export const updateProduct = async (id, data) => {
 };
 
 export const deleteProduct = async (id) => {
+  if (pgPool) return pgStore.atomicDeleteProduct(id);
   const state = await store.getState();
   await store.saveProducts(state.products.filter((p) => p.id !== id));
   const newState = await store.getState();
@@ -1015,6 +1145,7 @@ export const deleteProduct = async (id) => {
 };
 
 export const addCategory = async (name) => {
+  if (pgPool) return pgStore.atomicAddCategory(name);
   const state = await store.getState();
   await store.saveCategories(maybeAddCategory(state.categories, name));
   const newState = await store.getState();
@@ -1022,6 +1153,7 @@ export const addCategory = async (name) => {
 };
 
 export const updateOrderStatus = async (id, status) => {
+  if (pgPool) return pgStore.atomicUpdateOrderStatus(id, status);
   const state = await store.getState();
   const existing = state.orders.find((o) => o.id === id);
   if (!existing) return { error: 'Pedido no encontrado' };
@@ -1041,6 +1173,7 @@ export const updateOrderStatus = async (id, status) => {
 // Cancela un pedido devolviendo el stock de sus artículos. Solo permite cancelar
 // pedidos pendientes o en preparación que pertenezcan al teléfono que los cancela.
 export const cancelOrder = async (id, phone) => {
+  if (pgPool) return pgStore.atomicCancelOrder(id, phone);
   const state = await store.getState();
   const existing = state.orders.find((o) => o.id === id);
   if (!existing) return { error: 'Pedido no encontrado' };
@@ -1067,6 +1200,7 @@ export const cancelOrder = async (id, phone) => {
 
 // Elimina un pedido (solo si está cancelado). Para limpiar la lista del admin.
 export const deleteOrder = async (id) => {
+  if (pgPool) return pgStore.atomicDeleteOrder(id);
   const state = await store.getState();
   const existing = state.orders.find((o) => o.id === id);
   if (!existing) return { error: 'Pedido no encontrado' };

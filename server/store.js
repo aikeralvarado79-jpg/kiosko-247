@@ -199,6 +199,44 @@ const fileStore = {
       await this.upsertCustomer({ phone: order.phone, customerName: order.customerName });
     }
     return this.setCustomerBalance(key, Number(existing ? existing.balance : 0) + Number(order.total) || 0);
+  },
+
+  // Registra una deuda manual por productos (ventas presenciales o deudas
+  // anteriores a la app). Crea un pedido a crédito entregado y lo suma al
+  // balance del cliente. No descuenta stock: no es una venta real por la app.
+  async addDebtToCustomer({ phone, customerName, items }) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const normalized = (items || []).map((it) => ({
+      id: it.id,
+      name: it.name,
+      price: Number(it.price) || 0,
+      quantity: Number(it.quantity) || 1
+    }));
+    const total = normalized.reduce((acc, it) => acc + it.price * it.quantity, 0);
+    let id;
+    do {
+      id = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+    } while (this.state.orders.some((o) => o.id === id));
+    const order = {
+      id,
+      customerName: customerName || 'Cliente',
+      phone: key,
+      type: 'pickup',
+      address: undefined,
+      notes: 'Deuda registrada manualmente',
+      items: normalized,
+      total,
+      status: 'entregado',
+      timestamp: new Date().toISOString(),
+      estimatedMinutes: 10,
+      createdAt: new Date().toISOString(),
+      credit: true
+    };
+    this.state.orders = [order, ...this.state.orders];
+    await this.addOrderToAccount(order);
+    this.persist();
+    return order;
   }
 };
 
@@ -264,7 +302,8 @@ export async function refreshMirror() {
     return { ok: true, source: MIRROR_SOURCE_SCHEMA, target: MIRROR_TARGET_SCHEMA, tables };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    return { ok: false, error: err.message };
+    console.error('[kiosko] Error refrescando el espejo:', err);
+    return { ok: false, error: 'No se pudo actualizar la base de datos de calidad. Intentá de nuevo.' };
   } finally {
     client.release();
   }
@@ -337,6 +376,7 @@ const pgStore = {
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
+    await this.pool.query(`ALTER TABLE ${q('webauthn_credentials')} ADD COLUMN IF NOT EXISTS rpID TEXT`);
   },
 
   async seedIfEmpty() {
@@ -535,6 +575,49 @@ const pgStore = {
     return this.setCustomerBalance(key, Number(order.total) || 0);
   },
 
+  // Registra una deuda manual por productos (ventas presenciales o deudas
+  // anteriores a la app). Crea un pedido a crédito entregado y lo suma al
+  // balance del cliente. No descuenta stock: no es una venta real por la app.
+  async addDebtToCustomer({ phone, customerName, items }) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const normalized = (items || []).map((it) => ({
+      id: it.id,
+      name: it.name,
+      price: Number(it.price) || 0,
+      quantity: Number(it.quantity) || 1
+    }));
+    const total = normalized.reduce((acc, it) => acc + it.price * it.quantity, 0);
+    let id;
+    do {
+      id = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+      const dup = await this.pool.query(`SELECT 1 FROM ${q('orders')} WHERE id = $1`, [id]);
+      if (dup.rowCount > 0) id = null;
+    } while (!id);
+    const order = {
+      id,
+      customerName: customerName || 'Cliente',
+      phone: key,
+      type: 'pickup',
+      address: undefined,
+      notes: 'Deuda registrada manualmente',
+      items: normalized,
+      total,
+      status: 'entregado',
+      timestamp: new Date().toISOString(),
+      estimatedMinutes: 10,
+      createdAt: new Date().toISOString(),
+      credit: true
+    };
+    await this.pool.query(
+      `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit]
+    );
+    await this.addOrderToAccount(order);
+    return order;
+  },
+
   async getWebAuthnByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
@@ -585,7 +668,15 @@ const pgStore = {
          "lastOrderAt" = EXCLUDED."lastOrderAt"`,
       [key, customerName || existing?.customerName || 'Cliente', JSON.stringify(addresses), existing?.createdAt || now, now]
     );
-    return { phone: key, customerName: customerName || existing?.customerName || 'Cliente', addresses, createdAt: existing?.createdAt || now, lastOrderAt: now };
+    return {
+      phone: key,
+      customerName: customerName || existing?.customerName || 'Cliente',
+      addresses,
+      createdAt: existing?.createdAt || now,
+      lastOrderAt: now,
+      balance: Number(existing?.balance) || 0,
+      isBenefited: Boolean(existing?.isBenefited)
+    };
   },
 
   async upsertCustomerFromOrder(order) {
@@ -709,6 +800,8 @@ export const setCustomerBenefited = (phone, benefited) => store.setCustomerBenef
 export const setCustomerBalance = (phone, amount) => store.setCustomerBalance(phone, amount);
 
 export const addOrderToAccount = (order) => store.addOrderToAccount(order);
+
+export const addDebtToCustomer = (data) => store.addDebtToCustomer(data);
 
 export const getWebAuthnByPhone = (phone) => store.getWebAuthnByPhone(phone);
 

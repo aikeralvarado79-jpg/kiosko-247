@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Component } from 'react';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
 
@@ -357,7 +357,7 @@ export default function App() {
     const res = await api.getState();
     if (!res.ok) {
       if (!silent) {
-        setLoadError('No se pudo conectar con el servidor. Asegurate de ejecutar "npm run dev:all".');
+        setLoadError('No se pudo conectar con el servidor. Verificá tu conexión a internet e intentá de nuevo.');
       }
       setIsLoading(false);
       return;
@@ -405,6 +405,11 @@ export default function App() {
   // Cliente reconocido (pre-llenado automático del checkout)
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
 
+  // Bienvenida a pantalla completa tras iniciar sesión (cliente o admin).
+  // { name, tag }: name = primer nombre a mostrar, tag = texto superior.
+  // Se muestra justo tras identificarse y se cierra al instante con un toque.
+  const [welcome, setWelcome] = useState(null);
+
   // True si el cliente identificado figura en la lista de administradores por teléfono
   const isCurrentAdmin = useMemo(() => {
     if (!savedCustomer?.phoneNumber) return false;
@@ -422,7 +427,9 @@ export default function App() {
     }
   }, [activeView, savedCustomer]);
 
-  // Perfil del cliente desde el servidor (direcciones guardadas, etc.)
+  // Perfil del cliente desde el servidor (direcciones guardadas, balance, etc.)
+  // Se recarga también cuando cambia orders (polling) para que el saldo de Mi
+  // Cuenta se actualice al pasar un pedido a entregado o al saldar la deuda.
   const [customerProfile, setCustomerProfile] = useState(null);
 
   // Al reconocer un cliente con teléfono, buscar su perfil y direcciones guardadas
@@ -441,7 +448,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [savedCustomer?.phoneCode, savedCustomer?.phoneNumber]);
+  }, [savedCustomer?.phoneCode, savedCustomer?.phoneNumber, orders]);
 
   // Historial de pedidos del cliente reconocido, para "Mis Pedidos"
   const customerOrders = useMemo(() => {
@@ -564,6 +571,27 @@ export default function App() {
     }
     setToken(res.data.token);
     setIsAdminAuthed(true);
+    // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
+    // desde el cliente reconocido, la lista de clientes o el perfil en el server.
+    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+    let adminName = '';
+    const savedKey = savedCustomer
+      ? `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber || ''}`.replace(/\D/g, '').slice(-11)
+      : '';
+    if (savedKey === phoneKey && savedCustomer?.customerName) {
+      adminName = savedCustomer.customerName;
+    } else {
+      const known = (allCustomers || []).find(
+        (c) => normalizePhoneDigits(c.phone) === phoneKey && c.customerName
+      );
+      if (known) {
+        adminName = known.customerName;
+      } else {
+        const profile = await api.getCustomer(phoneKey);
+        if (profile.ok && profile.data?.customerName) adminName = profile.data.customerName;
+      }
+    }
+    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
     addToast('Sesión iniciada en el panel admin');
     return true;
   };
@@ -594,6 +622,18 @@ export default function App() {
     }
     await loadCustomers();
     addToast('Cliente añadido a la lista negra', 'success');
+    return true;
+  };
+
+  const handleAddBlacklistDebt = async ({ phone, name, items }) => {
+    const res = await api.addBlacklistDebt({ phone, name, items });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo registrar la deuda', 'error');
+      return false;
+    }
+    await loadCustomers();
+    await loadState({ silent: true });
+    addToast('Productos añadidos a la deuda', 'success');
     return true;
   };
 
@@ -791,6 +831,10 @@ export default function App() {
     saveCustomerData(record);
     setSavedCustomer(record);
     setIsIdentityOpen(false);
+    // Bienvenida a pantalla completa con el nombre del usuario (primer nombre).
+    // Se monta en el mismo render en que se cierra el modal, así la app nunca
+    // se ve antes de la animación.
+    setWelcome({ name: customerName.trim().split(' ')[0] || customerName.trim(), tag: 'Bienvenido' });
     const known = buildKnownCustomers(orders, record);
     const isReturning = known.some((c) => c.number === phoneNumber && c.code === phoneCode);
     addToast(isReturning ? `¡Hola de nuevo, ${customerName.split(' ')[0]}!` : `¡Bienvenido, ${customerName.split(' ')[0]}!`);
@@ -1090,6 +1134,7 @@ export default function App() {
             lastOrderForCustomer={lastOrderForCustomer}
             onRepeatLastOrder={handleRepeatLastOrder}
             customerOrders={customerOrders}
+            orders={orders}
             customerProfile={customerProfile}
             onViewOrderDetail={(order) => setOrderDetailOrder(order)}
             onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
@@ -1121,6 +1166,7 @@ export default function App() {
             onLoadCustomers={loadCustomers}
             onToggleBenefited={handleToggleBenefited}
             onAddToBlacklist={handleAddToBlacklist}
+            onAddBlacklistDebt={handleAddBlacklistDebt}
             collections={collections}
             onLoadCollections={loadCollections}
             onUpsertCollection={handleUpsertCollection}
@@ -1258,6 +1304,51 @@ export default function App() {
       <footer className="mt-auto border-t border-slate-800/80 bg-slate-950/60 py-5 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500">
         <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
       </footer>
+
+      {/* Bienvenida a pantalla completa tras el inicio de sesión */}
+      {welcome && (
+        <WelcomeOverlay
+          name={welcome.name}
+          tag={welcome.tag}
+          onDone={() => setWelcome(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
+  // Cualquier toque/click cierra la bienvenida al instante. También se cierra
+  // sola tras unos segundos por si el cliente no toca la pantalla.
+  useEffect(() => {
+    const t = setTimeout(onDone, 3200);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  const isAdmin = tag.toLowerCase().includes('panel');
+
+  return (
+    <div
+      onClick={onDone}
+      className="fixed inset-0 z-[80] flex flex-col items-center justify-center bg-gradient-to-br from-teal-700 via-cyan-800 to-slate-950 animate-welcome-overlay cursor-pointer select-none touch-manipulation"
+      role="dialog"
+      aria-label={`${tag} ${name}`}
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(45,212,191,0.15),transparent_60%)] animate-welcome-glow pointer-events-none" />
+      <div className="relative flex flex-col items-center text-center px-6">
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-white/10 border border-white/20 backdrop-blur-md flex items-center justify-center mb-6 sm:mb-8 animate-welcome-pop shadow-2xl shadow-teal-500/20">
+          <Icon name={isAdmin ? 'users' : 'sparkles'} className="w-8 h-8 sm:w-10 sm:h-10 text-teal-200" />
+        </div>
+        <p className="text-[11px] sm:text-xs font-bold uppercase tracking-[0.35em] text-teal-200/80 mb-3 animate-welcome-pop">
+          {tag}
+        </p>
+        <h2 className="text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
+          {name}
+        </h2>
+        <p className="text-xs sm:text-sm text-teal-100/70 animate-welcome-pop">
+          Toca en cualquier parte para continuar
+        </p>
+      </div>
     </div>
   );
 }
@@ -1376,8 +1467,8 @@ function AdminLoginView({ onLogin, onBack }) {
       setBiometricResponse(authResponse);
       setRecoverStep('newpass');
       setRecoverError('');
-    } catch (err) {
-      setRecoverError(err.message || 'No se pudo verificar la biometría.');
+    } catch {
+      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intentá de nuevo.');
       setRecoverStep('phone');
     }
   };
@@ -1579,6 +1670,41 @@ function AdminLoginView({ onLogin, onBack }) {
       </div>
     </div>
   );
+}
+
+// Captura errores de render para no dejar la pantalla en blanco sin aviso.
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-md">
+          <div className="w-full max-w-md bg-slate-900 border border-red-500/40 rounded-3xl p-6 text-center">
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-red-500/15 flex items-center justify-center mb-3">
+              <Icon name="alertTriangle" className="w-6 h-6 text-red-400" />
+            </div>
+            <h3 className="text-base font-black text-white mb-1">Algo salió mal</h3>
+            <p className="text-xs text-slate-400 leading-relaxed mb-4">
+              Ocurrió un problema inesperado al cargar esta sección. Tocá Reintentar para intentarlo de nuevo.
+            </p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="w-full py-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 text-sm font-bold hover:bg-red-500/30 transition-all"
+            >
+              Reintentar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function CustomerView({
@@ -2088,12 +2214,14 @@ function CustomerView({
         </div>
       )}
       {showDebtDetail && customerProfile && (
-        <CustomerDebtModal
-          customer={customerProfile}
-          orders={orders}
-          rate={rate}
-          onClose={() => setShowDebtDetail(false)}
-        />
+        <ErrorBoundary>
+          <CustomerDebtModal
+            customer={customerProfile}
+            orders={orders}
+            rate={rate}
+            onClose={() => setShowDebtDetail(false)}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );
@@ -2413,7 +2541,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
       onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
     } catch (err) {
       setIsWorking(false);
-      setWebauthnError(err.message || 'No se pudo completar la verificación');
+      setWebauthnError(friendlyAuthError(err));
       setStep('form');
     }
   };
@@ -3120,6 +3248,7 @@ function AdminView({
   onLoadCustomers,
   onToggleBenefited,
   onAddToBlacklist,
+  onAddBlacklistDebt,
   collections,
   onLoadCollections,
   onUpsertCollection,
@@ -3245,19 +3374,21 @@ function AdminView({
             <Icon name="plus" className="w-5 h-5" />
             <span>Nuevo Producto</span>
           </button>
-          <button
-            onClick={() => {
-              if (window.confirm('¿Reemplazar los datos de calidad con una copia de producción? Esta acción no se puede deshacer.')) {
-                onRefreshDb();
-              }
-            }}
-            disabled={refreshingDb}
-            className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
-            title="Copiar datos de producción hacia calidad (reemplaza el contenido actual de calidad)"
-          >
-            <Icon name="refresh" className="w-4 h-4" />
-            <span className="hidden sm:inline">{refreshingDb ? 'Refrescando…' : 'Refrescar datos'}</span>
-          </button>
+          {window.location.hostname === 'kiosko-247-staging.onrender.com' && (
+            <button
+              onClick={() => {
+                if (window.confirm('¿Reemplazar los datos de calidad con una copia de producción? Esta acción no se puede deshacer.')) {
+                  onRefreshDb();
+                }
+              }}
+              disabled={refreshingDb}
+              className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+              title="Copiar datos de producción hacia calidad (reemplaza el contenido actual de calidad)"
+            >
+              <Icon name="refresh" className="w-4 h-4" />
+              <span className="hidden sm:inline">{refreshingDb ? 'Refrescando…' : 'Refrescar datos'}</span>
+            </button>
+          )}
           <button
             onClick={onLogout}
             className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-rose-300 hover:border-rose-500/40 transition-all flex items-center justify-center gap-2"
@@ -3901,8 +4032,10 @@ function AdminView({
           customers={allCustomers}
           orders={orders}
           rate={rate}
+          products={products}
           onLoadCustomers={onLoadCustomers}
           onAddToBlacklist={onAddToBlacklist}
+          onAddBlacklistDebt={onAddBlacklistDebt}
           collections={collections}
           onUpsertCollection={onUpsertCollection}
           onDeleteCollection={onDeleteCollection}
@@ -4046,8 +4179,10 @@ function BlacklistAdminView({
   customers,
   orders,
   rate,
+  products,
   onLoadCustomers,
   onAddToBlacklist,
+  onAddBlacklistDebt,
   collections,
   onUpsertCollection,
   onDeleteCollection
@@ -4056,6 +4191,7 @@ function BlacklistAdminView({
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [selectedDebtor, setSelectedDebtor] = useState(null); // customer abierto
+  const [isAddProductsOpen, setIsAddProductsOpen] = useState(false);
 
   const debtors = customers.filter((c) => (Number(c.balance) || 0) > 0);
 
@@ -4066,6 +4202,14 @@ function BlacklistAdminView({
       setPhone('');
       setName('');
       setAmount('');
+    }
+  };
+
+  const handleAddDebt = async ({ phone: targetPhone, name: targetName, items }) => {
+    const ok = await onAddBlacklistDebt({ phone: targetPhone, name: targetName, items });
+    if (ok) {
+      setIsAddProductsOpen(false);
+      setSelectedDebtor(null);
     }
   };
 
@@ -4084,12 +4228,21 @@ function BlacklistAdminView({
             Clientes con saldo pendiente. Toca un deudor para ver el desglose, enviar la cuenta por WhatsApp o programar el cobro.
           </p>
         </div>
-        <button
-          onClick={onLoadCustomers}
-          className="px-3 py-2 rounded-xl bg-slate-700 text-slate-100 text-xs font-bold hover:bg-slate-600 transition-colors"
-        >
-          Actualizar lista
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsAddProductsOpen(true)}
+            className="px-3 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-colors flex items-center gap-1.5"
+          >
+            <Icon name="plus" className="w-4 h-4" />
+            Añadir productos
+          </button>
+          <button
+            onClick={onLoadCustomers}
+            className="px-3 py-2 rounded-xl bg-slate-700 text-slate-100 text-xs font-bold hover:bg-slate-600 transition-colors"
+          >
+            Actualizar lista
+          </button>
+        </div>
       </div>
 
       <form
@@ -4181,6 +4334,243 @@ function BlacklistAdminView({
           onDeleteCollection={onDeleteCollection}
         />
       )}
+
+      {/* Modal para añadir productos a la deuda de un cliente */}
+      {isAddProductsOpen && (
+        <AddDebtProductsModal
+          products={products}
+          rate={rate}
+          customers={customers}
+          onClose={() => setIsAddProductsOpen(false)}
+          onConfirm={handleAddDebt}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal que permite registrar una deuda por productos (ventas presenciales o
+// deudas anteriores a la app). Muestra el catálogo actual y deja elegir
+// cantidades; al confirmar crea un pedido a crédito entregado para el cliente.
+function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm }) {
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [category, setCategory] = useState('Todas');
+  const [search, setSearch] = useState('');
+  const [qty, setQty] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const categories = ['Todas', ...new Set((products || []).map((p) => p.category).filter(Boolean))];
+
+  const filtered = (products || []).filter((p) => {
+    if (category !== 'Todas' && p.category !== category) return false;
+    if (search && !`${p.name} ${p.brand || ''} ${p.code || ''}`.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  const selectedItems = (products || [])
+    .filter((p) => Number(qty[p.id]) > 0)
+    .map((p) => ({ id: p.id, name: p.name, price: p.price, quantity: Number(qty[p.id]) }));
+  const total = selectedItems.reduce((acc, it) => acc + Number(it.price || 0) * it.quantity, 0);
+
+  const changeQty = (id, delta) => {
+    setQty((prev) => {
+      const next = Math.max(0, (Number(prev[id]) || 0) + delta);
+      return { ...prev, [id]: next };
+    });
+  };
+
+  const pickCustomer = (phone) => {
+    const c = (customers || []).find((x) => normalizePhoneDigits(x.phone) === normalizePhoneDigits(phone));
+    setCustomerPhone(phone);
+    if (c) setCustomerName(c.customerName || '');
+  };
+
+  const handleConfirm = async () => {
+    const key = customerPhone.replace(/\D/g, '').slice(-11);
+    if (key.length < 7) {
+      setError('Ingresá el número de teléfono del deudor');
+      return;
+    }
+    if (selectedItems.length === 0) {
+      setError('Seleccioná al menos un producto');
+      return;
+    }
+    setError('');
+    setSubmitting(true);
+    await onConfirm({ phone: key, name: customerName, items: selectedItems });
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="package" className="w-5 h-5 text-amber-400" />
+              Añadir productos a la deuda
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Seleccioná el cliente y los productos que debe (ventas presenciales o deudas viejas).
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+          {/* Cliente */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Deudor (cliente registrado)</label>
+              <select
+                value=""
+                onChange={(e) => e.target.value && pickCustomer(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-amber-500 focus:outline-none"
+              >
+                <option value="">— Seleccionar deudor existente —</option>
+                {(customers || []).map((c) => (
+                  <option key={c.phone} value={c.phone}>
+                    {c.customerName || 'Cliente'} · {c.phone} · {formatUsd(Number(c.balance) || 0)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono *</label>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={customerPhone}
+                  onChange={(e) => pickCustomer(e.target.value)}
+                  placeholder="0414 1234567"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre</label>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="Nombre del deudor"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Filtros del catálogo */}
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar producto…"
+              className="flex-1 min-w-[180px] px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+            />
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
+            >
+              {categories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Catálogo con cantidades */}
+          <div className="space-y-2">
+            {filtered.length === 0 ? (
+              <p className="text-sm text-slate-500 py-6 text-center">No hay productos en el catálogo.</p>
+            ) : (
+              filtered.map((p) => {
+                const n = Number(qty[p.id]) || 0;
+                return (
+                  <div
+                    key={p.id}
+                    className={`flex items-center gap-3 p-2.5 rounded-xl border transition-all ${n > 0 ? 'bg-amber-500/10 border-amber-500/40' : 'bg-slate-950 border-slate-800'}`}
+                  >
+                    <img
+                      src={p.image}
+                      alt={p.name}
+                      className="w-11 h-11 rounded-lg object-cover bg-slate-900 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-100 truncate">{p.name}</p>
+                      <p className="text-[11px] text-teal-400 font-semibold">
+                        {formatUsd(p.price)}
+                        {rate?.rate > 0 && (
+                          <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(p.price, rate.rate))}</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-700 shrink-0">
+                      <button
+                        onClick={() => changeQty(p.id, -1)}
+                        className="p-1 rounded text-slate-400 hover:text-white"
+                      >
+                        <Icon name="minus" className="w-3 h-3" />
+                      </button>
+                      <span className="text-xs font-bold w-6 text-center text-white">{n}</span>
+                      <button
+                        onClick={() => changeQty(p.id, 1)}
+                        className="p-1 rounded text-slate-400 hover:text-white"
+                      >
+                        <Icon name="plus" className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Pie */}
+        <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
+          {error && (
+            <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 mb-3">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
+                Total a cargar a la deuda
+              </span>
+              <span className="text-lg font-black text-amber-400">
+                {formatUsd(total)}
+                {rate?.rate > 0 && (
+                  <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(total, rate.rate))}</span>
+                )}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-sm font-bold hover:bg-slate-700 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={submitting}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 text-slate-950 text-sm font-bold hover:from-red-400 hover:to-amber-400 shadow-lg shadow-red-500/20 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5"
+              >
+                <Icon name="check" className="w-4 h-4" />
+                {submitting ? 'Guardando…' : 'Añadir a la deuda'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4201,7 +4591,7 @@ function DebtDetailModal({
 
   const key = normalizePhoneDigits(customer.phone);
   // Pedidos del cliente que han sido entregados y a crédito = deuda contraída.
-  const debtOrders = orders
+  const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
   const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
@@ -4340,11 +4730,13 @@ function DebtDetailModal({
 // a bolívares según la tasa del día.
 function CustomerDebtModal({ customer, orders, rate, onClose }) {
   const key = normalizePhoneDigits(customer.phone);
-  const debtOrders = orders
+  const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
-  const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
-  const balance = Number(customer.balance) || 0;
+  // El balance del cliente es la fuente autoritativa (lo actualiza el servidor al
+  // pasar un pedido a entregado o al saldar la deuda); el desglose por pedidos
+  // es solo un detalle informativo.
+  const debtTotal = Number(customer.balance) || 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
@@ -4357,8 +4749,8 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
               Mi deuda
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              {customer.customerName || customer.phone} · Total {formatUsd(balance)}
-              {rate?.rate > 0 && <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(balance, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}</span>}
+              {customer.customerName || customer.phone} · Total {formatUsd(debtTotal)}
+              {rate?.rate > 0 && <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}</span>}
             </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
@@ -4374,7 +4766,9 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
             </span>
             {debtOrders.length === 0 ? (
               <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl">
-                No tienes pedidos a crédito registrados en este momento.
+                {debtTotal > 0
+                  ? 'Tu saldo deudor está registrado manualmente; no hay pedidos a crédito pendientes en el historial.'
+                  : 'No tienes deudas registradas en este momento.'}
               </p>
             ) : (
               debtOrders.map((o) => (
@@ -4543,7 +4937,7 @@ function futureCollectionDue(list) {
 // por WhatsApp (transparencia ante discrepancias).
 function buildAccountMessage(customer, orders) {
   const key = normalizePhoneDigits(customer.phone);
-  const debtOrders = orders
+  const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
   const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
@@ -4565,6 +4959,31 @@ function buildAccountMessage(customer, orders) {
   lines.push('Gracias por tu prontitud. 🙌');
   return lines.join('\n');
 }
+
+// Traduce errores del navegador/WebAuthn a un mensaje amigable para el usuario.
+// Evita mostrar textos técnicos en inglés como "NotAllowedError".
+const friendlyAuthError = (err) => {
+  const name = err?.name || '';
+  // Errores lanzados manualmente (new Error(...)) ya traen un mensaje en español
+  // del servidor o un fallback amigable, así que se muestran tal cual.
+  if (name === 'Error' && err?.message) return err.message;
+  if (name === 'NotAllowedError') {
+    return 'Verificación cancelada. Para continuar, aceptá la huella o Face ID cuando tu teléfono lo pida.';
+  }
+  if (name === 'NotFoundError' || name === 'NotSupportedError') {
+    return 'Tu dispositivo no tiene biometría configurada. Activá la huella o Face ID en los ajustes y probá de nuevo.';
+  }
+  if (name === 'AbortError') {
+    return 'La verificación tardó demasiado y se canceló. Intentá de nuevo.';
+  }
+  if (name === 'TimeoutError') {
+    return 'El tiempo de espera se agotó. Intentá de nuevo.';
+  }
+  if (name === 'SecurityError' || name === 'InvalidStateError') {
+    return 'Tu dispositivo no pudo completar la verificación. Intentá de nuevo o usá un teléfono más reciente.';
+  }
+  return 'No se pudo completar la verificación. Intentá de nuevo.';
+};
 
 // Recordatorio corto para un cobro programado que ya venció.
 const OPENFACTS_FIELDS = 'code,product_name,brands,image_front_url';
@@ -4772,7 +5191,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     }
 
     setImageSearchError(
-      'No se pudieron cargar las sugerencias. Verificá tu conexión. Si la app corre como build de producción, iniciá "npm run dev" para habilitar la búsqueda de Pexels (Open Food Facts y Wikimedia funcionan igual).'
+      'No se pudieron cargar las sugerencias de imágenes. Verificá tu conexión a internet e intentá de nuevo.'
     );
   };
 

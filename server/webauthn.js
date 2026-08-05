@@ -22,23 +22,23 @@ const phoneKey = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
 // Convierte el teléfono a un userID estable (WebAuthn requiere bytes únicos)
 const phoneToUserId = (key) => new Uint8Array(Buffer.from(key));
 
-// Deriva el origin correcto desde el request y un rpID portable.
-// El rpID ES EL PROBLEMA CLAVE: las credenciales WebAuthn quedan atadas al
-// rpID con el que se registraron. Como staging y producción viven en subdominios
-// distintos de onrender.com (kiosko-247-staging.onrender.com vs kiosko-247.onrender.com),
-// si derivamos el rpID del host, una biometría registrada en uno NO es válida en el otro
-// y el navegador cancela la autenticación justo después del Face ID (NotAllowedError).
-// Al fijar el rpID al dominio registrable común (onrender.com), la credencial es
-// portable entre ambos entornos. En desarrollo local se usa 'localhost'.
+// Deriva el origin correcto y el rpID desde el request.
+// El rpID debe ser el HOST COMPLETO: WebAuthn ata la biometría al dominio con
+// el que se registró. No podemos usar 'onrender.com' como rpID común porque
+// está en la Public Suffix List y los navegadores lo rechazan. Consecuencia:
+// una biometría registrada en staging NO es válida en producción y viceversa
+// (el cliente re-registra una sola vez al detectar el cambio de rpID). En
+// desarrollo local se usa 'localhost'.
 const deriveRp = (req) => {
   const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
   const proto = req.headers['x-forwarded-proto'] || (req.socket?.encrypted ? 'https' : 'http');
   const hostP = String(host).split(':')[0];
+  // RP ID = host completo. NO se puede usar 'onrender.com': está en la Public
+  // Suffix List y los navegadores rechazan rpID que sea un sufijo público
+  // (error: "The RP ID 'onrender.com' is invalid for this domain").
   let rpID = hostP;
   if (hostP === 'localhost' || hostP === '127.0.0.1') {
     rpID = 'localhost';
-  } else if (hostP.endsWith('.onrender.com')) {
-    rpID = 'onrender.com';
   }
   return { expectedOrigin: `${proto}://${host}`, rpID };
 };
@@ -52,10 +52,10 @@ export const registrationOptions = async (req, res) => {
 
     const { rpID } = deriveRp(req);
     const existing = await store.getWebAuthnByPhone(key);
-    // Si la credencial se registró bajo otro rpID (por ej. antes de que el
-    // rpID fuera portable entre staging y producción) o quedó sin rpID (datos
-    // migrados), el dominio actual ya no la acepta. Permitimos re-registrar
-    // una sola vez para que quede válida en el rpID actual.
+    // WebAuthn ata la biometría al rpID (= host completo; onrender.com no vale
+    // por estar en la Public Suffix List). Si la credencial guardada se registró
+    // bajo otro dominio (staging/producción o antes de guardar rpID), el host
+    // actual no la acepta: permitimos re-registrar una sola vez.
     if (existing && existing.rpID === rpID) {
       return res.status(409).json({ error: 'Este teléfono ya tiene biometría registrada' });
     }
@@ -81,7 +81,8 @@ export const registrationOptions = async (req, res) => {
 
     res.json({ options });
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo generar la opción de registro: ' + err.message });
+    console.error('[kiosko] No se pudo generar la opción de registro:', err);
+    res.status(500).json({ error: 'No se pudo iniciar el registro con biometría. Intentá de nuevo.' });
   }
 };
 
@@ -119,7 +120,8 @@ export const registrationVerify = async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: 'Error verificando el registro: ' + err.message });
+    console.error('[kiosko] Error verificando el registro:', err);
+    res.status(500).json({ error: 'No se pudo guardar tu biometría. Intentá de nuevo.' });
   }
 };
 
@@ -143,7 +145,8 @@ export const authenticationOptions = async (req, res) => {
 
     res.json({ options, credentialId: credential.credentialId });
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo generar la opción de autenticación: ' + err.message });
+    console.error('[kiosko] No se pudo generar la opción de autenticación:', err);
+    res.status(500).json({ error: 'No se pudo iniciar la verificación con biometría. Intentá de nuevo.' });
   }
 };
 
@@ -157,7 +160,8 @@ export const authenticationVerify = async (req, res) => {
     const customer = await store.getCustomerByPhone(key);
     res.json({ ok: true, customer: customer || { phone: key } });
   } catch (err) {
-    res.status(500).json({ error: 'Error verificando la autenticación: ' + err.message });
+    console.error('[kiosko] Error verificando la autenticación:', err);
+    res.status(500).json({ error: 'No se pudo verificar tu biometría. Intentá de nuevo.' });
   }
 };
 

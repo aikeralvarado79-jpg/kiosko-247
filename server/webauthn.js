@@ -53,10 +53,10 @@ export const registrationOptions = async (req, res) => {
     const { rpID } = deriveRp(req);
     const existing = await store.getWebAuthnByPhone(key);
     // Si la credencial se registró bajo otro rpID (por ej. antes de que el
-    // rpID fuera portable entre staging y producción), el dominio ya no la
-    // acepta. Permitimos re-registrar solo cuando el rpID almacenado existe y
-    // difiere del actual (datos legados sin rpID siguen bloqueados a mano).
-    if (existing && (!existing.rpID || existing.rpID === rpID)) {
+    // rpID fuera portable entre staging y producción) o quedó sin rpID (datos
+    // migrados), el dominio actual ya no la acepta. Permitimos re-registrar
+    // una sola vez para que quede válida en el rpID actual.
+    if (existing && existing.rpID === rpID) {
       return res.status(409).json({ error: 'Este teléfono ya tiene biometría registrada' });
     }
 
@@ -69,13 +69,12 @@ export const registrationOptions = async (req, res) => {
       attestationType: 'none',
       authenticatorSelection: {
         authenticatorAttachment: 'platform',
-        // Credencial local no-discoverable: exige solo la huella / Face ID del
-        // dispositivo. Con 'required' se creaba un passkey discoverable y, en
-        // Android, Google Credential Manager pedía una "llave de acceso" de Google.
+        // Credencial no-descubrible ligada al dispositivo: solo Face ID / huella
+        // del celular. Evita crear una "llave de acceso" (passkey) sincronizada
+        // (iCloud/Google) que es lo que muestra el browser como llave externa.
         residentKey: 'discouraged',
         userVerification: 'required'
-      },
-      preferredAuthenticatorType: 'localDevice'
+      }
     });
 
     challengeStore.set(`reg-${key}`, { challenge: options.challenge, expires: Date.now() + 5 * 60 * 1000 });

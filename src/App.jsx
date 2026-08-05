@@ -3001,15 +3001,36 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
   const [locating, setLocating] = useState(false);
   const [locError, setLocError] = useState('');
 
+  // Comprueba el estado del permiso de ubicación (si el navegador lo soporta).
+  const getGeoPermission = () =>
+    navigator.permissions && navigator.permissions.query
+      ? navigator.permissions.query({ name: 'geolocation' })
+      : null;
+
   // Captura la ubicación GPS del cliente para entregas a domicilio (sin usar
   // Google Maps API; solo se guardan lat/lng y se muestra un enlace a Maps).
-  const handleUseMyLocation = () => {
+  const handleUseMyLocation = async () => {
     setLocError('');
     if (!navigator.geolocation) {
       setLocError('Tu navegador no soporta geolocalización. Ingresá la dirección manualmente.');
       addToast('Tu navegador no soporta geolocalización', 'error');
       return;
     }
+    // Si el navegador ya guardó "denegado", no volverá a preguntar; lo avisamos
+    // con instrucciones para habilitarlo en lugar de pedirlo en silencio.
+    try {
+      const perm = getGeoPermission();
+      if (perm) {
+        const state = await perm;
+        if (state && state.state === 'denied') {
+          setLocError(
+            'El navegador tiene la ubicación bloqueada. Para que pregunte de nuevo, activá el permiso de ubicación para este sitio en los ajustes del navegador (icono del candado junto a la URL) y recargá la página.'
+          );
+          addToast('Permiso de ubicación bloqueado en el navegador', 'error');
+          return;
+        }
+      }
+    } catch {}
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -3023,10 +3044,10 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
       },
       (err) => {
         setLocating(false);
-        const msg =
-          err.code === err.PERMISSION_DENIED
-            ? 'Permiso de ubicación denegado. Ingresá la dirección manualmente.'
-            : 'No se pudo obtener la ubicación. Ingresá la dirección manualmente.';
+        const denied = err && err.code === 1;
+        const msg = denied
+          ? 'Permiso de ubicación denegado. Activalo en los ajustes del navegador (candado junto a la URL) y recargá, o ingresá la dirección manualmente.'
+          : 'No se pudo obtener la ubicación. Ingresá la dirección manualmente.';
         setLocError(msg);
         addToast(msg, 'error');
       },

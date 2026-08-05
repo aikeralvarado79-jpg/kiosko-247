@@ -79,7 +79,8 @@ const fileStore = {
   },
 
   async saveSettings(settings) {
-    this.state.settings = settings;
+    // Merge para no pisar adminPassword/adminCredentials al guardar otros ajustes.
+    this.state.settings = { ...this.state.settings, ...settings };
     this.persist();
   },
 
@@ -454,6 +455,7 @@ const pgStore = {
     for (const row of settingsRes.rows) {
       try {
         if (row.key === 'promos' && Array.isArray(row.value)) settings.promos = row.value;
+        if (row.key === 'storeLocation' && row.value && typeof row.value === 'object') settings.storeLocation = row.value;
       } catch {}
     }
     return { products, categories, orders, settings };
@@ -494,6 +496,13 @@ const pgStore = {
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['promos', JSON.stringify(settings.promos || [])]
     );
+    if (settings.storeLocation && typeof settings.storeLocation === 'object') {
+      await this.pool.query(
+        `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        ['storeLocation', JSON.stringify(settings.storeLocation)]
+      );
+    }
   },
 
   async getAdminPassword() {
@@ -858,7 +867,8 @@ export const getOrderTracking = async (id) => {
     courier_lng: order.courier_lng != null ? Number(order.courier_lng) : null,
     courier_updated_at: order.courier_updated_at || null,
     estimatedMinutes: Number(order.estimatedMinutes) || 10,
-    timestamp: order.timestamp || ''
+    timestamp: order.timestamp || '',
+    storeLocation: (state.settings && state.settings.storeLocation) || null
   };
 };
 

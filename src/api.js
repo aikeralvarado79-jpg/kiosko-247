@@ -35,6 +35,7 @@ export const api = {
   setCustomerBenefited: (phone, benefited) => request(`/api/customers/${encodeURIComponent(phone)}/benefited`, { method: 'PUT', body: JSON.stringify({ benefited }) }),
   getBlacklist: () => request('/api/customers/blacklist'),
   addToBlacklist: (data) => request('/api/customers/blacklist', { method: 'POST', body: JSON.stringify(data) }),
+  addBlacklistDebt: (data) => request('/api/customers/blacklist/debt', { method: 'POST', body: JSON.stringify(data) }),
   getCollections: () => request('/api/collections'),
   upsertCollection: (data) => request('/api/collections', { method: 'POST', body: JSON.stringify(data) }),
   deleteCollection: (id) => request(`/api/collections/${encodeURIComponent(id)}`, { method: 'DELETE' }),

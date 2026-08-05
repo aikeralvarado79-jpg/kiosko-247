@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Component } from 'react';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
 
@@ -1581,6 +1581,41 @@ function AdminLoginView({ onLogin, onBack }) {
   );
 }
 
+// Captura errores de render para no dejar la pantalla en blanco sin aviso.
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-md">
+          <div className="w-full max-w-md bg-slate-900 border border-red-500/40 rounded-3xl p-6 text-center">
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-red-500/15 flex items-center justify-center mb-3">
+              <Icon name="alertTriangle" className="w-6 h-6 text-red-400" />
+            </div>
+            <h3 className="text-base font-black text-white mb-1">Algo salió mal</h3>
+            <p className="text-xs text-slate-400 font-mono break-words mb-4">
+              {this.state.error?.message || String(this.state.error)}
+            </p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="w-full py-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 text-sm font-bold hover:bg-red-500/30 transition-all"
+            >
+              Reintentar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function CustomerView({
   products,
   allProducts,
@@ -2088,12 +2123,14 @@ function CustomerView({
         </div>
       )}
       {showDebtDetail && customerProfile && (
-        <CustomerDebtModal
-          customer={customerProfile}
-          orders={orders}
-          rate={rate}
-          onClose={() => setShowDebtDetail(false)}
-        />
+        <ErrorBoundary>
+          <CustomerDebtModal
+            customer={customerProfile}
+            orders={orders}
+            rate={rate}
+            onClose={() => setShowDebtDetail(false)}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );

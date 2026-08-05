@@ -4284,7 +4284,7 @@ function DebtDetailModal({
                     <span className="font-mono text-cyan-400">{o.id}</span>
                     <span className="text-slate-500">{new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}</span>
                   </div>
-                  {o.items.map((it, i) => (
+                  {Array.isArray(o.items) ? o.items.map((it, i) => (
                     <div key={i} className="flex justify-between text-xs text-slate-300">
                       <span>{it.quantity}x {it.name}</span>
                       <span className="font-bold text-white">
@@ -4296,7 +4296,7 @@ function DebtDetailModal({
                         )}
                       </span>
                     </div>
-                  ))}
+                  )) : null}
                   <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs">
                     <span className="text-slate-400">Total</span>
                     <span className="text-amber-400 text-right">
@@ -4383,7 +4383,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
                     <span className="font-mono text-cyan-400">{o.id}</span>
                     <span className="text-slate-500">{new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}</span>
                   </div>
-                  {o.items.map((it, i) => (
+                  {Array.isArray(o.items) ? o.items.map((it, i) => (
                     <div key={i} className="flex justify-between text-xs text-slate-300">
                       <span>{it.quantity}x {it.name}</span>
                       <span className="font-bold text-white">
@@ -4395,7 +4395,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
                         )}
                       </span>
                     </div>
-                  ))}
+                  )) : null}
                   <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs">
                     <span className="text-slate-400">Total</span>
                     <span className="text-amber-400 text-right">

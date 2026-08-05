@@ -97,6 +97,15 @@ const fileStore = {
     this.persist();
   },
 
+  async listCollections() {
+    return this.state.settings?.collections || [];
+  },
+
+  async saveCollections(collections) {
+    this.state.settings = { ...this.state.settings, collections: Array.isArray(collections) ? collections : [] };
+    this.persist();
+  },
+
   async getCustomerByPhone(phone) {
     const key = normalizePhone(phone);
     return this.state.customers.find((c) => c.phone === key) || null;
@@ -118,6 +127,12 @@ const fileStore = {
     this.persist();
   },
 
+  async deleteWebAuthn(phone) {
+    const key = normalizePhone(phone);
+    this.state.webauthn = this.state.webauthn.filter((c) => c.phone !== key);
+    this.persist();
+  },
+
   async upsertCustomer({ phone, customerName, address }) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
@@ -129,6 +144,8 @@ const fileStore = {
       phone: key,
       customerName: customerName || existing?.customerName || 'Cliente',
       addresses,
+      balance: Number(existing?.balance) || 0,
+      isBenefited: Boolean(existing?.isBenefited),
       createdAt: existing?.createdAt || now,
       lastOrderAt: now
     };
@@ -138,6 +155,50 @@ const fileStore = {
     ];
     this.persist();
     return record;
+  },
+
+  async listCustomers() {
+    return this.state.customers
+      .map((c) => ({ ...c, balance: Number(c.balance) || 0, isBenefited: Boolean(c.isBenefited) }))
+      .sort((a, b) => normalizePhone(a.phone).localeCompare(normalizePhone(b.phone)));
+  },
+
+  async setCustomerBenefited(phone, benefited) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const existing = this.state.customers.find((c) => c.phone === key);
+    if (!existing) return null;
+    const updated = { ...existing, isBenefited: Boolean(benefited) };
+    this.state.customers = [
+      updated,
+      ...this.state.customers.filter((c) => c.phone !== key)
+    ];
+    this.persist();
+    return updated;
+  },
+
+  async setCustomerBalance(phone, amount) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const existing = this.state.customers.find((c) => c.phone === key);
+    if (!existing) return null;
+    const updated = { ...existing, balance: Number(amount) || 0 };
+    this.state.customers = [
+      updated,
+      ...this.state.customers.filter((c) => c.phone !== key)
+    ];
+    this.persist();
+    return updated;
+  },
+
+  async addOrderToAccount(order) {
+    if (!order || !order.phone) return null;
+    const key = normalizePhone(order.phone);
+    const existing = this.state.customers.find((c) => c.phone === key);
+    if (!existing) {
+      await this.upsertCustomer({ phone: order.phone, customerName: order.customerName });
+    }
+    return this.setCustomerBalance(key, Number(existing ? existing.balance : 0) + Number(order.total) || 0);
   }
 };
 
@@ -145,6 +206,12 @@ const fileStore = {
 // Backend Postgres (Supabase / producción). Se usa cuando existe DATABASE_URL.
 // ---------------------------------------------------------------------------
 const { Pool } = pg;
+
+// Schema donde vive el estado. Por defecto "public" (producción); staging usa un
+// schema aislado vía KIOSKO_DB_SCHEMA para no compartir datos con producción.
+const DB_SCHEMA = process.env.KIOSKO_DB_SCHEMA || 'public';
+const q = (table) => (DB_SCHEMA === 'public' ? table : `${DB_SCHEMA}.${table}`);
+
 const pgPool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
@@ -152,12 +219,63 @@ const pgPool = process.env.DATABASE_URL
     })
   : null;
 
+// Tablas que se copian en el espejo. Fuente = producción (public), destino = schema
+// aislado de calidad (staging). Reemplazo total por tabla (no hace merge).
+const MIRROR_SOURCE_SCHEMA = process.env.MIRROR_SOURCE_SCHEMA || 'public';
+const MIRROR_TARGET_SCHEMA = process.env.MIRROR_TARGET_SCHEMA || 'staging';
+const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers', 'webauthn_credentials'];
+
+// Refresca el espejo: copia el estado completo desde un schema fuente (producción)
+// hasta un schema destino (calidad), reemplazando su contenido por completo.
+// Ya que el pooler de Supabase descarta SET search_path, se califican los nombres
+// de schema explícitamente. Devuelve un resumen de filas copiadas por tabla.
+export async function refreshMirror() {
+  if (!pgPool) return { ok: false, error: 'Refresco disponible solo cuando hay DATABASE_URL' };
+  if (MIRROR_SOURCE_SCHEMA === MIRROR_TARGET_SCHEMA) {
+    return { ok: false, error: 'El schema fuente y destino deben ser distintos' };
+  }
+  const client = await pgPool.connect();
+  const tables = {};
+  try {
+    await client.query('BEGIN');
+    await client.query(`CREATE SCHEMA IF NOT EXISTS ${MIRROR_TARGET_SCHEMA}`);
+    for (const t of MIRROR_TABLES) {
+      const exists = await client.query('SELECT to_regclass($1) AS r', [`${MIRROR_SOURCE_SCHEMA}.${t}`]);
+      if (!exists.rows[0].r) {
+        tables[t] = -1;
+        continue;
+      }
+      await client.query(`DROP TABLE IF EXISTS ${MIRROR_TARGET_SCHEMA}.${t}`);
+      await client.query(`CREATE TABLE ${MIRROR_TARGET_SCHEMA}.${t} (LIKE ${MIRROR_SOURCE_SCHEMA}.${t} INCLUDING ALL)`);
+      const ins = await client.query(`INSERT INTO ${MIRROR_TARGET_SCHEMA}.${t} SELECT * FROM ${MIRROR_SOURCE_SCHEMA}.${t}`);
+      // El espejo copia el esquema de producción; re-agrega las columnas propias
+      // de staging (deuda / beneficiados / crédito) por si el schema origen aún
+      // no las tiene (CREATE TABLE ... LIKE no las trae).
+      if (t === 'customers') {
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
+      }
+      if (t === 'orders') {
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
+      }
+      tables[t] = ins.rowCount;
+    }
+    await client.query('COMMIT');
+    return { ok: true, source: MIRROR_SOURCE_SCHEMA, target: MIRROR_TARGET_SCHEMA, tables };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    return { ok: false, error: err.message };
+  } finally {
+    client.release();
+  }
+}
+
 const pgStore = {
   pool: pgPool,
 
   async ensureSchema() {
     await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS products (
+      CREATE TABLE IF NOT EXISTS ${q('products')} (
         id TEXT PRIMARY KEY,
         code TEXT,
         name TEXT,
@@ -170,10 +288,10 @@ const pgStore = {
         "sizeUnit" TEXT,
         image TEXT
       );
-      CREATE TABLE IF NOT EXISTS categories (
+      CREATE TABLE IF NOT EXISTS ${q('categories')} (
         name TEXT PRIMARY KEY
       );
-      CREATE TABLE IF NOT EXISTS orders (
+      CREATE TABLE IF NOT EXISTS ${q('orders')} (
         id TEXT PRIMARY KEY,
         "customerName" TEXT,
         phone TEXT,
@@ -187,50 +305,56 @@ const pgStore = {
         "estimatedMinutes" INTEGER,
         "createdAt" TEXT
       );
-      CREATE TABLE IF NOT EXISTS settings (
+      CREATE TABLE IF NOT EXISTS ${q('settings')} (
         key TEXT PRIMARY KEY,
         value JSONB
       );
-      CREATE TABLE IF NOT EXISTS customers (
+      CREATE TABLE IF NOT EXISTS ${q('customers')} (
         phone TEXT PRIMARY KEY,
         "customerName" TEXT,
         addresses JSONB DEFAULT '[]',
         "createdAt" TEXT,
-        "lastOrderAt" TEXT
+        "lastOrderAt" TEXT,
+        balance NUMERIC DEFAULT 0,
+        "isBenefited" BOOLEAN DEFAULT false
       );
-      CREATE TABLE IF NOT EXISTS webauthn_credentials (
+      CREATE TABLE IF NOT EXISTS ${q('webauthn_credentials')} (
         phone TEXT PRIMARY KEY,
         credential_id TEXT,
         public_key BYTEA,
         counter INTEGER,
+        rpID TEXT,
         "createdAt" TEXT
       );
-      CREATE TABLE IF NOT EXISTS admin_credentials (
+      CREATE TABLE IF NOT EXISTS ${q('admin_credentials')} (
         phone TEXT PRIMARY KEY,
         salt TEXT,
         hash TEXT,
         "createdAt" TEXT
       );
     `);
-    await this.pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
+    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
   },
 
   async seedIfEmpty() {
-    const { rows } = await this.pool.query('SELECT COUNT(*)::int AS n FROM products');
+    const { rows } = await this.pool.query(`SELECT COUNT(*)::int AS n FROM ${q('products')}`);
     if (rows[0].n > 0) return;
     for (const p of defaultState().products) {
       await this.pool.query(
-        `INSERT INTO products (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
+        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
         [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
       );
     }
     for (const c of defaultState().categories) {
-      await this.pool.query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT DO NOTHING', [c]);
+      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [c]);
     }
     for (const o of defaultState().orders) {
       await this.pool.query(
-        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes")
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes")
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
         [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes]
       );
@@ -239,10 +363,10 @@ const pgStore = {
 
   async getState() {
     const [productsRes, categoriesRes, ordersRes, settingsRes] = await Promise.all([
-      this.pool.query('SELECT * FROM products'),
-      this.pool.query('SELECT * FROM categories ORDER BY name'),
-      this.pool.query('SELECT * FROM orders'),
-      this.pool.query('SELECT key, value FROM settings')
+      this.pool.query(`SELECT * FROM ${q('products')}`),
+      this.pool.query(`SELECT * FROM ${q('categories')} ORDER BY name`),
+      this.pool.query(`SELECT * FROM ${q('orders')}`),
+      this.pool.query(`SELECT key, value FROM ${q('settings')}`)
     ]);
     const products = productsRes.rows.map((r) => ({
       id: r.id,
@@ -271,10 +395,10 @@ const pgStore = {
   },
 
   async saveProducts(products) {
-    await this.pool.query('DELETE FROM products');
+    await this.pool.query(`DELETE FROM ${q('products')}`);
     for (const p of products) {
       await this.pool.query(
-        `INSERT INTO products (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
+        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
       );
@@ -282,26 +406,26 @@ const pgStore = {
   },
 
   async saveCategories(categories) {
-    await this.pool.query('DELETE FROM categories');
+    await this.pool.query(`DELETE FROM ${q('categories')}`);
     for (const c of categories) {
-      await this.pool.query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT DO NOTHING', [c]);
+      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [c]);
     }
   },
 
   async saveOrders(orders) {
-    await this.pool.query('DELETE FROM orders');
+    await this.pool.query(`DELETE FROM ${q('orders')}`);
     for (const o of orders) {
       await this.pool.query(
-        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString()]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit)]
       );
     }
   },
 
   async saveSettings(settings) {
     await this.pool.query(
-      `INSERT INTO settings (key, value) VALUES ($1, $2)
+      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['promos', JSON.stringify(settings.promos || [])]
     );
@@ -309,7 +433,7 @@ const pgStore = {
 
   async getAdminPassword() {
     const { rows } = await this.pool.query(
-      `SELECT value FROM settings WHERE key = $1`,
+      `SELECT value FROM ${q('settings')} WHERE key = $1`,
       ['adminPassword']
     );
     if (!rows[0] || rows[0].value == null) return null;
@@ -318,7 +442,7 @@ const pgStore = {
 
   async setAdminPassword(entry) {
     await this.pool.query(
-      `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)
+      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['adminPassword', JSON.stringify(entry)]
     );
@@ -327,7 +451,7 @@ const pgStore = {
   async getAdminCredential(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query('SELECT salt, hash FROM admin_credentials WHERE phone = $1', [key]);
+    const { rows } = await this.pool.query(`SELECT salt, hash FROM ${q('admin_credentials')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return { salt: rows[0].salt, hash: rows[0].hash };
   },
@@ -335,31 +459,93 @@ const pgStore = {
   async setAdminCredential(phone, entry) {
     const key = normalizePhone(phone);
     await this.pool.query(
-      `INSERT INTO admin_credentials (phone, salt, hash, "createdAt")
+      `INSERT INTO ${q('admin_credentials')} (phone, salt, hash, "createdAt")
        VALUES ($1,$2,$3,$4)
        ON CONFLICT (phone) DO UPDATE SET salt = EXCLUDED.salt, hash = EXCLUDED.hash`,
       [key, entry.salt, entry.hash, new Date().toISOString()]
     );
   },
 
+  async listCollections() {
+    const { rows } = await this.pool.query(`SELECT value FROM ${q('settings')} WHERE key = $1`, ['collections']);
+    if (!rows[0]) return [];
+    try {
+      const v = rows[0].value;
+      const arr = typeof v === 'string' ? JSON.parse(v) : v;
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async saveCollections(collections) {
+    await this.pool.query(
+      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      ['collections', JSON.stringify(Array.isArray(collections) ? collections : [])]
+    );
+  },
+
   async getCustomerByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query('SELECT * FROM customers WHERE phone = $1', [key]);
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('customers')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return { ...rows[0], addresses: rows[0].addresses || [] };
+  },
+
+  async listCustomers() {
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('customers')} ORDER BY phone`);
+    return rows.map((r) => ({ ...r, balance: Number(r.balance) || 0, isBenefited: Boolean(r.isBenefited) }));
+  },
+
+  async setCustomerBenefited(phone, benefited) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('customers')} SET "isBenefited" = $2 WHERE phone = $1 RETURNING *`,
+      [key, Boolean(benefited)]
+    );
+    if (!rows[0]) return null;
+    return { ...rows[0], balance: Number(rows[0].balance) || 0 };
+  },
+
+  async setCustomerBalance(phone, amount) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('customers')} SET balance = $2 WHERE phone = $1 RETURNING *`,
+      [key, Number(amount) || 0]
+    );
+    if (!rows[0]) return null;
+    return { ...rows[0], balance: Number(rows[0].balance) || 0 };
+  },
+
+  async addOrderToAccount(order) {
+    if (!order || !order.phone) return null;
+    const key = normalizePhone(order.phone);
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) + $2, "customerName" = COALESCE(NULLIF($3, ''), "customerName")
+       WHERE phone = $1 RETURNING *`,
+      [key, Number(order.total) || 0, order.customerName || '']
+    );
+    if (rows[0]) return { ...rows[0], balance: Number(rows[0].balance) || 0 };
+    const created = await this.upsertCustomer({ phone: order.phone, customerName: order.customerName });
+    if (!created) return null;
+    return this.setCustomerBalance(key, Number(order.total) || 0);
   },
 
   async getWebAuthnByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query('SELECT * FROM webauthn_credentials WHERE phone = $1', [key]);
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('webauthn_credentials')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return {
       phone: rows[0].phone,
       credentialId: rows[0].credential_id,
       publicKey: rows[0].public_key,
       counter: rows[0].counter,
+      rpID: rows[0].rpID || null,
       createdAt: rows[0].createdAt
     };
   },
@@ -367,14 +553,20 @@ const pgStore = {
   async saveWebAuthn(phone, credential) {
     const key = normalizePhone(phone);
     await this.pool.query(
-      `INSERT INTO webauthn_credentials (phone, credential_id, public_key, counter, "createdAt")
-       VALUES ($1,$2,$3,$4,$5)
+      `INSERT INTO ${q('webauthn_credentials')} (phone, credential_id, public_key, counter, rpID, "createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (phone) DO UPDATE SET
          credential_id = EXCLUDED.credential_id,
          public_key = EXCLUDED.public_key,
-         counter = EXCLUDED.counter`,
-      [key, credential.credentialId, credential.publicKey, credential.counter, new Date().toISOString()]
+         counter = EXCLUDED.counter,
+         rpID = EXCLUDED.rpID`,
+      [key, credential.credentialId, credential.publicKey, credential.counter, credential.rpID || null, new Date().toISOString()]
     );
+  },
+
+  async deleteWebAuthn(phone) {
+    const key = normalizePhone(phone);
+    await this.pool.query(`DELETE FROM ${q('webauthn_credentials')} WHERE phone = $1`, [key]);
   },
 
   async upsertCustomer({ phone, customerName, address }) {
@@ -385,7 +577,7 @@ const pgStore = {
     if (address && !addresses.includes(address)) addresses.push(address);
     const now = new Date().toISOString();
     await this.pool.query(
-      `INSERT INTO customers (phone, "customerName", addresses, "createdAt", "lastOrderAt")
+      `INSERT INTO ${q('customers')} (phone, "customerName", addresses, "createdAt", "lastOrderAt")
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (phone) DO UPDATE SET
          "customerName" = EXCLUDED."customerName",
@@ -409,10 +601,10 @@ const pgStore = {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('LOCK TABLE orders IN EXCLUSIVE MODE');
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
 
       const stockRes = await client.query(
-        'SELECT id, stock FROM products WHERE id = ANY($1::text[]) FOR UPDATE',
+        `SELECT id, stock FROM ${q('products')} WHERE id = ANY($1::text[]) FOR UPDATE`,
         [orderData.items.map((it) => it.id)]
       );
       const stockMap = new Map(stockRes.rows.map((r) => [r.id, r.stock]));
@@ -427,12 +619,12 @@ const pgStore = {
       let id;
       do {
         id = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
-        const dup = await client.query('SELECT 1 FROM orders WHERE id = $1', [id]);
+        const dup = await client.query(`SELECT 1 FROM ${q('orders')} WHERE id = $1`, [id]);
         if (dup.rowCount > 0) id = null;
       } while (!id);
 
       for (const it of orderData.items) {
-        await client.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [it.quantity, it.id]);
+        await client.query(`UPDATE ${q('products')} SET stock = stock - $1 WHERE id = $2`, [it.quantity, it.id]);
       }
 
       const order = {
@@ -447,25 +639,26 @@ const pgStore = {
         status: 'pendiente',
         timestamp: orderData.timestamp || '',
         estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
-        createdAt: orderData.createdAt || new Date().toISOString()
+        createdAt: orderData.createdAt || new Date().toISOString(),
+        credit: Boolean(orderData.credit)
       };
 
       await client.query(
-        `INSERT INTO orders (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit]
       );
 
       // Registrar/actualizar el cliente reconocido en la misma transacción
       const key = normalizePhone(order.phone);
       if (key && key.length >= 7) {
-        const existing = await client.query('SELECT * FROM customers WHERE phone = $1', [key]);
+        const existing = await client.query(`SELECT * FROM ${q('customers')} WHERE phone = $1`, [key]);
         const addresses = existing.rows[0]?.addresses || [];
         const address = order.type === 'delivery' && order.address ? order.address : undefined;
         if (address && !addresses.includes(address)) addresses.push(address);
         const now = new Date().toISOString();
         await client.query(
-          `INSERT INTO customers (phone, "customerName", addresses, "createdAt", "lastOrderAt")
+          `INSERT INTO ${q('customers')} (phone, "customerName", addresses, "createdAt", "lastOrderAt")
            VALUES ($1,$2,$3,$4,$5)
            ON CONFLICT (phone) DO UPDATE SET
              "customerName" = EXCLUDED."customerName",
@@ -499,6 +692,8 @@ export async function initStore() {
   }
 }
 
+export const isMirrorEnabled = () => Boolean(pgPool);
+
 export const getState = () => store.getState();
 
 export const saveSettings = (settings) => store.saveSettings(settings);
@@ -507,13 +702,52 @@ export const getCustomerByPhone = (phone) => store.getCustomerByPhone(phone);
 
 export const upsertCustomer = (customer) => store.upsertCustomer(customer);
 
+export const listCustomers = () => store.listCustomers();
+
+export const setCustomerBenefited = (phone, benefited) => store.setCustomerBenefited(phone, benefited);
+
+export const setCustomerBalance = (phone, amount) => store.setCustomerBalance(phone, amount);
+
+export const addOrderToAccount = (order) => store.addOrderToAccount(order);
+
 export const getWebAuthnByPhone = (phone) => store.getWebAuthnByPhone(phone);
 
 export const saveWebAuthn = (phone, credential) => store.saveWebAuthn(phone, credential);
 
+export const deleteWebAuthn = (phone) => store.deleteWebAuthn(phone);
+
 export const getAdminCredential = (phone) => store.getAdminCredential(phone);
 
 export const setAdminCredential = (phone, entry) => store.setAdminCredential(phone, entry);
+
+export const listCollections = () => store.listCollections();
+
+export const saveCollections = (collections) => store.saveCollections(collections);
+
+// Programa (o actualiza) un cobro. Devuelve la lista actualizada.
+export const upsertCollection = async (collection) => {
+  const list = await store.listCollections();
+  const item = {
+    id: collection.id || `COB-${Math.floor(1000 + Math.random() * 9000)}`,
+    phone: collection.phone || '',
+    customerName: collection.customerName || '',
+    dueAt: collection.dueAt || null,
+    note: collection.note || '',
+    status: collection.status || 'programado', // programado | enviado | cancelado
+    createdAt: collection.createdAt || new Date().toISOString()
+  };
+  const idx = list.findIndex((c) => c.id === item.id);
+  if (idx >= 0) list[idx] = item;
+  else list.push(item);
+  await store.saveCollections(list);
+  return { list, item };
+};
+
+export const removeCollection = async (id) => {
+  const list = (await store.listCollections()).filter((c) => c.id !== id);
+  await store.saveCollections(list);
+  return { list };
+};
 
 export const createOrder = async (orderData) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {
@@ -555,7 +789,8 @@ export const createOrder = async (orderData) => {
     status: 'pendiente',
     timestamp: orderData.timestamp || '',
     estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
-    createdAt: orderData.createdAt || new Date().toISOString()
+    createdAt: orderData.createdAt || new Date().toISOString(),
+    credit: Boolean(orderData.credit)
   };
 
   const orders = [order, ...state.orders];
@@ -629,6 +864,11 @@ export const updateOrderStatus = async (id, status) => {
 
   const orders = state.orders.map((o) => (o.id === id ? { ...o, status } : o));
   await store.saveOrders(orders);
+
+  // Los pedidos a crédito se suman a la cuenta del cliente cuando se entregan.
+  if (existing.credit && status === 'entregado') {
+    await store.addOrderToAccount(existing);
+  }
 
   const newState = await store.getState();
   return { state: newState };

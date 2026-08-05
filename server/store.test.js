@@ -170,4 +170,93 @@ describe('fileStore', () => {
     const leido = await store.getCustomerByPhone(c.phone);
     expect(leido.customerName).toBe('Ana');
   });
+
+  it('lista clientes con balance e isBenefited normalizados', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '41155550000', customerName: 'Luis' });
+    await store.setCustomerBalance('41155550000', 25.5);
+    await store.setCustomerBenefited('41155550000', true);
+
+    const customers = await store.listCustomers();
+    const luis = customers.find((c) => c.phone === '41155550000');
+    expect(luis).toBeDefined();
+    expect(luis.balance).toBe(25.5);
+    expect(luis.isBenefited).toBe(true);
+  });
+
+  it('agrega un pedido a crédito a la cuenta al marcarlo entregado', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '41166667777', customerName: 'Deudor' });
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+
+    const created = await store.createOrder({
+      customerName: 'Deudor',
+      phone: '41166667777',
+      credit: true,
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 2 }],
+      total: product.price * 2
+    });
+    expect(created.order.credit).toBe(true);
+
+    await store.updateOrderStatus(created.order.id, 'entregado');
+    const customer = await store.getCustomerByPhone('41166667777');
+    expect(Number(customer.balance)).toBeCloseTo(product.price * 2, 2);
+  });
+
+  it('no suma a la cuenta un pedido a crédito si se cancela', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '41177778888', customerName: 'Cliente B' });
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+
+    const created = await store.createOrder({
+      customerName: 'Cliente B',
+      phone: '41177778888',
+      credit: true,
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 1 }],
+      total: product.price
+    });
+    await store.cancelOrder(created.order.id, '41177778888');
+    const customer = await store.getCustomerByPhone('41177778888');
+    expect(Number(customer.balance)).toBe(0);
+  });
+
+  it('pedido de pago normal (sin crédito) no toca el balance', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '41188889999', customerName: 'Pagador' });
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+
+    const created = await store.createOrder({
+      customerName: 'Pagador',
+      phone: '41188889999',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 1 }],
+      total: product.price
+    });
+    await store.updateOrderStatus(created.order.id, 'entregado');
+    const customer = await store.getCustomerByPhone('41188889999');
+    expect(Number(customer.balance)).toBe(0);
+  });
+
+  it('programa y elimina cobros', async () => {
+    const store = await freshStore();
+    const before = await store.listCollections();
+    expect(Array.isArray(before)).toBe(true);
+
+    const created = await store.upsertCollection({
+      phone: '41133332222',
+      customerName: 'Deudor',
+      dueAt: new Date().toISOString(),
+      status: 'programado'
+    });
+    expect(created.item.id).toMatch(/^COB-/);
+    expect(created.list.some((c) => c.id === created.item.id)).toBe(true);
+
+    const same = await store.upsertCollection({ id: created.item.id, status: 'enviado' });
+    expect(same.list.find((c) => c.id === created.item.id).status).toBe('enviado');
+
+    const removed = await store.removeCollection(created.item.id);
+    expect(removed.list.some((c) => c.id === created.item.id)).toBe(false);
+  });
 });

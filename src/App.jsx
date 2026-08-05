@@ -507,6 +507,7 @@ export default function App() {
   const [productDetailModal, setProductDetailModal] = useState(null); // Product object
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [currentOrderTracking, setCurrentOrderTracking] = useState(null); // Order id for customer view
+  const [liveTrackingOrder, setLiveTrackingOrder] = useState(null); // Order for re-open live tracking from Mis Pedidos
 
   // Admin Specific States
   const [adminTab, setAdminTab] = useState('inventory'); // 'inventory' | 'orders' | 'analytics'
@@ -1152,6 +1153,7 @@ export default function App() {
             customerProfile={customerProfile}
             onViewOrderDetail={(order) => setOrderDetailOrder(order)}
             onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
+            onTrackLiveOrder={(order) => setLiveTrackingOrder(order)}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -1263,10 +1265,22 @@ export default function App() {
           order={orderDetailOrder}
           rate={rate}
           onClose={() => setOrderDetailOrder(null)}
+          onTrackLiveOrder={(order) => {
+            setOrderDetailOrder(null);
+            setLiveTrackingOrder(order);
+          }}
           onRequestCancelOrder={(order) => {
             setOrderDetailOrder(null);
             setCancelConfirmOrder(order);
           }}
+        />
+      )}
+
+      {/* 5b2. Live Tracking Modal (cliente reabre el rastreo de una entrega) */}
+      {liveTrackingOrder && (
+        <LiveTrackingModal
+          order={liveTrackingOrder}
+          onClose={() => setLiveTrackingOrder(null)}
         />
       )}
 
@@ -1747,7 +1761,8 @@ function CustomerView({
   orders,
   customerProfile,
   onViewOrderDetail,
-  onRequestCancelOrder
+  onRequestCancelOrder,
+  onTrackLiveOrder
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
@@ -2043,6 +2058,15 @@ function CustomerView({
                         <Icon name="eye" className="w-3 h-3" />
                         Ver detalle
                       </button>
+                      {o.type === 'delivery' && o.status !== 'cancelado' && o.status !== 'entregado' && (
+                        <button
+                          onClick={() => onTrackLiveOrder(o)}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1"
+                        >
+                          <Icon name="mapPin" className="w-3 h-3" />
+                          Rastrear
+                        </button>
+                      )}
                       {cancellable && (
                         <button
                           onClick={() => onRequestCancelOrder(o)}
@@ -2978,6 +3002,125 @@ function DeliveryMap({ order }) {
             Destino de la entrega
           </a>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Modal de rastreo en vivo para el cliente: consulta el estado del pedido y la
+// posición del repartidor cada 5s mientras está abierto, mostrando el mapa.
+function LiveTrackingModal({ order, onClose }) {
+  const [track, setTrack] = useState(order);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const res = await api.getOrderTracking(order.id);
+      if (!alive) return;
+      if (res.ok && res.data) {
+        setTrack(res.data);
+        setError('');
+      } else {
+        setError(res.data?.error || 'No se pudo obtener el rastreo del pedido.');
+      }
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [order.id]);
+
+  const status = track?.status || order.status;
+  const style = STATUS_STYLES[status] || STATUS_STYLES.pendiente;
+  const currentIdx = STATUS_FLOW.indexOf(status);
+  const steps = [
+    { key: 'pendiente', label: '1. Recibido' },
+    { key: 'en_preparacion', label: '2. Preparando' },
+    { key: 'listo', label: '3. Listo' },
+    ...(order.type === 'delivery' ? [{ key: 'en_camino', label: '4. En camino' }] : []),
+    { key: 'entregado', label: order.type === 'delivery' ? '5. Entregado' : '4. Entregado' }
+  ];
+
+  const courierLive = track?.courier_lat != null && track?.courier_lng != null;
+  const updatedAt = track?.courier_updated_at
+    ? new Date(track.courier_updated_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-scale-up">
+        <div className="p-5 sm:p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <Icon name="mapPin" className="w-5 h-5 text-emerald-400" />
+              Rastreo en vivo <span className="text-teal-400">#{order.id}</span>
+            </h3>
+            <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${style.badge}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${style.dot} ${status === 'en_camino' ? 'animate-pulse' : ''}`} />
+              {STATUS_LABELS[status] || 'Pendiente'}
+            </span>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 sm:p-6 space-y-4">
+          {/* Stepper de estados */}
+          <div className={`grid gap-1.5 sm:gap-2 pt-1 ${order.type === 'delivery' ? 'grid-cols-5' : 'grid-cols-4'}`}>
+            {steps.map((step, idx) => {
+              const isPassed = idx <= currentIdx;
+              const isCurrent = idx === currentIdx;
+              return (
+                <div key={step.key} className="flex flex-col items-center gap-1.5 sm:gap-2">
+                  <div className={`w-full h-1.5 sm:h-2 rounded-full transition-all duration-500 ${isPassed ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50' : 'bg-slate-700/60'}`} />
+                  <span className={`text-[9px] sm:text-xs font-semibold text-center leading-tight ${isCurrent ? 'text-emerald-300 font-bold scale-105' : isPassed ? 'text-slate-300' : 'text-slate-500'}`}>
+                    {step.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Mapa: destino + repartidor en vivo */}
+          <DeliveryMap order={track} />
+
+          {/* Estado del repartidor */}
+          <div className="rounded-xl bg-slate-800/60 p-3 text-xs space-y-1">
+            <div className="flex items-center gap-2">
+              <Icon name="mapPin" className="w-3.5 h-3.5 text-emerald-400" />
+              {courierLive ? (
+                <span className="text-emerald-300 font-bold flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Repartidor en camino {updatedAt ? `· ${updatedAt}` : ''}
+                </span>
+              ) : (
+                <span className="text-slate-400">
+                  {status === 'en_camino' ? 'Buscando la posición del repartidor…' : 'El repartidor aún no inició el envío.'}
+                </span>
+              )}
+            </div>
+            {order.address && <p className="text-slate-400">Destino: <span className="text-white font-bold">{order.address}</span></p>}
+            <p className="text-slate-500">La posición se actualiza automáticamente cada 5 segundos.</p>
+          </div>
+
+          {error && (
+            <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+              {error} Se seguirá intentando.
+            </p>
+          )}
+
+          <button
+            onClick={onClose}
+            className="w-full py-3 rounded-2xl bg-slate-800 text-slate-300 font-bold text-sm hover:bg-slate-700 transition-all"
+          >
+            Cerrar rastreo
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -5839,9 +5982,10 @@ function DeleteOrderModal({ order, onClose, onConfirm }) {
   );
 }
 
-function OrderDetailModal({ order, rate, onClose, onRequestCancelOrder }) {
+function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder }) {
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
+  const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
   return (
     <div className="fixed inset-0 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
@@ -5931,6 +6075,16 @@ function OrderDetailModal({ order, rate, onClose, onRequestCancelOrder }) {
               <span className="text-slate-500 font-semibold text-[10px] uppercase tracking-wider">Notas</span>
               <p className="text-slate-300 italic mt-1">"{order.notes}"</p>
             </div>
+          )}
+
+          {trackable && onTrackLiveOrder && (
+            <button
+              onClick={() => onTrackLiveOrder(order)}
+              className="w-full py-3 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold text-sm hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-2"
+            >
+              <Icon name="mapPin" className="w-4 h-4" />
+              Rastrear en vivo
+            </button>
           )}
 
           {cancellable && (

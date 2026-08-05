@@ -4382,7 +4382,6 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
   const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
-  const balance = Number(customer.balance) || 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
@@ -4395,8 +4394,8 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
               Mi deuda
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              {customer.customerName || customer.phone} · Total {formatUsd(balance)}
-              {rate?.rate > 0 && <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(balance, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}</span>}
+              {customer.customerName || customer.phone} · Total {formatUsd(debtTotal)}
+              {rate?.rate > 0 && <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}</span>}
             </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">

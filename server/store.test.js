@@ -316,4 +316,25 @@ describe('fileStore', () => {
     const missing = await store.getOrderTracking('ORD-9999');
     expect(missing).toBeNull();
   });
+
+  it('persiste la ubicación del comercio y la expone en el rastreo', async () => {
+    const store = await freshStore();
+    await store.saveSettings({ storeLocation: { lat: 10.4806, lng: -66.9036, address: 'Av. Principal 123' } });
+    const state = await store.getState();
+    expect(state.settings.storeLocation).toEqual({ lat: 10.4806, lng: -66.9036, address: 'Av. Principal 123' });
+
+    const created = await store.createOrder({
+      customerName: 'Cliente Tienda',
+      phone: '41155557777',
+      type: 'delivery',
+      address: 'Calle 2',
+      lat: 10.481,
+      lng: -66.904,
+      items: [{ id: 'p1', name: 'Prod', price: 10, quantity: 1 }],
+      total: 10
+    });
+    const tracking = await store.getOrderTracking(created.order.id);
+    expect(tracking.storeLocation.address).toBe('Av. Principal 123');
+    expect(Number(tracking.storeLocation.lat)).toBeCloseTo(10.4806, 4);
+  });
 });

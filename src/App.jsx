@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Component } from 'react';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 // SVG Icons Helper Components for full visual depth without external dependencies
 const Icon = ({ name, className = "w-5 h-5", ...props }) => {
@@ -343,6 +345,7 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [orders, setOrders] = useState([]);
   const [promos, setPromos] = useState([]);
+  const [storeLocation, setStoreLocation] = useState(null);
   const [rate, setRate] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -368,6 +371,7 @@ export default function App() {
     setCategories(res.data.categories || []);
     setOrders(res.data.orders || []);
     if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
+    if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.rate) setRate(res.data.rate);
     setIsLoading(false);
   }, []);
@@ -951,6 +955,17 @@ export default function App() {
     return true;
   };
 
+  const handleSaveStoreLocation = async (location) => {
+    const res = await api.saveSettings({ promos, storeLocation: location });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar la ubicación del comercio', 'error');
+      return false;
+    }
+    if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
+    addToast('Ubicación del comercio guardada');
+    return true;
+  };
+
   const handleRefreshDb = async () => {
     setRefreshingDb(true);
     const res = await api.refreshDb();
@@ -1154,6 +1169,7 @@ export default function App() {
             onViewOrderDetail={(order) => setOrderDetailOrder(order)}
             onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
             onTrackLiveOrder={(order) => setLiveTrackingOrder(order)}
+            storeLocation={storeLocation}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -1189,6 +1205,8 @@ export default function App() {
             onUpsertCollection={handleUpsertCollection}
             onDeleteCollection={handleDeleteCollection}
             addToast={addToast}
+            storeLocation={storeLocation}
+            onSaveStoreLocation={handleSaveStoreLocation}
           />
         ) : (
           <AdminLoginView onLogin={handleAdminLogin} onBack={() => setActiveView('customer')} />
@@ -1281,6 +1299,7 @@ export default function App() {
         <LiveTrackingModal
           order={liveTrackingOrder}
           onClose={() => setLiveTrackingOrder(null)}
+          storeLocation={storeLocation}
         />
       )}
 
@@ -1762,7 +1781,8 @@ function CustomerView({
   customerProfile,
   onViewOrderDetail,
   onRequestCancelOrder,
-  onTrackLiveOrder
+  onTrackLiveOrder,
+  storeLocation
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
@@ -2154,7 +2174,7 @@ function CustomerView({
 
           {/* Mapa de entrega a domicilio (destino + repartidor en vivo) */}
           {currentOrderTracking.type === 'delivery' && (
-            <DeliveryMap order={currentOrderTracking} />
+            <DeliveryMap order={currentOrderTracking} storeLocation={storeLocation} />
           )}
         </div>
       )}
@@ -2951,35 +2971,137 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
   );
 }
 
-// Mapa embebido de Google Maps (sin API key) para mostrar la entrega a domicilio
-// y la posición en vivo del repartidor en el rastreo del cliente.
-function DeliveryMap({ order }) {
-  if (!order || order.type !== 'delivery') return null;
+// Marcador Leaflet personalizado (divIcon con SVG inline) para no depender de
+// imágenes externas. Evita que Leaflet intente cargar sus iconos por defecto.
+const makePinIcon = (color, label) =>
+  L.divIcon({
+    className: '',
+    html: `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">
+        <span style="font-size:10px;font-weight:800;color:${color};background:#0f172a;border:1px solid ${color};border-radius:999px;padding:0 6px;white-space:nowrap">${label || ''}</span>
+        <svg width="26" height="34" viewBox="0 0 26 34" style="overflow:visible">
+          <path d="M13 1C6.4 1 1 6.4 1 13c0 8.8 12 20 12 20s12-11.2 12-20C25 6.4 19.6 1 13 1z" fill="${color}" stroke="#fff" stroke-width="2"/>
+          <circle cx="13" cy="13" r="4.5" fill="#fff"/>
+        </svg>
+      </div>`,
+    iconSize: [26, 44],
+    iconAnchor: [13, 42]
+  });
 
-  const dest = order.lat != null && order.lng != null;
-  const courier = order.courier_lat != null && order.courier_lng != null;
-  if (!dest && !courier) return null;
+// Mapa interactivo (Leaflet + OpenStreetMap, sin API key) para la entrega a
+// domicilio. Muestra el comercio (origen), el destino del cliente, la posición
+// en vivo del repartidor y el camino sugerido repartidor → destino (OSRM).
+function DeliveryMap({ order, storeLocation }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layersRef = useRef(null);
 
-  // Centro el mapa en la posición del repartidor cuando está en camino, sino en
-  // el destino. El iframe de Google Maps con ?q= no requiere API key.
-  const center = courier ? { lat: order.courier_lat, lng: order.courier_lng } : { lat: order.lat, lng: order.lng };
-  const mapUrl = `https://www.google.com/maps?q=${center.lat},${center.lng}&z=15&output=embed`;
+  const dest = order && order.lat != null && order.lng != null;
+  const courier = order && order.courier_lat != null && order.courier_lng != null;
+  const store = storeLocation && storeLocation.lat != null && storeLocation.lng != null;
+  const showMap = order && order.type === 'delivery' && (dest || courier || store);
 
-  const destUrl = dest ? `https://www.google.com/maps?q=${order.lat},${order.lng}` : null;
-  const courierUrl = courier ? `https://www.google.com/maps?q=${order.courier_lat},${order.courier_lng}` : null;
+  const markers = useMemo(() => {
+    const list = [];
+    if (store) list.push({ lat: Number(storeLocation.lat), lng: Number(storeLocation.lng), kind: 'store' });
+    if (dest) list.push({ lat: Number(order.lat), lng: Number(order.lng), kind: 'dest' });
+    if (courier) list.push({ lat: Number(order.courier_lat), lng: Number(order.courier_lng), kind: 'courier' });
+    return list;
+  }, [store, dest, courier, storeLocation?.lat, storeLocation?.lng, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
+
+  // Crea el mapa una sola vez.
+  useEffect(() => {
+    if (!showMap || !containerRef.current || mapRef.current) return;
+    const map = L.map(containerRef.current, { zoomControl: false, attributionControl: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    mapRef.current = map;
+    layersRef.current = L.layerGroup().addTo(map);
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      layersRef.current = null;
+    };
+  }, [showMap]);
+
+  // Dibuja marcadores y la ruta OSRM cuando cambian los datos.
+  useEffect(() => {
+    const map = mapRef.current;
+    const layerGroup = layersRef.current;
+    if (!map || !layerGroup) return;
+    layerGroup.clearLayers();
+
+    if (markers.length === 0) return;
+    markers.forEach((m) => {
+      const icon =
+        m.kind === 'courier'
+          ? makePinIcon('#10b981', 'REPARTIDOR')
+          : m.kind === 'store'
+          ? makePinIcon('#22d3ee', 'COMERCIO')
+          : makePinIcon('#f43f5e', 'DESTINO');
+      L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+    });
+
+    // Línea recta provisional entre repartidor y destino.
+    let straight = null;
+    if (courier && dest) {
+      straight = L.polyline(
+        [
+          [Number(order.courier_lat), Number(order.courier_lng)],
+          [Number(order.lat), Number(order.lng)]
+        ],
+        { color: '#10b981', weight: 3, dashArray: '6 6', opacity: 0.7 }
+      ).addTo(layerGroup);
+    }
+
+    // Pedido de ruta real a OSRM (gratuito, sin key). Si responde, reemplaza la línea.
+    if (courier && dest) {
+      const url = `https://router.project-osrm.org/route/v1/driving/${Number(order.courier_lng)},${Number(order.courier_lat)};${Number(order.lng)},${Number(order.lat)}?overview=full&geometries=geojson`;
+      fetch(url)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => {
+          const coords = data?.routes?.[0]?.geometry?.coordinates;
+          if (!Array.isArray(coords) || coords.length < 2) return;
+          if (straight) layerGroup.removeLayer(straight);
+          L.polyline(
+            coords.map((c) => [c[1], c[0]]),
+            { color: '#10b981', weight: 5, opacity: 0.9 }
+          ).addTo(layerGroup);
+        })
+        .catch(() => {});
+    }
+
+    // Ajusta el viewport para abarcar todos los puntos.
+    const latLngs = markers.map((m) => [m.lat, m.lng]);
+    if (latLngs.length) {
+      map.fitBounds(L.latLngBounds(latLngs).pad(0.25), { animate: false });
+    }
+  }, [markers, courier, dest, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
+
+  const destUrl = dest ? `https://www.google.com/maps?q=${Number(order.lat)},${Number(order.lng)}` : null;
+  const courierUrl = courier ? `https://www.google.com/maps?q=${Number(order.courier_lat)},${Number(order.courier_lng)}` : null;
+  const storeUrl = store ? `https://www.google.com/maps?q=${Number(storeLocation.lat)},${Number(storeLocation.lng)}` : null;
+
+  if (!showMap) return null;
 
   return (
     <div className="space-y-2">
       <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
-        <iframe
-          title="Mapa de entrega"
-          src={mapUrl}
-          className="w-full h-44 sm:h-52"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
+        <div ref={containerRef} className="w-full h-44 sm:h-52" />
       </div>
       <div className="flex flex-wrap gap-2">
+        {store && storeUrl && (
+          <a
+            href={storeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold hover:bg-cyan-500/25 transition-all"
+          >
+            <Icon name="store" className="w-3.5 h-3.5" />
+            Comercio
+          </a>
+        )}
         {courier && courierUrl && (
           <a
             href={courierUrl}
@@ -3007,9 +3129,217 @@ function DeliveryMap({ order }) {
   );
 }
 
+// Modal selector de punto en el mapa (Leaflet + OpenStreetMap). Lo usan el
+// cliente (para elegir dónde recibir distinto de su ubicación actual) y el
+// admin (para fijar la ubicación del comercio).
+function MapPickerModal({ title, initial, onPick, onClose }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const initialPointRef = useRef(initial?.lat != null && initial?.lng != null ? { lat: initial.lat, lng: initial.lng } : null);
+  const [point, setPoint] = useState(initialPointRef.current);
+  const [search, setSearch] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState('');
+
+  // Crea el mapa y coloca un marcador arrastrable.
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    const start = initialPointRef.current;
+    const defaultCenter = start ? [start.lat, start.lng] : [10.4806, -66.9036];
+    const map = L.map(containerRef.current, { zoomControl: true }).setView(defaultCenter, start ? 16 : 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    mapRef.current = map;
+
+    const marker = L.marker(defaultCenter, { icon: makePinIcon('#14b8a6', 'PUNTO'), draggable: true }).addTo(map);
+    markerRef.current = marker;
+    if (!initialPointRef.current) marker.setOpacity(0.6);
+
+    map.on('click', (e) => {
+      setPoint({ lat: e.latlng.lat, lng: e.latlng.lng });
+      marker.setLatLng(e.latlng);
+      marker.setOpacity(1);
+    });
+    marker.on('dragend', (e) => {
+      setPoint({ lat: e.target.getLatLng().lat, lng: e.target.getLatLng().lng });
+      marker.setOpacity(1);
+    });
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
+  }, []);
+
+  // Geocodificación con Nominatim (gratuita, sin key) para buscar direcciones.
+  const searchTimer = useRef(null);
+  const handleSearch = (e) => {
+    const q = e.target.value;
+    setSearch(q);
+    clearTimeout(searchTimer.current);
+    if (q.trim().length < 4) {
+      setSuggestions([]);
+      return;
+    }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q.trim())}&limit=6&addressdetails=1`);
+        const data = await res.json();
+        if (Array.isArray(data)) setSuggestions(data);
+      } catch {
+        setSuggestions([]);
+      }
+    }, 400);
+  };
+
+  const applySuggestion = (s) => {
+    const lat = Number(s.lat);
+    const lng = Number(s.lon);
+    setPoint({ lat, lng });
+    setSearch(s.display_name || s.name || '');
+    setSuggestions([]);
+    const map = mapRef.current;
+    if (map) {
+      map.setView([lat, lng], 17);
+      if (markerRef.current) {
+        markerRef.current.setLatLng([lat, lng]);
+        markerRef.current.setOpacity(1);
+      }
+    }
+  };
+
+  // Ubicación actual del dispositivo (con guía de permiso como en checkout).
+  const useMyLocation = () => {
+    setLocError('');
+    if (!navigator.geolocation) {
+      setLocError('Tu navegador no soporta geolocalización.');
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setPoint({ lat, lng });
+        const map = mapRef.current;
+        if (map) {
+          map.setView([lat, lng], 17);
+          if (markerRef.current) {
+            markerRef.current.setLatLng([lat, lng]);
+            markerRef.current.setOpacity(1);
+          }
+        }
+        setLocating(false);
+      },
+      (err) => {
+        setLocating(false);
+        setLocError(err && err.code === 1 ? 'Permiso de ubicación denegado. Activalo en los ajustes del navegador.' : 'No se pudo obtener la ubicación.');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+    );
+  };
+
+  const confirm = () => {
+    if (!point) {
+      setLocError('Tocá el mapa o buscá una dirección para elegir el punto.');
+      return;
+    }
+    onPick({ lat: Number(point.lat), lng: Number(point.lng), address: search.trim() || null });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-scale-up">
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <Icon name="mapPin" className="w-5 h-5 text-teal-400" />
+              {title || 'Elegir punto en el mapa'}
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Buscá una dirección, tocá el mapa o arrastrá el marcador.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1">
+          <div className="relative">
+            <input
+              type="text"
+              value={search}
+              onChange={handleSearch}
+              placeholder="Buscar dirección o lugar (ej: Av. Bolívar 123)"
+              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none pr-10"
+            />
+            <Icon name="search" className="w-4 h-4 text-slate-500 absolute right-3 top-3.5" />
+            {suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-1 rounded-xl bg-slate-800 border border-slate-700 shadow-2xl overflow-hidden z-20">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.place_id}
+                    type="button"
+                    onClick={() => applySuggestion(s)}
+                    className="w-full text-left px-3 py-2.5 text-xs text-slate-200 hover:bg-slate-700/70 transition-colors border-b border-slate-700/50 last:border-0"
+                  >
+                    {s.display_name || s.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={useMyLocation}
+            disabled={locating}
+            className="w-full px-4 py-2.5 rounded-xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-sm font-bold hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            <Icon name="mapPin" className="w-4 h-4" />
+            {locating ? 'Obteniendo ubicación...' : 'Usar mi ubicación actual'}
+          </button>
+
+          <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+            <div ref={containerRef} className="w-full h-56 sm:h-64" />
+          </div>
+
+          {point && (
+            <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Icon name="check" className="w-3.5 h-3.5 text-emerald-400" />
+              Punto elegido: <span className="text-white font-bold">{point.lat.toFixed(6)}, {point.lng.toFixed(6)}</span>
+            </p>
+          )}
+          {locError && (
+            <p className="text-xs text-rose-400 flex items-center gap-1.5">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5 flex-shrink-0" />
+              {locError}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={confirm}
+            className="w-full py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2"
+          >
+            <Icon name="check" className="w-4 h-4" />
+            Confirmar punto
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Modal de rastreo en vivo para el cliente: consulta el estado del pedido y la
 // posición del repartidor cada 5s mientras está abierto, mostrando el mapa.
-function LiveTrackingModal({ order, onClose }) {
+function LiveTrackingModal({ order, onClose, storeLocation }) {
   const [track, setTrack] = useState(order);
   const [error, setError] = useState('');
 
@@ -3087,7 +3417,7 @@ function LiveTrackingModal({ order, onClose }) {
           </div>
 
           {/* Mapa: destino + repartidor en vivo */}
-          <DeliveryMap order={track} />
+          <DeliveryMap order={track} storeLocation={storeLocation} />
 
           {/* Estado del repartidor */}
           <div className="rounded-xl bg-slate-800/60 p-3 text-xs space-y-1">
@@ -3136,13 +3466,15 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
     notes: '',
     credit: false,
     lat: null,
-    lng: null
+    lng: null,
+    mapAddress: null
   });
 
   const [errors, setErrors] = useState({});
   const [showPhoneSuggestions, setShowPhoneSuggestions] = useState(false);
   const [locating, setLocating] = useState(false);
   const [locError, setLocError] = useState('');
+  const [showMapPicker, setShowMapPicker] = useState(false);
 
   // Comprueba el estado del permiso de ubicación (si el navegador lo soporta).
   const getGeoPermission = () =>
@@ -3408,37 +3740,47 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
                     </div>
                   </div>
                 )}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Dirección de Entrega
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleUseMyLocation}
-                    disabled={locating}
-                    className={`w-full px-4 py-3 rounded-xl border text-sm font-bold flex items-center justify-center gap-2 transition-all mb-2 ${
-                      formData.lat != null && formData.lng != null
-                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                        : 'bg-teal-500/15 border-teal-500/40 text-teal-300 hover:bg-teal-500/25'
-                    } ${locating ? 'opacity-60 pointer-events-none' : ''}`}
-                  >
-                    <Icon name="mapPin" className="w-4 h-4" />
-                    {locating
-                      ? 'Obteniendo ubicación...'
-                      : formData.lat != null && formData.lng != null
-                      ? 'Ubicación capturada (tocá para actualizar)'
-                      : 'Usar mi ubicación (GPS)'}
-                  </button>
-                  {formData.lat != null && formData.lng != null && (
-                    <a
-                      href={`https://www.google.com/maps?q=${formData.lat},${formData.lng}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block text-[11px] text-sky-300 underline mb-2"
-                    >
-                      Ver punto en Google Maps
-                    </a>
-                  )}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Dirección de Entrega
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <button
+                        type="button"
+                        onClick={handleUseMyLocation}
+                        disabled={locating}
+                        className={`px-2 py-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                          formData.lat != null && formData.lng != null
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : 'bg-teal-500/15 border-teal-500/40 text-teal-300 hover:bg-teal-500/25'
+                        } ${locating ? 'opacity-60 pointer-events-none' : ''}`}
+                      >
+                        <Icon name="mapPin" className="w-3.5 h-3.5 shrink-0" />
+                        {locating ? 'Obteniendo...' : 'Mi ubicación (GPS)'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowMapPicker(true)}
+                        className={`px-2 py-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                          formData.mapAddress
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : 'bg-sky-500/15 border-sky-500/40 text-sky-300 hover:bg-sky-500/25'
+                        }`}
+                      >
+                        <Icon name="search" className="w-3.5 h-3.5 shrink-0" />
+                        Elegir punto en el mapa
+                      </button>
+                    </div>
+                    {(formData.lat != null || formData.mapAddress) && (
+                      <a
+                        href={`https://www.google.com/maps?q=${formData.lat},${formData.lng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-[11px] text-sky-300 underline mb-2"
+                      >
+                        Ver punto en Google Maps
+                      </a>
+                    )}
                   {locError && (
                     <p className="text-xs text-rose-400 mb-2 flex items-center gap-1.5">
                       <Icon name="alertTriangle" className="w-3.5 h-3.5 flex-shrink-0" />
@@ -3541,6 +3883,26 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
             <span>Confirmar y Enviar Pedido</span>
           </button>
         </form>
+
+        {showMapPicker && (
+          <MapPickerModal
+            title="¿Dónde recibís el pedido?"
+            initial={formData.lat != null ? { lat: formData.lat, lng: formData.lng } : null}
+            onPick={(p) => {
+              setFormData((prev) => ({
+                ...prev,
+                lat: p.lat,
+                lng: p.lng,
+                address: p.address || prev.address || '',
+                mapAddress: p.address || prev.address || ''
+              }));
+              setLocError('');
+              setShowMapPicker(false);
+              addToast('Punto de entrega elegido en el mapa', 'success');
+            }}
+            onClose={() => setShowMapPicker(false)}
+          />
+        )}
       </div>
     </div>
   );
@@ -3572,10 +3934,13 @@ function AdminView({
   onLoadCollections,
   onUpsertCollection,
   onDeleteCollection,
-  addToast
+  addToast,
+  storeLocation,
+  onSaveStoreLocation
 }) {
   // Order status filter state
   const [statusFilter, setStatusFilter] = useState('todos');
+  const [showStorePicker, setShowStorePicker] = useState(false);
 
   // Modo Repartidor: cuando un pedido a domicilio está en "En Camino", el admin
   // (que reparte) comparte su GPS en vivo para que el cliente lo rastree.
@@ -3834,6 +4199,7 @@ function AdminView({
           { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
           { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
           { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
+          { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
           { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Negocio', icon: 'trendingUp' }
         ].map((tab) => (
           <button
@@ -4457,6 +4823,72 @@ function AdminView({
           onUpsertCollection={onUpsertCollection}
           onDeleteCollection={onDeleteCollection}
         />
+      )}
+
+      {/* Tab: Tienda — ubicación fija del comercio */}
+      {adminTab === 'tienda' && (
+        <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md space-y-4">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="store" className="w-5 h-5 text-teal-400" />
+              Ubicación del Comercio
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Esta es la dirección fija del negocio. Aparece en el rastreo del cliente como punto de origen
+              de la entrega. Cualquier administrador puede actualizarla.
+            </p>
+          </div>
+
+          {storeLocation ? (
+            <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+              <span className="p-2.5 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+                <Icon name="store" className="w-5 h-5" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-400">Comercio configurado</p>
+                {storeLocation.address && (
+                  <p className="text-sm font-bold text-white truncate">{storeLocation.address}</p>
+                )}
+                <p className="text-[11px] text-slate-500">
+                  {Number(storeLocation.lat).toFixed(6)}, {Number(storeLocation.lng).toFixed(6)}
+                </p>
+              </div>
+              <a
+                href={`https://www.google.com/maps?q=${Number(storeLocation.lat)},${Number(storeLocation.lng)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold hover:bg-sky-500/25 transition-all inline-flex items-center gap-1.5"
+              >
+                <Icon name="mapPin" className="w-3.5 h-3.5" />
+                Abrir en Maps
+              </a>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
+              Aún no configuraste la ubicación del comercio. Usá el botón para elegirla en el mapa.
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowStorePicker(true)}
+            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all inline-flex items-center gap-2"
+          >
+            <Icon name="mapPin" className="w-4 h-4" />
+            {storeLocation ? 'Cambiar ubicación del comercio' : 'Configurar ubicación'}
+          </button>
+
+          {showStorePicker && (
+            <MapPickerModal
+              title="Ubicación del comercio"
+              initial={storeLocation?.lat != null ? { lat: storeLocation.lat, lng: storeLocation.lng } : null}
+              onPick={async (p) => {
+                const ok = await onSaveStoreLocation(p);
+                if (ok) setShowStorePicker(false);
+              }}
+              onClose={() => setShowStorePicker(false)}
+            />
+          )}
+        </div>
       )}
 
       {/* Tab 6: Analytics */}

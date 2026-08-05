@@ -222,6 +222,29 @@ describe('fileStore', () => {
     expect(Number(customer.balance)).toBe(0);
   });
 
+  it('addDebtToCustomer registra una deuda por productos sin descontar stock', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    const stockBefore = product.stock;
+
+    const order = await store.addDebtToCustomer({
+      phone: '41188889999',
+      customerName: 'Deudor Presencial',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 3 }]
+    });
+
+    expect(order.credit).toBe(true);
+    expect(order.status).toBe('entregado');
+    expect(Number(order.total)).toBeCloseTo(product.price * 3, 2);
+
+    const customer = await store.getCustomerByPhone('41188889999');
+    expect(Number(customer.balance)).toBeCloseTo(product.price * 3, 2);
+
+    const after = await store.getState();
+    expect(after.products.find((p) => p.id === 'p1').stock).toBe(stockBefore);
+  });
+
   it('pedido de pago normal (sin crédito) no toca el balance', async () => {
     const store = await freshStore();
     await store.upsertCustomer({ phone: '41188889999', customerName: 'Pagador' });

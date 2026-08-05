@@ -993,7 +993,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
       {/* Toast Notification Container */}
-      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-50 flex flex-col gap-2 pointer-events-none">
+      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
         {toasts.map((toast) => (
           <div
             key={toast.id}
@@ -2999,11 +2999,14 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
   const [errors, setErrors] = useState({});
   const [showPhoneSuggestions, setShowPhoneSuggestions] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState('');
 
   // Captura la ubicación GPS del cliente para entregas a domicilio (sin usar
   // Google Maps API; solo se guardan lat/lng y se muestra un enlace a Maps).
   const handleUseMyLocation = () => {
+    setLocError('');
     if (!navigator.geolocation) {
+      setLocError('Tu navegador no soporta geolocalización. Ingresá la dirección manualmente.');
       addToast('Tu navegador no soporta geolocalización', 'error');
       return;
     }
@@ -3024,9 +3027,10 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
           err.code === err.PERMISSION_DENIED
             ? 'Permiso de ubicación denegado. Ingresá la dirección manualmente.'
             : 'No se pudo obtener la ubicación. Ingresá la dirección manualmente.';
+        setLocError(msg);
         addToast(msg, 'error');
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
     );
   };
 
@@ -3270,6 +3274,12 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
                     >
                       Ver punto en Google Maps
                     </a>
+                  )}
+                  {locError && (
+                    <p className="text-xs text-rose-400 mb-2 flex items-center gap-1.5">
+                      <Icon name="alertTriangle" className="w-3.5 h-3.5 flex-shrink-0" />
+                      {locError}
+                    </p>
                   )}
                   <div className="flex gap-2">
                     <input

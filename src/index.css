@@ -28,6 +28,34 @@ html {
   50% { transform: translateY(-4px); }
 }
 
+/* Bienvenida a pantalla completa tras el inicio de sesión */
+@keyframes welcome-overlay {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes welcome-glow {
+  from { opacity: 0; transform: scale(0.7); }
+  to { opacity: 1; transform: scale(1.15); }
+}
+
+@keyframes welcome-pop {
+  0% { opacity: 0; transform: translateY(14px) scale(0.92); }
+  60% { opacity: 1; transform: translateY(-2px) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes welcome-name {
+  0% { opacity: 0; transform: translateY(22px) scale(0.85); letter-spacing: 0.4em; }
+  60% { opacity: 1; transform: translateY(-3px) scale(1.04); letter-spacing: 0.05em; }
+  100% { opacity: 1; transform: translateY(0) scale(1); letter-spacing: 0.02em; }
+}
+
+.animate-welcome-overlay { animation: welcome-overlay 0.3s ease-out both; }
+.animate-welcome-glow { animation: welcome-glow 1.8s ease-out infinite alternate; }
+.animate-welcome-pop { animation: welcome-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-welcome-name { animation: welcome-name 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
 .animate-fade-in { animation: fade-in 0.25s ease-out both; }
 .animate-scale-up { animation: scale-up 0.25s ease-out both; }
 .animate-slide-left { animation: slide-left 0.3s ease-out both; }

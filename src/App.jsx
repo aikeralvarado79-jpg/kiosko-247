@@ -405,6 +405,10 @@ export default function App() {
   // Cliente reconocido (pre-llenado automático del checkout)
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
 
+  // Primer nombre del cliente para la animación de bienvenida a pantalla completa.
+  // Se muestra justo tras identificarse y se cierra al instante con un toque.
+  const [welcomeName, setWelcomeName] = useState('');
+
   // True si el cliente identificado figura en la lista de administradores por teléfono
   const isCurrentAdmin = useMemo(() => {
     if (!savedCustomer?.phoneNumber) return false;
@@ -793,6 +797,10 @@ export default function App() {
     saveCustomerData(record);
     setSavedCustomer(record);
     setIsIdentityOpen(false);
+    // Bienvenida a pantalla completa con el nombre del usuario (primer nombre).
+    // Se monta en el mismo render en que se cierra el modal, así la app nunca
+    // se ve antes de la animación.
+    setWelcomeName(customerName.trim().split(' ')[0] || customerName.trim());
     const known = buildKnownCustomers(orders, record);
     const isReturning = known.some((c) => c.number === phoneNumber && c.code === phoneCode);
     addToast(isReturning ? `¡Hola de nuevo, ${customerName.split(' ')[0]}!` : `¡Bienvenido, ${customerName.split(' ')[0]}!`);
@@ -1261,6 +1269,48 @@ export default function App() {
       <footer className="mt-auto border-t border-slate-800/80 bg-slate-950/60 py-5 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500">
         <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
       </footer>
+
+      {/* Bienvenida a pantalla completa tras el inicio de sesión */}
+      {welcomeName && (
+        <WelcomeOverlay
+          name={welcomeName}
+          onDone={() => setWelcomeName('')}
+        />
+      )}
+    </div>
+  );
+}
+
+function WelcomeOverlay({ name, onDone }) {
+  // Cualquier toque/click cierra la bienvenida al instante. También se cierra
+  // sola tras unos segundos por si el cliente no toca la pantalla.
+  useEffect(() => {
+    const t = setTimeout(onDone, 3200);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  return (
+    <div
+      onClick={onDone}
+      className="fixed inset-0 z-[80] flex flex-col items-center justify-center bg-gradient-to-br from-teal-700 via-cyan-800 to-slate-950 animate-welcome-overlay cursor-pointer select-none touch-manipulation"
+      role="dialog"
+      aria-label={`Bienvenido ${name}`}
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(45,212,191,0.15),transparent_60%)] animate-welcome-glow pointer-events-none" />
+      <div className="relative flex flex-col items-center text-center px-6">
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-white/10 border border-white/20 backdrop-blur-md flex items-center justify-center mb-6 sm:mb-8 animate-welcome-pop shadow-2xl shadow-teal-500/20">
+          <Icon name="sparkles" className="w-8 h-8 sm:w-10 sm:h-10 text-teal-200" />
+        </div>
+        <p className="text-[11px] sm:text-xs font-bold uppercase tracking-[0.35em] text-teal-200/80 mb-3 animate-welcome-pop">
+          Bienvenido
+        </p>
+        <h2 className="text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
+          {name}
+        </h2>
+        <p className="text-xs sm:text-sm text-teal-100/70 animate-welcome-pop">
+          Toca en cualquier parte para continuar
+        </p>
+      </div>
     </div>
   );
 }

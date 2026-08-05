@@ -586,7 +586,15 @@ const pgStore = {
          "lastOrderAt" = EXCLUDED."lastOrderAt"`,
       [key, customerName || existing?.customerName || 'Cliente', JSON.stringify(addresses), existing?.createdAt || now, now]
     );
-    return { phone: key, customerName: customerName || existing?.customerName || 'Cliente', addresses, createdAt: existing?.createdAt || now, lastOrderAt: now };
+    return {
+      phone: key,
+      customerName: customerName || existing?.customerName || 'Cliente',
+      addresses,
+      createdAt: existing?.createdAt || now,
+      lastOrderAt: now,
+      balance: Number(existing?.balance) || 0,
+      isBenefited: Boolean(existing?.isBenefited)
+    };
   },
 
   async upsertCustomerFromOrder(order) {

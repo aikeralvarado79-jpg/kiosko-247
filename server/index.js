@@ -58,6 +58,14 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
+// Envía un error amigable al usuario sin filtrar el detalle técnico
+// (err.message suele estar en inglés o contener detalles internos). El detalle
+// se registra en consola para diagnóstico.
+const fail = (res, err, message) => {
+  console.error(`[kiosko] ${message}:`, err);
+  res.status(500).json({ error: message });
+};
+
 // Verifica contraseña de un admin. Si el teléfono tiene credencial propia,
 // valida contra ella; sino (o como fallback) usa la base (env > config).
 async function verifyAdminPassword(phone, input) {
@@ -112,7 +120,7 @@ app.post('/api/auth/recover', async (req, res) => {
     await store.setAdminCredential(key, { salt, hash });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: 'Error recuperando contraseña: ' + err.message });
+    fail(res, err, 'No se pudo recuperar la contraseña. Intentá de nuevo.');
   }
 });
 
@@ -122,7 +130,7 @@ app.get('/api/state', async (req, res) => {
     const [state, rate] = await Promise.all([store.getState(), getBcvRate()]);
     res.json({ ...state, rate });
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo leer el estado: ' + err.message });
+    fail(res, err, 'No se pudo cargar la tienda. Intentá de nuevo en unos segundos.');
   }
 });
 
@@ -130,7 +138,7 @@ app.get('/api/rate', async (req, res) => {
   try {
     res.json(await getBcvRate());
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo obtener la tasa: ' + err.message });
+    fail(res, err, 'No se pudo obtener la tasa de cambio del día.');
   }
 });
 
@@ -140,7 +148,7 @@ app.post('/api/orders', async (req, res) => {
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo crear el pedido: ' + err.message });
+    fail(res, err, 'No se pudo realizar el pedido. Intentá de nuevo.');
   }
 });
 
@@ -151,7 +159,7 @@ app.get('/api/customers/blacklist', requireAdmin, async (req, res) => {
     const customers = await store.listCustomers();
     res.json(customers.filter((c) => (Number(c.balance) || 0) > 0));
   } catch (err) {
-    res.status(500).json({ error: 'No se pudieron listar los deudores: ' + err.message });
+    fail(res, err, 'No se pudo cargar la lista de deudores.');
   }
 });
 
@@ -169,7 +177,7 @@ app.post('/api/customers/blacklist', requireAdmin, async (req, res) => {
     if (name) await store.upsertCustomer({ phone: key, customerName: name });
     res.json(await store.getCustomerByPhone(key));
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo añadir el deudor: ' + err.message });
+    fail(res, err, 'No se pudo guardar el deudor. Intentá de nuevo.');
   }
 });
 
@@ -179,7 +187,7 @@ app.get('/api/customers/:phone', async (req, res) => {
     const customer = await store.getCustomerByPhone(req.params.phone);
     res.json(customer || {});
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo leer el cliente: ' + err.message });
+    fail(res, err, 'No se pudo cargar los datos del cliente.');
   }
 });
 
@@ -189,7 +197,7 @@ app.put('/api/customers/:phone', async (req, res) => {
     if (!customer) return res.status(400).json({ error: 'Número de teléfono inválido' });
     res.json(customer);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo actualizar el cliente: ' + err.message });
+    fail(res, err, 'No se pudo guardar los datos del cliente.');
   }
 });
 
@@ -204,7 +212,7 @@ app.post('/api/products', requireAdmin, async (req, res) => {
   try {
     res.json(await store.createProduct(req.body || {}));
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo crear el producto: ' + err.message });
+    fail(res, err, 'No se pudo crear el producto. Intentá de nuevo.');
   }
 });
 
@@ -214,7 +222,7 @@ app.put('/api/products/:id', requireAdmin, async (req, res) => {
     if (result.error) return res.status(404).json({ error: result.error });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo actualizar el producto: ' + err.message });
+    fail(res, err, 'No se pudo actualizar el producto.');
   }
 });
 
@@ -222,7 +230,7 @@ app.delete('/api/products/:id', requireAdmin, async (req, res) => {
   try {
     res.json(await store.deleteProduct(req.params.id));
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo eliminar el producto: ' + err.message });
+    fail(res, err, 'No se pudo eliminar el producto.');
   }
 });
 
@@ -230,7 +238,7 @@ app.post('/api/categories', requireAdmin, async (req, res) => {
   try {
     res.json(await store.addCategory((req.body || {}).name));
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo agregar la categoría: ' + err.message });
+    fail(res, err, 'No se pudo agregar la categoría.');
   }
 });
 
@@ -240,7 +248,7 @@ app.patch('/api/orders/:id', requireAdmin, async (req, res) => {
     if (result.error) return res.status(404).json({ error: result.error });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo actualizar el pedido: ' + err.message });
+    fail(res, err, 'No se pudo actualizar el pedido.');
   }
 });
 
@@ -251,7 +259,7 @@ app.post('/api/orders/:id/cancel', async (req, res) => {
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo cancelar el pedido: ' + err.message });
+    fail(res, err, 'No se pudo cancelar el pedido. Intentá de nuevo.');
   }
 });
 
@@ -262,7 +270,7 @@ app.delete('/api/orders/:id', requireAdmin, async (req, res) => {
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo eliminar el pedido: ' + err.message });
+    fail(res, err, 'No se pudo eliminar el pedido.');
   }
 });
 
@@ -271,7 +279,7 @@ app.put('/api/settings', requireAdmin, async (req, res) => {
     await store.saveSettings(req.body || {});
     res.json(await store.getState());
   } catch (err) {
-    res.status(500).json({ error: 'No se pudieron guardar los ajustes: ' + err.message });
+    fail(res, err, 'No se pudieron guardar los ajustes.');
   }
 });
 
@@ -286,7 +294,7 @@ app.post('/api/db/refresh', requireAdmin, async (req, res) => {
     if (!result.ok) return res.status(500).json({ error: result.error });
     res.json({ ok: true, source: result.source, target: result.target, tables: result.tables });
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo refrescar el espejo: ' + err.message });
+    fail(res, err, 'No se pudo refrescar la base de datos.');
   }
 });
 
@@ -295,7 +303,7 @@ app.get('/api/customers', requireAdmin, async (req, res) => {
   try {
     res.json(await store.listCustomers());
   } catch (err) {
-    res.status(500).json({ error: 'No se pudieron listar los clientes: ' + err.message });
+    fail(res, err, 'No se pudo cargar la lista de clientes.');
   }
 });
 
@@ -306,7 +314,7 @@ app.put('/api/customers/:phone/benefited', requireAdmin, async (req, res) => {
     if (!customer) return res.status(404).json({ error: 'Cliente no encontrado' });
     res.json(customer);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo actualizar el beneficio: ' + err.message });
+    fail(res, err, 'No se pudo actualizar el beneficio.');
   }
 });
 
@@ -315,7 +323,7 @@ app.get('/api/collections', requireAdmin, async (req, res) => {
   try {
     res.json(await store.listCollections());
   } catch (err) {
-    res.status(500).json({ error: 'No se pudieron leer los cobros: ' + err.message });
+    fail(res, err, 'No se pudo cargar los cobros programados.');
   }
 });
 
@@ -325,7 +333,7 @@ app.post('/api/collections', requireAdmin, async (req, res) => {
     const result = await store.upsertCollection(req.body || {});
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo guardar el cobro: ' + err.message });
+    fail(res, err, 'No se pudo guardar el cobro programado.');
   }
 });
 
@@ -334,7 +342,7 @@ app.delete('/api/collections/:id', requireAdmin, async (req, res) => {
     const result = await store.removeCollection(req.params.id);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo eliminar el cobro: ' + err.message });
+    fail(res, err, 'No se pudo eliminar el cobro programado.');
   }
 });
 

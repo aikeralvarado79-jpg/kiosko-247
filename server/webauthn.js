@@ -81,7 +81,8 @@ export const registrationOptions = async (req, res) => {
 
     res.json({ options });
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo generar la opción de registro: ' + err.message });
+    console.error('[kiosko] No se pudo generar la opción de registro:', err);
+    res.status(500).json({ error: 'No se pudo iniciar el registro con biometría. Intentá de nuevo.' });
   }
 };
 
@@ -119,7 +120,8 @@ export const registrationVerify = async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: 'Error verificando el registro: ' + err.message });
+    console.error('[kiosko] Error verificando el registro:', err);
+    res.status(500).json({ error: 'No se pudo guardar tu biometría. Intentá de nuevo.' });
   }
 };
 
@@ -143,7 +145,8 @@ export const authenticationOptions = async (req, res) => {
 
     res.json({ options, credentialId: credential.credentialId });
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo generar la opción de autenticación: ' + err.message });
+    console.error('[kiosko] No se pudo generar la opción de autenticación:', err);
+    res.status(500).json({ error: 'No se pudo iniciar la verificación con biometría. Intentá de nuevo.' });
   }
 };
 
@@ -157,7 +160,8 @@ export const authenticationVerify = async (req, res) => {
     const customer = await store.getCustomerByPhone(key);
     res.json({ ok: true, customer: customer || { phone: key } });
   } catch (err) {
-    res.status(500).json({ error: 'Error verificando la autenticación: ' + err.message });
+    console.error('[kiosko] Error verificando la autenticación:', err);
+    res.status(500).json({ error: 'No se pudo verificar tu biometría. Intentá de nuevo.' });
   }
 };
 

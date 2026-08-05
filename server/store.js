@@ -69,6 +69,15 @@ const fileStore = {
     this.persist();
   },
 
+  async updateCourierLocation(id, lat, lng) {
+    const now = new Date().toISOString();
+    this.state.orders = this.state.orders.map((o) =>
+      o.id === id ? { ...o, courier_lat: Number(lat), courier_lng: Number(lng), courier_updated_at: now } : o
+    );
+    this.persist();
+    return this.state.orders.find((o) => o.id === id) || null;
+  },
+
   async saveSettings(settings) {
     this.state.settings = settings;
     this.persist();
@@ -295,6 +304,11 @@ export async function refreshMirror() {
       }
       if (t === 'orders') {
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS lat NUMERIC`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS lng NUMERIC`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_lat" NUMERIC`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_lng" NUMERIC`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_updated_at" TEXT`);
       }
       tables[t] = ins.rowCount;
     }
@@ -342,7 +356,13 @@ const pgStore = {
         status TEXT,
         timestamp TEXT,
         "estimatedMinutes" INTEGER,
-        "createdAt" TEXT
+        "createdAt" TEXT,
+        credit BOOLEAN DEFAULT false,
+        lat NUMERIC,
+        lng NUMERIC,
+        "courier_lat" NUMERIC,
+        "courier_lng" NUMERIC,
+        "courier_updated_at" TEXT
       );
       CREATE TABLE IF NOT EXISTS ${q('settings')} (
         key TEXT PRIMARY KEY,
@@ -377,6 +397,11 @@ const pgStore = {
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('webauthn_credentials')} ADD COLUMN IF NOT EXISTS rpID TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lat NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lng NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lat" NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lng" NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_updated_at" TEXT`);
   },
 
   async seedIfEmpty() {
@@ -456,9 +481,9 @@ const pgStore = {
     await this.pool.query(`DELETE FROM ${q('orders')}`);
     for (const o of orders) {
       await this.pool.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit)]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "courier_lat", "courier_lng", "courier_updated_at")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit), o.lat != null ? Number(o.lat) : null, o.lng != null ? Number(o.lng) : null, o.courier_lat != null ? Number(o.courier_lat) : null, o.courier_lng != null ? Number(o.courier_lng) : null, o.courier_updated_at || null]
       );
     }
   },
@@ -731,13 +756,15 @@ const pgStore = {
         timestamp: orderData.timestamp || '',
         estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
         createdAt: orderData.createdAt || new Date().toISOString(),
-        credit: Boolean(orderData.credit)
+        credit: Boolean(orderData.credit),
+        lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
+        lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null
       };
 
       await client.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit, order.lat, order.lng]
       );
 
       // Registrar/actualizar el cliente reconocido en la misma transacción
@@ -767,6 +794,15 @@ const pgStore = {
     } finally {
       client.release();
     }
+  },
+
+  async updateCourierLocation(id, lat, lng) {
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('orders')} SET "courier_lat" = $2, "courier_lng" = $3, "courier_updated_at" = $4
+       WHERE id = $1 RETURNING *`,
+      [id, Number(lat), Number(lng), new Date().toISOString()]
+    );
+    return rows[0] || null;
   }
 };
 
@@ -802,6 +838,29 @@ export const setCustomerBalance = (phone, amount) => store.setCustomerBalance(ph
 export const addOrderToAccount = (order) => store.addOrderToAccount(order);
 
 export const addDebtToCustomer = (data) => store.addDebtToCustomer(data);
+
+export const updateCourierLocation = (id, lat, lng) => store.updateCourierLocation(id, lat, lng);
+
+// Devuelve los datos públicos de rastreo de un pedido (destino + posición del
+// repartidor), sin exponer datos sensibles de otros pedidos.
+export const getOrderTracking = async (id) => {
+  const state = await store.getState();
+  const order = state.orders.find((o) => o.id === id);
+  if (!order) return null;
+  return {
+    id: order.id,
+    status: order.status,
+    type: order.type,
+    address: order.address || '',
+    lat: order.lat != null ? Number(order.lat) : null,
+    lng: order.lng != null ? Number(order.lng) : null,
+    courier_lat: order.courier_lat != null ? Number(order.courier_lat) : null,
+    courier_lng: order.courier_lng != null ? Number(order.courier_lng) : null,
+    courier_updated_at: order.courier_updated_at || null,
+    estimatedMinutes: Number(order.estimatedMinutes) || 10,
+    timestamp: order.timestamp || ''
+  };
+};
 
 export const getWebAuthnByPhone = (phone) => store.getWebAuthnByPhone(phone);
 
@@ -883,7 +942,9 @@ export const createOrder = async (orderData) => {
     timestamp: orderData.timestamp || '',
     estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
     createdAt: orderData.createdAt || new Date().toISOString(),
-    credit: Boolean(orderData.credit)
+    credit: Boolean(orderData.credit),
+    lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
+    lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null
   };
 
   const orders = [order, ...state.orders];

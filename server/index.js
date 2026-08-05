@@ -282,6 +282,34 @@ app.post('/api/orders/:id/cancel', async (req, res) => {
   }
 });
 
+// Reporta la posición en vivo del repartidor para un pedido a domicilio.
+// El admin (que es quien reparte) envía su GPS periódicamente mientras entrega.
+app.post('/api/orders/:id/courier-location', requireAdmin, async (req, res) => {
+  try {
+    const { lat, lng } = req.body || {};
+    if (lat == null || lng == null || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+      return res.status(400).json({ error: 'Coordenadas inválidas' });
+    }
+    const order = await store.updateCourierLocation(req.params.id, Number(lat), Number(lng));
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    res.json({ ok: true, order });
+  } catch (err) {
+    fail(res, err, 'No se pudo actualizar la ubicación del repartidor.');
+  }
+});
+
+// Rastreo público de un pedido: estado + destino + posición del repartidor.
+// Lo usa el cliente para ver en tiempo real cómo avanza su entrega a domicilio.
+app.get('/api/orders/:id/tracking', async (req, res) => {
+  try {
+    const tracking = await store.getOrderTracking(req.params.id);
+    if (!tracking) return res.status(404).json({ error: 'Pedido no encontrado' });
+    res.json(tracking);
+  } catch (err) {
+    fail(res, err, 'No se pudo obtener el rastreo del pedido.');
+  }
+});
+
 // Eliminar pedido (solo admin, solo pedidos cancelados)
 app.delete('/api/orders/:id', requireAdmin, async (req, res) => {
   try {

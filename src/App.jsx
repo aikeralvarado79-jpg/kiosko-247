@@ -205,6 +205,7 @@ const STATUS_STYLES = {
   pendiente: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40', ring: 'border-amber-500/50', dot: 'bg-amber-400' },
   en_preparacion: { badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', ring: 'border-cyan-500/50', dot: 'bg-cyan-400' },
   listo: { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', ring: 'border-emerald-500/50', dot: 'bg-emerald-400' },
+  en_camino: { badge: 'bg-sky-500/20 text-sky-300 border-sky-500/40', ring: 'border-sky-500/50', dot: 'bg-sky-400' },
   entregado: { badge: 'bg-slate-500/20 text-slate-300 border-slate-500/40', ring: 'border-slate-500/50', dot: 'bg-slate-400' },
   cancelado: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', ring: 'border-rose-500/50', dot: 'bg-rose-400' }
 };
@@ -234,12 +235,13 @@ const playChime = (() => {
   };
 })();
 
-const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'entregado'];
+const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'en_camino', 'entregado'];
 
 const STATUS_LABELS = {
   pendiente: 'Pendiente',
   en_preparacion: 'En Preparación',
   listo: 'Listo',
+  en_camino: 'En Camino',
   entregado: 'Entregado',
   cancelado: 'Cancelado'
 };
@@ -733,6 +735,8 @@ export default function App() {
       phone: formData.phone,
       type: formData.type,
       address: formData.type === 'delivery' ? formData.address : undefined,
+      lat: formData.type === 'delivery' && formData.lat != null ? formData.lat : undefined,
+      lng: formData.type === 'delivery' && formData.lng != null ? formData.lng : undefined,
       notes: formData.notes,
       items: cart.map((item) => ({
         id: item.product.id,
@@ -901,6 +905,16 @@ export default function App() {
     }
     setOrders(res.data.state.orders || []);
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
+  };
+
+  // Envía la posición en vivo del repartidor (el admin que entrega) al servidor.
+  const handleUpdateCourierLocation = async (orderId, lat, lng) => {
+    const res = await api.updateCourierLocation(orderId, lat, lng);
+    if (!res.ok) {
+      addToast('No se pudo enviar la ubicación del repartidor', 'error');
+      return false;
+    }
+    return true;
   };
 
   const handleCancelOrder = async (orderId, phone) => {
@@ -1161,6 +1175,7 @@ export default function App() {
             }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onUpdateCourierLocation={handleUpdateCourierLocation}
             onDeleteOrder={(order) => setDeleteOrderTarget(order)}
             allCustomers={allCustomers}
             onLoadCustomers={loadCustomers}
@@ -1171,6 +1186,7 @@ export default function App() {
             onLoadCollections={loadCollections}
             onUpsertCollection={handleUpsertCollection}
             onDeleteCollection={handleDeleteCollection}
+            addToast={addToast}
           />
         ) : (
           <AdminLoginView onLogin={handleAdminLogin} onBack={() => setActiveView('customer')} />
@@ -2069,12 +2085,19 @@ function CustomerView({
           </div>
 
           {/* Stepper Status Bar */}
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-2 pt-1 sm:pt-2">
+          <div
+            className={`grid gap-1.5 sm:gap-2 pt-1 sm:pt-2 ${
+              currentOrderTracking.type === 'delivery' ? 'grid-cols-5' : 'grid-cols-4'
+            }`}
+          >
             {[
               { key: 'pendiente', label: '1. Recibido' },
               { key: 'en_preparacion', label: '2. Preparando' },
               { key: 'listo', label: '3. Listo' },
-              { key: 'entregado', label: '4. Entregado' }
+              ...(currentOrderTracking.type === 'delivery'
+                ? [{ key: 'en_camino', label: '4. En camino' }]
+                : []),
+              { key: 'entregado', label: currentOrderTracking.type === 'delivery' ? '5. Entregado' : '4. Entregado' }
             ].map((step, idx) => {
               const currentIdx = STATUS_FLOW.indexOf(currentOrderTracking.status);
               const isPassed = idx <= currentIdx;
@@ -2104,6 +2127,11 @@ function CustomerView({
               );
             })}
           </div>
+
+          {/* Mapa de entrega a domicilio (destino + repartidor en vivo) */}
+          {currentOrderTracking.type === 'delivery' && (
+            <DeliveryMap order={currentOrderTracking} />
+          )}
         </div>
       )}
 
@@ -2899,6 +2927,62 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
   );
 }
 
+// Mapa embebido de Google Maps (sin API key) para mostrar la entrega a domicilio
+// y la posición en vivo del repartidor en el rastreo del cliente.
+function DeliveryMap({ order }) {
+  if (!order || order.type !== 'delivery') return null;
+
+  const dest = order.lat != null && order.lng != null;
+  const courier = order.courier_lat != null && order.courier_lng != null;
+  if (!dest && !courier) return null;
+
+  // Centro el mapa en la posición del repartidor cuando está en camino, sino en
+  // el destino. El iframe de Google Maps con ?q= no requiere API key.
+  const center = courier ? { lat: order.courier_lat, lng: order.courier_lng } : { lat: order.lat, lng: order.lng };
+  const mapUrl = `https://www.google.com/maps?q=${center.lat},${center.lng}&z=15&output=embed`;
+
+  const destUrl = dest ? `https://www.google.com/maps?q=${order.lat},${order.lng}` : null;
+  const courierUrl = courier ? `https://www.google.com/maps?q=${order.courier_lat},${order.courier_lng}` : null;
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+        <iframe
+          title="Mapa de entrega"
+          src={mapUrl}
+          className="w-full h-44 sm:h-52"
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {courier && courierUrl && (
+          <a
+            href={courierUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+          >
+            <Icon name="mapPin" className="w-3.5 h-3.5" />
+            Ubicación del repartidor
+          </a>
+        )}
+        {dest && destUrl && (
+          <a
+            href={destUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-[11px] font-bold hover:bg-teal-500/25 transition-all"
+          >
+            <Icon name="mapPin" className="w-3.5 h-3.5" />
+            Destino de la entrega
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
   const [formData, setFormData] = useState({
     customerName: savedCustomer?.customerName || '',
@@ -2907,11 +2991,44 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
     type: savedCustomer?.type || 'pickup', // 'pickup' | 'delivery'
     address: savedCustomer?.address || '',
     notes: '',
-    credit: false
+    credit: false,
+    lat: null,
+    lng: null
   });
 
   const [errors, setErrors] = useState({});
   const [showPhoneSuggestions, setShowPhoneSuggestions] = useState(false);
+  const [locating, setLocating] = useState(false);
+
+  // Captura la ubicación GPS del cliente para entregas a domicilio (sin usar
+  // Google Maps API; solo se guardan lat/lng y se muestra un enlace a Maps).
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      addToast('Tu navegador no soporta geolocalización', 'error');
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setFormData((prev) => ({
+          ...prev,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        }));
+        setLocating(false);
+        addToast('Ubicación capturada. La entrega se hará en este punto.', 'success');
+      },
+      (err) => {
+        setLocating(false);
+        const msg =
+          err.code === err.PERMISSION_DENIED
+            ? 'Permiso de ubicación denegado. Ingresá la dirección manualmente.'
+            : 'No se pudo obtener la ubicación. Ingresá la dirección manualmente.';
+        addToast(msg, 'error');
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+    );
+  };
 
   // Autocompletado por teléfono: busca clientes conocidos cuyos 7 dígitos coincidan
   const phoneSuggestions = useMemo(() => {
@@ -2938,8 +3055,8 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
     const newErrors = {};
     if (!formData.customerName.trim()) newErrors.customerName = 'Ingresa tu nombre completo';
     if (!/^\d{7}$/.test(formData.phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
-    if (formData.type === 'delivery' && !formData.address.trim()) {
-      newErrors.address = 'Ingresa la dirección de entrega';
+    if (formData.type === 'delivery' && !formData.address.trim() && (formData.lat == null || formData.lng == null)) {
+      newErrors.address = 'Ingresa la dirección o comparte tu ubicación';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -3125,14 +3242,41 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
                 )}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Dirección Completa de Entrega *
+                    Dirección de Entrega
                   </label>
+                  <button
+                    type="button"
+                    onClick={handleUseMyLocation}
+                    disabled={locating}
+                    className={`w-full px-4 py-3 rounded-xl border text-sm font-bold flex items-center justify-center gap-2 transition-all mb-2 ${
+                      formData.lat != null && formData.lng != null
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : 'bg-teal-500/15 border-teal-500/40 text-teal-300 hover:bg-teal-500/25'
+                    } ${locating ? 'opacity-60 pointer-events-none' : ''}`}
+                  >
+                    <Icon name="mapPin" className="w-4 h-4" />
+                    {locating
+                      ? 'Obteniendo ubicación...'
+                      : formData.lat != null && formData.lng != null
+                      ? 'Ubicación capturada (tocá para actualizar)'
+                      : 'Usar mi ubicación (GPS)'}
+                  </button>
+                  {formData.lat != null && formData.lng != null && (
+                    <a
+                      href={`https://www.google.com/maps?q=${formData.lat},${formData.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-[11px] text-sky-300 underline mb-2"
+                    >
+                      Ver punto en Google Maps
+                    </a>
+                  )}
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={formData.address}
                       onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                      placeholder="Calle, Número, Piso/Depto..."
+                      placeholder="Calle, Número, Piso/Depto (opcional si compartiste ubicación)"
                       className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
                     />
                     <button
@@ -3243,6 +3387,7 @@ function AdminView({
   onEditProduct,
   onDeleteProduct,
   onUpdateOrderStatus,
+  onUpdateCourierLocation,
   onDeleteOrder,
   allCustomers,
   onLoadCustomers,
@@ -3252,10 +3397,67 @@ function AdminView({
   collections,
   onLoadCollections,
   onUpsertCollection,
-  onDeleteCollection
+  onDeleteCollection,
+  addToast
 }) {
   // Order status filter state
   const [statusFilter, setStatusFilter] = useState('todos');
+
+  // Modo Repartidor: cuando un pedido a domicilio está en "En Camino", el admin
+  // (que reparte) comparte su GPS en vivo para que el cliente lo rastree.
+  const [courierActive, setCourierActive] = useState(false);
+  const [courierOrderId, setCourierOrderId] = useState(null);
+  const courierPosRef = useRef(null);
+  const courierWatchIdRef = useRef(null);
+
+  const stopCourierTracking = () => {
+    if (courierWatchIdRef.current != null) {
+      navigator.geolocation.clearWatch(courierWatchIdRef.current);
+      courierWatchIdRef.current = null;
+    }
+    courierPosRef.current = null;
+    setCourierActive(false);
+    setCourierOrderId(null);
+  };
+
+  // Inicia el seguimiento GPS y lo reporta periódicamente al servidor.
+  const startCourierTracking = (orderId) => {
+    if (!navigator.geolocation) {
+      addToast('Tu navegador no soporta geolocalización', 'error');
+      return;
+    }
+    setCourierActive(true);
+    setCourierOrderId(orderId);
+    addToast('Modo Repartidor activo: compartiendo tu ubicación en vivo', 'success');
+    courierWatchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        courierPosRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
+    );
+  };
+
+  // Reporta la posición cada 5s mientras el modo repartidor esté activo.
+  const onUpdateCourierLocationRef = useRef(onUpdateCourierLocation);
+  useEffect(() => {
+    onUpdateCourierLocationRef.current = onUpdateCourierLocation;
+  }, [onUpdateCourierLocation]);
+
+  useEffect(() => {
+    if (!courierActive || !courierOrderId) return;
+    const report = () => {
+      const pos = courierPosRef.current;
+      if (pos) onUpdateCourierLocationRef.current?.(courierOrderId, pos.lat, pos.lng);
+    };
+    const timer = setInterval(report, 5000);
+    return () => clearInterval(timer);
+  }, [courierActive, courierOrderId]);
+
+  // Detiene el seguimiento al desmontar el panel.
+  useEffect(() => () => {
+    if (courierWatchIdRef.current != null) navigator.geolocation.clearWatch(courierWatchIdRef.current);
+  }, []);
 
   // Promos editor state
   const [promoDraft, setPromoDraft] = useState(null);
@@ -3641,6 +3843,7 @@ function AdminView({
               { key: 'pendiente', label: 'Pendientes', count: orders.filter((o) => o.status === 'pendiente').length },
               { key: 'en_preparacion', label: 'Preparación', count: orders.filter((o) => o.status === 'en_preparacion').length },
               { key: 'listo', label: 'Listos', count: orders.filter((o) => o.status === 'listo').length },
+              { key: 'en_camino', label: 'En Camino', count: orders.filter((o) => o.status === 'en_camino').length },
               { key: 'entregado', label: 'Entregados', count: orders.filter((o) => o.status === 'entregado').length },
               { key: 'cancelado', label: 'Cancelados', count: orders.filter((o) => o.status === 'cancelado').length }
             ].map((f) => (
@@ -3681,7 +3884,7 @@ function AdminView({
                           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
-                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
+                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
                         </span>
                         {order.credit && (
                           <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
@@ -3714,6 +3917,22 @@ function AdminView({
                           <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
                             <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
                             <span>Entrega: {order.address}</span>
+                            {order.lat != null && order.lng != null && (
+                              <a
+                                href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
+                              >
+                                <Icon name="mapPin" className="w-3 h-3" />
+                                Abrir en Maps
+                              </a>
+                            )}
+                            {order.courier_lat != null && order.courier_lng != null && (
+                              <span className="text-[10px] font-bold text-emerald-300 ml-auto">
+                                Repartidor en vivo
+                              </span>
+                            )}
                           </p>
                         ) : (
                           <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
@@ -3765,6 +3984,7 @@ function AdminView({
                           { key: 'pendiente', label: 'Pendiente' },
                           { key: 'en_preparacion', label: 'En Prep.' },
                           { key: 'listo', label: 'Listo' },
+                          ...(order.type === 'delivery' ? [{ key: 'en_camino', label: 'En Camino' }] : []),
                           { key: 'entregado', label: 'Entregado' },
                           { key: 'cancelado', label: 'Cancelado' }
                         ].map((stBtn) => (
@@ -3781,6 +4001,29 @@ function AdminView({
                           </button>
                         ))}
                       </div>
+
+                      {/* Modo Repartidor: comparte el GPS mientras el pedido va en camino */}
+                      {order.type === 'delivery' && order.status === 'en_camino' && (
+                        <div className="pt-1">
+                          {courierOrderId === order.id && courierActive ? (
+                            <button
+                              onClick={stopCourierTracking}
+                              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Icon name="mapPin" className="w-3.5 h-3.5" />
+                              Detener rastreo en vivo
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => startCourierTracking(order.id)}
+                              className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Icon name="mapPin" className="w-3.5 h-3.5" />
+                              Comenzar entrega (GPS en vivo)
+                            </button>
+                          )}
+                        </div>
+                      )}
 
                       {/* Aprobar / Rechazar pedido a crédito (solo pendiente) */}
                       {order.credit && order.status === 'pendiente' && (
@@ -5605,11 +5848,28 @@ function OrderDetailModal({ order, rate, onClose, onRequestCancelOrder }) {
               <>
                 <Icon name="mapPin" className="w-3.5 h-3.5 text-amber-300" />
                 <span className="text-amber-300 font-bold">{order.address || 'Domicilio'}</span>
+                {order.lat != null && order.lng != null && (
+                  <a
+                    href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
+                  >
+                    <Icon name="mapPin" className="w-3 h-3" />
+                    Abrir en Maps
+                  </a>
+                )}
+                {order.courier_lat != null && order.courier_lng != null && (
+                  <span className="text-[10px] font-bold text-emerald-300 ml-auto">Repartidor en vivo</span>
+                )}
               </>
             ) : (
               <span className="text-teal-300 font-bold">Retiro por mostrador</span>
             )}
           </div>
+
+          {/* Mapa de entrega a domicilio */}
+          <DeliveryMap order={order} />
 
           <div className="rounded-2xl bg-slate-800/40 p-3 space-y-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block">Artículos</span>

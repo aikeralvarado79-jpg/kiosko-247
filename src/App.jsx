@@ -405,9 +405,10 @@ export default function App() {
   // Cliente reconocido (pre-llenado automático del checkout)
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
 
-  // Primer nombre del cliente para la animación de bienvenida a pantalla completa.
+  // Bienvenida a pantalla completa tras iniciar sesión (cliente o admin).
+  // { name, tag }: name = primer nombre a mostrar, tag = texto superior.
   // Se muestra justo tras identificarse y se cierra al instante con un toque.
-  const [welcomeName, setWelcomeName] = useState('');
+  const [welcome, setWelcome] = useState(null);
 
   // True si el cliente identificado figura en la lista de administradores por teléfono
   const isCurrentAdmin = useMemo(() => {
@@ -570,6 +571,27 @@ export default function App() {
     }
     setToken(res.data.token);
     setIsAdminAuthed(true);
+    // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
+    // desde el cliente reconocido, la lista de clientes o el perfil en el server.
+    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+    let adminName = '';
+    const savedKey = savedCustomer
+      ? `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber || ''}`.replace(/\D/g, '').slice(-11)
+      : '';
+    if (savedKey === phoneKey && savedCustomer?.customerName) {
+      adminName = savedCustomer.customerName;
+    } else {
+      const known = (allCustomers || []).find(
+        (c) => normalizePhoneDigits(c.phone) === phoneKey && c.customerName
+      );
+      if (known) {
+        adminName = known.customerName;
+      } else {
+        const profile = await api.getCustomer(phoneKey);
+        if (profile.ok && profile.data?.customerName) adminName = profile.data.customerName;
+      }
+    }
+    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
     addToast('Sesión iniciada en el panel admin');
     return true;
   };
@@ -800,7 +822,7 @@ export default function App() {
     // Bienvenida a pantalla completa con el nombre del usuario (primer nombre).
     // Se monta en el mismo render en que se cierra el modal, así la app nunca
     // se ve antes de la animación.
-    setWelcomeName(customerName.trim().split(' ')[0] || customerName.trim());
+    setWelcome({ name: customerName.trim().split(' ')[0] || customerName.trim(), tag: 'Bienvenido' });
     const known = buildKnownCustomers(orders, record);
     const isReturning = known.some((c) => c.number === phoneNumber && c.code === phoneCode);
     addToast(isReturning ? `¡Hola de nuevo, ${customerName.split(' ')[0]}!` : `¡Bienvenido, ${customerName.split(' ')[0]}!`);
@@ -1271,17 +1293,18 @@ export default function App() {
       </footer>
 
       {/* Bienvenida a pantalla completa tras el inicio de sesión */}
-      {welcomeName && (
+      {welcome && (
         <WelcomeOverlay
-          name={welcomeName}
-          onDone={() => setWelcomeName('')}
+          name={welcome.name}
+          tag={welcome.tag}
+          onDone={() => setWelcome(null)}
         />
       )}
     </div>
   );
 }
 
-function WelcomeOverlay({ name, onDone }) {
+function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
   // Cualquier toque/click cierra la bienvenida al instante. También se cierra
   // sola tras unos segundos por si el cliente no toca la pantalla.
   useEffect(() => {
@@ -1289,20 +1312,22 @@ function WelcomeOverlay({ name, onDone }) {
     return () => clearTimeout(t);
   }, [onDone]);
 
+  const isAdmin = tag.toLowerCase().includes('panel');
+
   return (
     <div
       onClick={onDone}
       className="fixed inset-0 z-[80] flex flex-col items-center justify-center bg-gradient-to-br from-teal-700 via-cyan-800 to-slate-950 animate-welcome-overlay cursor-pointer select-none touch-manipulation"
       role="dialog"
-      aria-label={`Bienvenido ${name}`}
+      aria-label={`${tag} ${name}`}
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(45,212,191,0.15),transparent_60%)] animate-welcome-glow pointer-events-none" />
       <div className="relative flex flex-col items-center text-center px-6">
         <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-white/10 border border-white/20 backdrop-blur-md flex items-center justify-center mb-6 sm:mb-8 animate-welcome-pop shadow-2xl shadow-teal-500/20">
-          <Icon name="sparkles" className="w-8 h-8 sm:w-10 sm:h-10 text-teal-200" />
+          <Icon name={isAdmin ? 'users' : 'sparkles'} className="w-8 h-8 sm:w-10 sm:h-10 text-teal-200" />
         </div>
         <p className="text-[11px] sm:text-xs font-bold uppercase tracking-[0.35em] text-teal-200/80 mb-3 animate-welcome-pop">
-          Bienvenido
+          {tag}
         </p>
         <h2 className="text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
           {name}

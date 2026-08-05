@@ -90,39 +90,47 @@ export const registrationOptions = async (req, res) => {
 export const registrationVerify = async (req, res) => {
   try {
     const { phone, response } = req.body || {};
-    const key = phoneKey(phone);
-    const stored = challengeStore.get(`reg-${key}`);
-    if (!stored) return res.status(400).json({ error: 'La sesión de registro expiró. Intenta de nuevo.' });
-
-    const { rpID, expectedOrigin } = deriveRp(req);
-
-    const verification = await verifyRegistrationResponse({
-      response,
-      expectedChallenge: stored.challenge,
-      expectedOrigin,
-      expectedRPID: rpID
-    });
-
-    challengeStore.delete(`reg-${key}`);
-
-    if (!verification.verified || !verification.registrationInfo) {
-      return res.status(400).json({ error: 'No se pudo verificar la biometría' });
-    }
-
-    const { credential } = verification.registrationInfo;
-
-    await store.saveWebAuthn(key, {
-      credentialId: credential.id,
-      publicKey: Buffer.from(credential.publicKey),
-      counter: credential.counter,
-      rpID
-    });
-
+    const v = await verifyRegistration(phone, response, req);
+    if (!v.ok) return res.status(v.status || 400).json({ error: v.error || 'No se pudo verificar la biometría' });
     res.json({ ok: true });
   } catch (err) {
     console.error('[kiosko] Error verificando el registro:', err);
     res.status(500).json({ error: 'No se pudo guardar tu biometría. Intentá de nuevo.' });
   }
+};
+
+// Verifica la respuesta de registro, guarda la credencial y devuelve { ok, status, error }.
+// Reutilizable para el registro de biometría del admin (que además emite token).
+export const verifyRegistration = async (phone, response, req) => {
+  const key = phoneKey(phone);
+  const stored = challengeStore.get(`reg-${key}`);
+  if (!stored) return { ok: false, status: 400, error: 'La sesión de registro expiró. Intenta de nuevo.' };
+
+  const { rpID, expectedOrigin } = deriveRp(req);
+
+  const verification = await verifyRegistrationResponse({
+    response,
+    expectedChallenge: stored.challenge,
+    expectedOrigin,
+    expectedRPID: rpID
+  });
+
+  challengeStore.delete(`reg-${key}`);
+
+  if (!verification.verified || !verification.registrationInfo) {
+    return { ok: false, status: 400, error: 'No se pudo verificar la biometría' };
+  }
+
+  const { credential } = verification.registrationInfo;
+
+  await store.saveWebAuthn(key, {
+    credentialId: credential.id,
+    publicKey: Buffer.from(credential.publicKey),
+    counter: credential.counter,
+    rpID
+  });
+
+  return { ok: true };
 };
 
 // Login: Paso 1 - generá los options para navigator.credentials.get

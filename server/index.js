@@ -124,6 +124,41 @@ app.post('/api/auth/recover', async (req, res) => {
   }
 });
 
+// Login admin por biometría: verifica huella/Face ID del teléfono admin y emite token.
+// El teléfono es obligatorio para saber qué admin está ingresando (evita la contraseña).
+app.post('/api/auth/admin/biometric-login', async (req, res) => {
+  try {
+    const { phone, response } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!ADMIN_PHONES.includes(key)) {
+      return res.status(403).json({ error: 'Este número no tiene acceso al panel' });
+    }
+    const v = await webauthn.verifyAuth(key, response, req);
+    if (!v.ok) return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
+    const token = signToken({ role: 'admin', phone: key, iat: Date.now() });
+    res.json({ token });
+  } catch (err) {
+    fail(res, err, 'No se pudo verificar la biometría. Intentá de nuevo.');
+  }
+});
+
+// Registro de biometría admin (primera vez): guarda huella/Face ID y emite token.
+app.post('/api/auth/admin/biometric-register', async (req, res) => {
+  try {
+    const { phone, response } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!ADMIN_PHONES.includes(key)) {
+      return res.status(403).json({ error: 'Este número no tiene acceso al panel' });
+    }
+    const v = await webauthn.verifyRegistration(phone, response, req);
+    if (!v.ok) return res.status(v.status || 400).json({ error: v.error || 'No se pudo guardar la biometría' });
+    const token = signToken({ role: 'admin', phone: key, iat: Date.now() });
+    res.json({ token });
+  } catch (err) {
+    fail(res, err, 'No se pudo guardar la biometría. Intentá de nuevo.');
+  }
+});
+
 // Public
 app.get('/api/state', async (req, res) => {
   try {

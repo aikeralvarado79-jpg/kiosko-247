@@ -39,8 +39,9 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
      arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
     image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
     xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
-     key: <path d="M12 2a9.92 9.92 0 0 0-7 2.82L2.82 7.01a1 1 0 0 0 0 1.42l2.59 2.59a1 1 0 0 0 1.42 0L12 5.34l6.17 6.17a1 1 0 0 0 1.42 0l2.59-2.59a1 1 0 0 0 0-1.42L13 4.83c-.35-.35-.5-.83-.5-1.31A5.5 5.5 0 0 0 12 2z" />
-  };
+     key: <path d="M12 2a9.92 9.92 0 0 0-7 2.82L2.82 7.01a1 1 0 0 0 0 1.42l2.59 2.59a1 1 0 0 0 1.42 0L12 5.34l6.17 6.17a1 1 0 0 0 1.42 0l2.59-2.59a1 1 0 0 0 0-1.42L13 4.83c-.35-.35-.5-.83-.5-1.31A5.5 5.5 0 0 0 12 2z" />,
+     fingerprint: <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88M17.29 21.02c.12-.6.43-2.3.5-3.02M2 12a10 10 0 0 1 18-6M2 16h.01M21.8 16c.2-2 .131-5.354 0-6M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2M8.65 22c.21-.66.45-1.32.57-2M9 6.8a6 6 0 0 1 9 5.2v2" />,
+   };
 
   return (
     <svg
@@ -581,26 +582,63 @@ export default function App() {
     // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
     // desde el cliente reconocido, la lista de clientes o el perfil en el server.
     const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
-    let adminName = '';
+    const adminName = await resolveAdminName(phoneKey);
+    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+    addToast('Sesión iniciada en el panel admin');
+    return true;
+  };
+
+  // Login admin por biometría (huella/Face ID): el teléfono identifica al admin
+  // y la biometría lo autentica sin contraseña. Solo para el panel admin.
+  const handleAdminBiometricLogin = async (phone, response) => {
+    const res = await api.adminBiometricLogin(phone, response);
+    if (!res.ok) {
+      addToast(res.data.error || 'La biometría no coincidió', 'error');
+      return false;
+    }
+    setToken(res.data.token);
+    setIsAdminAuthed(true);
+    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+    const adminName = await resolveAdminName(phoneKey);
+    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+    addToast('Sesión iniciada en el panel admin');
+    return true;
+  };
+
+  // Primer registro de biometría del admin: guarda huella/Face ID y emite token.
+  const handleAdminBiometricRegister = async (phone, response) => {
+    const res = await api.adminBiometricRegister(phone, response);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar tu biometría', 'error');
+      return false;
+    }
+    setToken(res.data.token);
+    setIsAdminAuthed(true);
+    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+    const adminName = await resolveAdminName(phoneKey);
+    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+    addToast('Sesión iniciada en el panel admin');
+    return true;
+  };
+
+  // Resuelve el nombre del admin desde el cliente guardado, los clientes conocidos
+  // o el perfil en el server. Devuelve '' si no se encuentra.
+  const resolveAdminName = async (phoneKey) => {
     const savedKey = savedCustomer
       ? `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber || ''}`.replace(/\D/g, '').slice(-11)
       : '';
     if (savedKey === phoneKey && savedCustomer?.customerName) {
-      adminName = savedCustomer.customerName;
-    } else {
-      const known = (allCustomers || []).find(
-        (c) => normalizePhoneDigits(c.phone) === phoneKey && c.customerName
-      );
-      if (known) {
-        adminName = known.customerName;
-      } else {
-        const profile = await api.getCustomer(phoneKey);
-        if (profile.ok && profile.data?.customerName) adminName = profile.data.customerName;
-      }
+      return savedCustomer.customerName;
     }
-    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
-    addToast('Sesión iniciada en el panel admin');
-    return true;
+    const known = (allCustomers || []).find(
+      (c) => normalizePhoneDigits(c.phone) === phoneKey && c.customerName
+    );
+    if (known) {
+      return known.customerName;
+    }
+    const profile = await api.getCustomer(phoneKey);
+    if (profile.ok && profile.data?.customerName) return profile.data.customerName;
+    return '';
   };
 
   const handleAdminLogout = () => {
@@ -1209,7 +1247,12 @@ export default function App() {
             onSaveStoreLocation={handleSaveStoreLocation}
           />
         ) : (
-          <AdminLoginView onLogin={handleAdminLogin} onBack={() => setActiveView('customer')} />
+          <AdminLoginView
+            onLogin={handleAdminLogin}
+            onBiometricLogin={handleAdminBiometricLogin}
+            onBiometricRegister={handleAdminBiometricRegister}
+            onBack={() => setActiveView('customer')}
+          />
         )}
       </main>
 
@@ -1437,13 +1480,19 @@ function LoadErrorScreen({ error, onRetry }) {
   );
 }
 
-function AdminLoginView({ onLogin, onBack }) {
+function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack }) {
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   // Login state
   const [loginPhone, setLoginPhone] = useState({ code: '0412', number: '' });
+
+  // Biometric login state
+  const [bioStatus, setBioStatus] = useState('idle'); // 'idle' | 'working' | 'register'
+  const [bioError, setBioError] = useState('');
+  const [bioOptions, setBioOptions] = useState(null);
+  const bioFetchKeyRef = useRef('');
 
   // Recovery state
   const [recoverMode, setRecoverMode] = useState(false);
@@ -1481,6 +1530,30 @@ function AdminLoginView({ onLogin, onBack }) {
     };
   }, [recoverMode, recoverStep, recoverPhone.code, recoverPhone.number]);
 
+  // Pre-carga las opciones de biometría del login admin al completar el teléfono.
+  // Solo se hace UN fetch por teléfono: prefetches solapados pisan el challenge
+  // en el server y rompen la verificación.
+  useEffect(() => {
+    const valid = !recoverMode && /^\d{7}$/.test(loginPhone.number);
+    if (!valid) return undefined;
+    const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
+    if (bioFetchKeyRef.current === phoneKey) return undefined;
+    let cancelled = false;
+    api
+      .webauthnLoginOptions({ phone: phoneKey })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          bioFetchKeyRef.current = phoneKey;
+          setBioOptions(res.data.options);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [recoverMode, loginPhone.code, loginPhone.number]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!/^\d{7}$/.test(loginPhone.number)) {
@@ -1497,6 +1570,51 @@ function AdminLoginView({ onLogin, onBack }) {
     const ok = await onLogin(phoneKey, password);
     setIsSubmitting(false);
     if (!ok) setError('Contraseña incorrecta. Verificá tu teléfono y contraseña.');
+  };
+
+  // Login admin con biometría (huella/Face ID). El teléfono es obligatorio y
+  // la biometría reemplaza la contraseña. Si no hay biometría registrada para
+  // ese teléfono, se registra en el momento (primera vez).
+  const handleBiometricLogin = async () => {
+    if (!/^\d{7}$/.test(loginPhone.number)) {
+      setError('Ingresá tu teléfono de administrador.');
+      return;
+    }
+    const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
+    setError('');
+    setBioError('');
+    if (bioFetchKeyRef.current !== phoneKey || !bioOptions) {
+      setBioError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
+      return;
+    }
+    setBioStatus('working');
+    try {
+      const authResponse = await startAuthentication({ optionsJSON: bioOptions });
+      const ok = await onBiometricLogin(phoneKey, authResponse);
+      if (!ok) setBioError('La biometría no coincidió. Verificá que tu número sea de administrador.');
+    } catch (err) {
+      // Si la credencial se registró bajo un rpID anterior (dominio distinto),
+      // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
+      // actual para que quede válida.
+      const isRpidMismatch = err?.name === 'NotAllowedError';
+      if (!isRpidMismatch) {
+        setBioError(friendlyAuthError(err));
+        setBioStatus('idle');
+        return;
+      }
+      try {
+        setBioStatus('register');
+        const rres = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: 'Administrador' });
+        if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
+        const regResponse = await startRegistration({ optionsJSON: rres.data.options });
+        const ok = await onBiometricRegister(phoneKey, regResponse);
+        if (!ok) setBioError('No se pudo guardar tu biometría. Intentá de nuevo.');
+      } catch (regErr) {
+        setBioError(friendlyAuthError(regErr));
+      }
+    } finally {
+      setBioStatus('idle');
+    }
   };
 
   const startRecovery = async () => {
@@ -1675,7 +1793,30 @@ function AdminLoginView({ onLogin, onBack }) {
                 className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
               />
             </div>
+            {error && <p className="text-xs text-rose-400 mt-2">{error}</p>}
+            {bioError && <p className="text-xs text-rose-400 mt-2">{bioError}</p>}
           </div>
+
+          <button
+            type="button"
+            onClick={handleBiometricLogin}
+            disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
+            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-sm hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
+          >
+            <Icon name="fingerprint" className="w-4 h-4" />
+            {bioStatus === 'working'
+              ? 'Esperando huella o Face ID...'
+              : bioStatus === 'register'
+                ? 'Registrando tu biometría...'
+                : 'Ingresar con huella o Face ID'}
+          </button>
+
+          <div className="flex items-center gap-3 py-1">
+            <span className="flex-1 h-px bg-slate-800" />
+            <span className="text-[10px] uppercase tracking-widest text-slate-500">o con contraseña</span>
+            <span className="flex-1 h-px bg-slate-800" />
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Contraseña</label>
             <input
@@ -1686,7 +1827,6 @@ function AdminLoginView({ onLogin, onBack }) {
               autoFocus
               className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
             />
-            {error && <p className="text-xs text-rose-400 mt-2">{error}</p>}
           </div>
 
           <button
@@ -1695,7 +1835,7 @@ function AdminLoginView({ onLogin, onBack }) {
             className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold text-sm hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
           >
             <Icon name="check" className="w-4 h-4" />
-            {isSubmitting ? 'Verificando...' : 'Ingresar al Panel'}
+            {isSubmitting ? 'Verificando...' : 'Ingresar con contraseña'}
           </button>
         </form>
 

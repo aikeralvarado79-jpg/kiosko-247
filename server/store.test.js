@@ -282,4 +282,38 @@ describe('fileStore', () => {
     const removed = await store.removeCollection(created.item.id);
     expect(removed.list.some((c) => c.id === created.item.id)).toBe(false);
   });
+
+  it('guarda lat/lng del destino y actualiza la posición del repartidor', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+
+    const created = await store.createOrder({
+      customerName: 'Cliente GPS',
+      phone: '41155556666',
+      type: 'delivery',
+      address: 'Calle 1',
+      lat: 10.4806,
+      lng: -66.9036,
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 1 }],
+      total: product.price
+    });
+
+    expect(Number(created.order.lat)).toBeCloseTo(10.4806, 4);
+    expect(Number(created.order.lng)).toBeCloseTo(-66.9036, 4);
+
+    const updated = await store.updateCourierLocation(created.order.id, 10.481, -66.904);
+    expect(Number(updated.courier_lat)).toBeCloseTo(10.481, 3);
+    expect(Number(updated.courier_lng)).toBeCloseTo(-66.904, 3);
+    expect(updated.courier_updated_at).toBeTruthy();
+
+    const tracking = await store.getOrderTracking(created.order.id);
+    expect(tracking.id).toBe(created.order.id);
+    expect(Number(tracking.lat)).toBeCloseTo(10.4806, 4);
+    expect(Number(tracking.courier_lat)).toBeCloseTo(10.481, 3);
+    expect(tracking.courier_updated_at).toBeTruthy();
+
+    const missing = await store.getOrderTracking('ORD-9999');
+    expect(missing).toBeNull();
+  });
 });

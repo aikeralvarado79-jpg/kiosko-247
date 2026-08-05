@@ -1090,6 +1090,7 @@ export default function App() {
             lastOrderForCustomer={lastOrderForCustomer}
             onRepeatLastOrder={handleRepeatLastOrder}
             customerOrders={customerOrders}
+            orders={orders}
             customerProfile={customerProfile}
             onViewOrderDetail={(order) => setOrderDetailOrder(order)}
             onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
@@ -4238,7 +4239,7 @@ function DebtDetailModal({
 
   const key = normalizePhoneDigits(customer.phone);
   // Pedidos del cliente que han sido entregados y a crédito = deuda contraída.
-  const debtOrders = orders
+  const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
   const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
@@ -4377,7 +4378,7 @@ function DebtDetailModal({
 // a bolívares según la tasa del día.
 function CustomerDebtModal({ customer, orders, rate, onClose }) {
   const key = normalizePhoneDigits(customer.phone);
-  const debtOrders = orders
+  const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
   const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
@@ -4580,7 +4581,7 @@ function futureCollectionDue(list) {
 // por WhatsApp (transparencia ante discrepancias).
 function buildAccountMessage(customer, orders) {
   const key = normalizePhoneDigits(customer.phone);
-  const debtOrders = orders
+  const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
   const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);

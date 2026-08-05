@@ -3360,19 +3360,21 @@ function AdminView({
             <Icon name="plus" className="w-5 h-5" />
             <span>Nuevo Producto</span>
           </button>
-          <button
-            onClick={() => {
-              if (window.confirm('¿Reemplazar los datos de calidad con una copia de producción? Esta acción no se puede deshacer.')) {
-                onRefreshDb();
-              }
-            }}
-            disabled={refreshingDb}
-            className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
-            title="Copiar datos de producción hacia calidad (reemplaza el contenido actual de calidad)"
-          >
-            <Icon name="refresh" className="w-4 h-4" />
-            <span className="hidden sm:inline">{refreshingDb ? 'Refrescando…' : 'Refrescar datos'}</span>
-          </button>
+          {window.location.hostname === 'kiosko-247-staging.onrender.com' && (
+            <button
+              onClick={() => {
+                if (window.confirm('¿Reemplazar los datos de calidad con una copia de producción? Esta acción no se puede deshacer.')) {
+                  onRefreshDb();
+                }
+              }}
+              disabled={refreshingDb}
+              className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+              title="Copiar datos de producción hacia calidad (reemplaza el contenido actual de calidad)"
+            >
+              <Icon name="refresh" className="w-4 h-4" />
+              <span className="hidden sm:inline">{refreshingDb ? 'Refrescando…' : 'Refrescar datos'}</span>
+            </button>
+          )}
           <button
             onClick={onLogout}
             className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-rose-300 hover:border-rose-500/40 transition-all flex items-center justify-center gap-2"

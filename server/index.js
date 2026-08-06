@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import * as store from './store.js';
 import * as webauthn from './webauthn.js';
+import * as push from './push.js';
 import { getBcvRate } from './rate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,6 +86,44 @@ async function verifyAdminPassword(phone, input) {
     return hash === legacy.hash;
   }
   return false;
+}
+
+// Notificaciones push por cambio de estado: avisan al cliente al instante.
+// No rompen el flujo si el cliente no está suscrito.
+const NOTIFY_STATUS = {
+  en_preparacion: 'Tu pedido está en preparación',
+  en_camino: 'Tu repartidor está en camino',
+  listo: 'Tu pedido está listo para retirar',
+  entregado: 'Tu pedido fue entregado'
+};
+
+async function notifyOrderStatus(order) {
+  if (!order || !order.phone) return;
+  const label = NOTIFY_STATUS[order.status];
+  if (!label) return;
+  try {
+    await push.sendToPhone([order.phone], {
+      title: `Pedido ${order.id}`,
+      body: label,
+      url: '/'
+    });
+  } catch (err) {
+    console.warn('[kiosko] No se pudo notificar el estado del pedido:', err.message);
+  }
+}
+
+async function notifyAdminsNewOrder(order) {
+  if (!order || ADMIN_PHONES.length === 0) return;
+  try {
+    const totalItems = (order.items || []).reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
+    await push.sendToPhone(ADMIN_PHONES, {
+      title: 'Nuevo pedido',
+      body: `${order.id} · ${order.customerName} · ${totalItems} artículos · $${Number(order.total).toFixed(2)}`,
+      url: '/'
+    });
+  } catch (err) {
+    console.warn('[kiosko] No se pudo notificar a los admins:', err.message);
+  }
 }
 
 // Auth
@@ -186,6 +225,7 @@ app.post('/api/orders', async (req, res) => {
     const result = await store.createOrder(req.body || {});
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
+    notifyAdminsNewOrder(result.order).catch(() => {});
   } catch (err) {
     fail(res, err, 'No se pudo realizar el pedido. Intenta de nuevo.');
   }
@@ -265,6 +305,85 @@ app.post('/api/webauthn/register-verify', webauthn.registrationVerify);
 app.post('/api/webauthn/login-options', webauthn.authenticationOptions);
 app.post('/api/webauthn/login-verify', webauthn.authenticationVerify);
 
+// ---- Notificaciones push (Web Push / PWA) ----
+
+// Clave VAPID pública para que el navegador cree la suscripción.
+app.get('/api/push/vapid-key', async (req, res) => {
+  try {
+    const publicKey = await push.getVapidPublicKey();
+    if (!publicKey) return res.status(500).json({ error: 'Push no configurado' });
+    res.json({ publicKey });
+  } catch (err) {
+    fail(res, err, 'No se pudo obtener la clave de notificaciones.');
+  }
+});
+
+// Registra la suscripción push de un dispositivo (identificada por teléfono).
+app.post('/api/push/subscribe', async (req, res) => {
+  try {
+    const { phone, subscription } = req.body || {};
+    if (!subscription || !subscription.endpoint) return res.status(400).json({ error: 'Suscripción inválida' });
+    await push.subscribe(phone, subscription);
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'No se pudo guardar la suscripción.');
+  }
+});
+
+app.post('/api/push/unsubscribe', async (req, res) => {
+  try {
+    await push.unsubscribe((req.body || {}).endpoint);
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'No se pudo quitar la suscripción.');
+  }
+});
+
+// Enviar una notificación de prueba a un teléfono (solo admin).
+app.post('/api/push/test', requireAdmin, async (req, res) => {
+  try {
+    const { phone, title, body } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'Indica el teléfono' });
+    const sent = await push.sendToPhone([phone], {
+      title: title || 'Notificación de prueba',
+      body: body || 'Si ves esto, las notificaciones están funcionando.',
+      url: '/'
+    });
+    res.json({ ok: true, sent });
+  } catch (err) {
+    fail(res, err, 'No se pudo enviar la notificación.');
+  }
+});
+
+// Broadcast: promoción u aviso para todos los suscritos (solo admin).
+app.post('/api/push/broadcast', requireAdmin, async (req, res) => {
+  try {
+    const { title, body } = req.body || {};
+    if (!title || !body) return res.status(400).json({ error: 'Faltan título o mensaje' });
+    const sent = await push.sendToAll({ title, body, url: '/' }, ADMIN_PHONES);
+    res.json({ ok: true, sent });
+  } catch (err) {
+    fail(res, err, 'No se pudo enviar la promoción.');
+  }
+});
+
+// Recordatorio de deuda a un cliente (solo admin). Usa el balance actual.
+app.post('/api/push/reminder', requireAdmin, async (req, res) => {
+  try {
+    const { phone, amount } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'Indica el teléfono' });
+    const debt = Number(amount) || 0;
+    const sent = await push.sendToPhone([phone], {
+      title: 'Recordatorio de deuda',
+      body: debt > 0 ? `Tienes un saldo pendiente de $${debt.toFixed(2)}. ¡Pásate a saldar o escríbenos!` : 'Recuerda saldar tu cuenta. ¡Estamos para ayudarte!',
+      url: '/'
+    });
+    res.json({ ok: true, sent });
+  } catch (err) {
+    fail(res, err, 'No se pudo enviar el recordatorio.');
+  }
+});
+
 // Admin
 app.post('/api/products', requireAdmin, async (req, res) => {
   try {
@@ -305,8 +424,124 @@ app.patch('/api/orders/:id', requireAdmin, async (req, res) => {
     const result = await store.updateOrderStatus(req.params.id, (req.body || {}).status);
     if (result.error) return res.status(404).json({ error: result.error });
     res.json(result);
+    const updated = await store.getOrderById(req.params.id);
+    notifyOrderStatus(updated).catch(() => {});
   } catch (err) {
     fail(res, err, 'No se pudo actualizar el pedido.');
+  }
+});
+
+// ---- Pagos digitales (pago móvil / transferencia) ----
+
+// Confirmar o rechazar el pago de un pedido (solo admin).
+app.post('/api/orders/:id/payment', requireAdmin, async (req, res) => {
+  try {
+    const { status } = req.body || {};
+    if (!['confirmado', 'rechazado'].includes(status)) {
+      return res.status(400).json({ error: 'Estado de pago inválido' });
+    }
+    const result = await store.updateOrderPayment(req.params.id, { paymentStatus: status });
+    if (result.error) return res.status(404).json({ error: result.error });
+    res.json(result);
+    const updated = await store.getOrderById(req.params.id);
+    if (updated && updated.phone) {
+      push.sendToPhone([updated.phone], {
+        title: `Pago ${status === 'confirmado' ? 'confirmado' : 'rechazado'}`,
+        body:
+          status === 'confirmado'
+            ? `Tu pago del pedido ${updated.id} fue confirmado. ¡Gracias!`
+            : `El pago del pedido ${updated.id} fue rechazado. Contáctanos para resolverlo.`,
+        url: '/'
+      }).catch(() => {});
+    }
+  } catch (err) {
+    fail(res, err, 'No se pudo actualizar el pago.');
+  }
+});
+
+// Adjuntar el comprobante de pago a un pedido (el cliente sube la imagen).
+app.post('/api/orders/:id/payment-proof', async (req, res) => {
+  try {
+    const { phone, proof, reference } = req.body || {};
+    const order = await store.getOrderById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (String(order.phone || '').replace(/\D/g, '').slice(-11) !== String(phone || '').replace(/\D/g, '').slice(-11)) {
+      return res.status(403).json({ error: 'No autorizado para este pedido' });
+    }
+    if (!proof || typeof proof !== 'string' || !proof.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'Comprobante inválido' });
+    }
+    if (proof.length > 1500000) {
+      return res.status(400).json({ error: 'La imagen es demasiado grande' });
+    }
+    const result = await store.updateOrderPayment(req.params.id, {
+      paymentProof: proof,
+      paymentReference: String(reference || '').slice(0, 120),
+      paymentStatus: order.paymentStatus || 'pendiente'
+    });
+    if (result.error) return res.status(404).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    fail(res, err, 'No se pudo guardar el comprobante.');
+  }
+});
+
+// ---- Chat del pedido ----
+
+const authorizeOrderChat = async (req, orderId) => {
+  const order = await store.getOrderById(orderId);
+  if (!order) return { error: 'Pedido no encontrado', status: 404 };
+  const authHeader = req.headers.authorization || '';
+  const isAdmin = authHeader.startsWith('Bearer ') && verifyToken(authHeader.slice(7));
+  if (isAdmin) return { order };
+  const phone = req.body?.phone || req.query?.phone || '';
+  if (String(order.phone || '').replace(/\D/g, '').slice(-11) === String(phone).replace(/\D/g, '').slice(-11)) {
+    return { order };
+  }
+  return { error: 'No autorizado para este pedido', status: 403 };
+};
+
+// Enviar mensaje de chat (admin o el dueño del pedido).
+app.post('/api/orders/:id/messages', async (req, res) => {
+  try {
+    const auth = await authorizeOrderChat(req, req.params.id);
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+    const text = String(req.body?.text || '').trim().slice(0, 500);
+    if (!text) return res.status(400).json({ error: 'Escribe un mensaje' });
+    const sender = auth.order.phone && (req.headers.authorization || '').startsWith('Bearer ')
+      ? 'admin'
+      : 'customer';
+    const message = { id: `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sender, text, at: new Date().toISOString() };
+    const result = await store.addOrderMessage(req.params.id, message);
+    if (result.error) return res.status(404).json({ error: result.error });
+    res.json({ ok: true, message });
+    // Notifica al otro lado del chat.
+    if (sender === 'admin') {
+      push.sendToPhone([auth.order.phone], {
+        title: `Nuevo mensaje · Pedido ${auth.order.id}`,
+        body: text,
+        url: '/'
+      }).catch(() => {});
+    } else if (ADMIN_PHONES.length) {
+      push.sendToPhone(ADMIN_PHONES, {
+        title: `Mensaje del cliente · ${auth.order.id}`,
+        body: text,
+        url: '/'
+      }).catch(() => {});
+    }
+  } catch (err) {
+    fail(res, err, 'No se pudo enviar el mensaje.');
+  }
+});
+
+// Leer mensajes del chat (admin o el dueño del pedido).
+app.get('/api/orders/:id/messages', async (req, res) => {
+  try {
+    const auth = await authorizeOrderChat(req, req.params.id);
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+    res.json({ messages: await store.getOrderMessages(req.params.id) });
+  } catch (err) {
+    fail(res, err, 'No se pudieron cargar los mensajes.');
   }
 });
 
@@ -492,8 +727,9 @@ function scheduleAutoRefresh() {
   console.log(`[kiosko] Refresco automático del espejo cada ${interval} ms`);
 }
 
-store.initStore().then(() => {
+store.initStore().then(async () => {
   scheduleAutoRefresh();
+  await push.ensureVapid().catch((err) => console.warn('[kiosko] VAPID no listo:', err.message));
   app.listen(PORT, () => {
     console.log(`[kiosko] Servidor corriendo en http://localhost:${PORT}`);
   });

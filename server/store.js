@@ -116,6 +116,15 @@ const fileStore = {
     this.persist();
   },
 
+  async getSetting(key) {
+    return this.state.settings ? this.state.settings[key] : null;
+  },
+
+  async setSetting(key, value) {
+    this.state.settings = { ...this.state.settings, [key]: value };
+    this.persist();
+  },
+
   async getCustomerByPhone(phone) {
     const key = normalizePhone(phone);
     return this.state.customers.find((c) => c.phone === key) || null;
@@ -321,6 +330,11 @@ export async function refreshMirror() {
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_lat" NUMERIC`);
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_lng" NUMERIC`);
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "courier_updated_at" TEXT`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "paymentMethod" TEXT`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "paymentProof" TEXT`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "paymentReference" TEXT`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`);
       }
       tables[t] = ins.rowCount;
     }
@@ -416,6 +430,11 @@ const pgStore = {
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lat" NUMERIC`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lng" NUMERIC`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_updated_at" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentMethod" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentProof" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentReference" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`);
   },
 
   async seedIfEmpty() {
@@ -470,6 +489,7 @@ const pgStore = {
       try {
         if (row.key === 'promos' && Array.isArray(row.value)) settings.promos = row.value;
         if (row.key === 'storeLocation' && row.value && typeof row.value === 'object') settings.storeLocation = row.value;
+        if (row.key === 'paymentConfig' && row.value && typeof row.value === 'object') settings.paymentConfig = row.value;
       } catch {}
     }
     return { products, categories, orders, settings };
@@ -497,9 +517,9 @@ const pgStore = {
     await this.pool.query(`DELETE FROM ${q('orders')}`);
     for (const o of orders) {
       await this.pool.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "courier_lat", "courier_lng", "courier_updated_at")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
-        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit), o.lat != null ? Number(o.lat) : null, o.lng != null ? Number(o.lng) : null, o.courier_lat != null ? Number(o.courier_lat) : null, o.courier_lng != null ? Number(o.courier_lng) : null, o.courier_updated_at || null]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "courier_lat", "courier_lng", "courier_updated_at", "paymentMethod", "paymentStatus", "paymentProof", "paymentReference", messages)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit), o.lat != null ? Number(o.lat) : null, o.lng != null ? Number(o.lng) : null, o.courier_lat != null ? Number(o.courier_lat) : null, o.courier_lng != null ? Number(o.courier_lng) : null, o.courier_updated_at || null, o.paymentMethod || null, o.paymentStatus || null, o.paymentProof || null, o.paymentReference || null, JSON.stringify(o.messages || [])]
       );
     }
   },
@@ -515,6 +535,13 @@ const pgStore = {
         `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         ['storeLocation', JSON.stringify(settings.storeLocation)]
+      );
+    }
+    if (settings.paymentConfig && typeof settings.paymentConfig === 'object') {
+      await this.pool.query(
+        `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        ['paymentConfig', JSON.stringify(settings.paymentConfig)]
       );
     }
   },
@@ -571,6 +598,28 @@ const pgStore = {
       `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       ['collections', JSON.stringify(Array.isArray(collections) ? collections : [])]
+    );
+  },
+
+  async getSetting(key) {
+    const { rows } = await this.pool.query(`SELECT value FROM ${q('settings')} WHERE key = $1`, [key]);
+    if (!rows[0] || rows[0].value == null) return null;
+    const v = rows[0].value;
+    if (typeof v === 'string') {
+      try {
+        return JSON.parse(v);
+      } catch {
+        return v;
+      }
+    }
+    return v;
+  },
+
+  async setSetting(key, value) {
+    await this.pool.query(
+      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [key, JSON.stringify(value)]
     );
   },
 
@@ -781,13 +830,18 @@ const pgStore = {
         createdAt: orderData.createdAt || new Date().toISOString(),
         credit: Boolean(orderData.credit),
         lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
-        lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null
+        lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
+        paymentMethod: orderData.paymentMethod || 'efectivo',
+        paymentStatus: orderData.paymentStatus || (orderData.paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
+        paymentProof: orderData.paymentProof || null,
+        paymentReference: orderData.paymentReference || null,
+        messages: []
       };
 
       await client.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit, order.lat, order.lng]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "paymentMethod", "paymentStatus", "paymentProof", "paymentReference", messages)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit, order.lat, order.lng, order.paymentMethod, order.paymentStatus, order.paymentProof, order.paymentReference, JSON.stringify(order.messages || [])]
       );
 
       // Registrar/actualizar el cliente reconocido en la misma transacción
@@ -859,6 +913,44 @@ const pgStore = {
           [existing.phone, Number(existing.total) || 0, existing.customerName || '']
         );
       }
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
+  // Actualiza los campos de pago de un pedido (confirmar/rechazar, comprobante).
+  async atomicUpdateOrderPayment(id, data) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT id FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      if (!rows[0]) return { error: 'Pedido no encontrado' };
+      const fields = ['paymentStatus', 'paymentProof', 'paymentReference'];
+      const clauses = [];
+      const params = [id];
+      fields.forEach((f) => {
+        if (data[f] !== undefined) {
+          clauses.push(`"${f}" = $${params.length}`);
+          params.push(data[f]);
+        }
+      });
+      if (clauses.length === 0) return { error: 'Sin cambios de pago' };
+      await client.query(`UPDATE ${q('orders')} SET ${clauses.join(', ')} WHERE id = $1`, params);
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
+  // Agrega un mensaje de chat al pedido (JSONB, sin tabla extra).
+  async atomicAddOrderMessage(id, message) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT messages FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      if (!rows[0]) return { error: 'Pedido no encontrado' };
+      const msgs = Array.isArray(rows[0].messages) ? rows[0].messages : [];
+      msgs.push(message);
+      await client.query(`UPDATE ${q('orders')} SET messages = $2 WHERE id = $1`, [id, JSON.stringify(msgs)]);
       return { ok: true };
     });
     if (result.error) return result;
@@ -971,6 +1063,10 @@ export const isMirrorEnabled = () => Boolean(pgPool);
 export const getState = () => store.getState();
 
 export const saveSettings = (settings) => store.saveSettings(settings);
+
+export const getSetting = (key) => store.getSetting(key);
+
+export const setSetting = (key, value) => store.setSetting(key, value);
 
 export const getCustomerByPhone = (phone) => store.getCustomerByPhone(phone);
 
@@ -1094,7 +1190,12 @@ export const createOrder = async (orderData) => {
     createdAt: orderData.createdAt || new Date().toISOString(),
     credit: Boolean(orderData.credit),
     lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
-    lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null
+    lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
+    paymentMethod: orderData.paymentMethod || 'efectivo',
+    paymentStatus: orderData.paymentStatus || (orderData.paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
+    paymentProof: orderData.paymentProof || null,
+    paymentReference: orderData.paymentReference || null,
+    messages: []
   };
 
   const orders = [order, ...state.orders];
@@ -1180,6 +1281,40 @@ export const updateOrderStatus = async (id, status) => {
     await store.addOrderToAccount(existing);
   }
 
+  const newState = await store.getState();
+  return { state: newState };
+};
+
+export const getOrderById = async (id) => {
+  const state = await store.getState();
+  return state.orders.find((o) => o.id === id) || null;
+};
+
+export const updateOrderPayment = async (id, data) => {
+  if (pgPool) return pgStore.atomicUpdateOrderPayment(id, data);
+  const state = await store.getState();
+  const existing = state.orders.find((o) => o.id === id);
+  if (!existing) return { error: 'Pedido no encontrado' };
+  const orders = state.orders.map((o) => (o.id === id ? { ...o, ...data } : o));
+  await store.saveOrders(orders);
+  const newState = await store.getState();
+  return { state: newState };
+};
+
+export const getOrderMessages = async (id) => {
+  const state = await store.getState();
+  const order = state.orders.find((o) => o.id === id);
+  if (!order) return null;
+  return Array.isArray(order.messages) ? order.messages : [];
+};
+
+export const addOrderMessage = async (id, message) => {
+  if (pgPool) return pgStore.atomicAddOrderMessage(id, message);
+  const state = await store.getState();
+  const existing = state.orders.find((o) => o.id === id);
+  if (!existing) return { error: 'Pedido no encontrado' };
+  const orders = state.orders.map((o) => (o.id === id ? { ...o, messages: [...(o.messages || []), message] } : o));
+  await store.saveOrders(orders);
   const newState = await store.getState();
   return { state: newState };
 };

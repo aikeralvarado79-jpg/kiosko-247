@@ -46,5 +46,15 @@ export const api = {
   webauthnRegisterOptions: (data) => request('/api/webauthn/register-options', { method: 'POST', body: JSON.stringify(data) }),
   webauthnRegisterVerify: (data) => request('/api/webauthn/register-verify', { method: 'POST', body: JSON.stringify(data) }),
   webauthnLoginOptions: (data) => request('/api/webauthn/login-options', { method: 'POST', body: JSON.stringify(data) }),
-  webauthnLoginVerify: (data) => request('/api/webauthn/login-verify', { method: 'POST', body: JSON.stringify(data) })
+  webauthnLoginVerify: (data) => request('/api/webauthn/login-verify', { method: 'POST', body: JSON.stringify(data) }),
+  getVapidKey: () => request('/api/push/vapid-key'),
+  subscribePush: (phone, subscription) => request('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ phone, subscription }) }),
+  unsubscribePush: (endpoint) => request('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+  pushTest: (phone, title, body) => request('/api/push/test', { method: 'POST', body: JSON.stringify({ phone, title, body }) }),
+  pushBroadcast: (title, body) => request('/api/push/broadcast', { method: 'POST', body: JSON.stringify({ title, body }) }),
+  pushReminder: (phone, amount) => request('/api/push/reminder', { method: 'POST', body: JSON.stringify({ phone, amount }) }),
+  updateOrderPayment: (id, status) => request(`/api/orders/${id}/payment`, { method: 'POST', body: JSON.stringify({ status }) }),
+  attachPaymentProof: (id, phone, proof, reference) => request(`/api/orders/${id}/payment-proof`, { method: 'POST', body: JSON.stringify({ phone, proof, reference }) }),
+  getOrderMessages: (id, phone) => request(`/api/orders/${id}/messages?phone=${encodeURIComponent(phone || '')}`),
+  sendOrderMessage: (id, phone, text) => request(`/api/orders/${id}/messages`, { method: 'POST', body: JSON.stringify({ phone, text }) })
 };

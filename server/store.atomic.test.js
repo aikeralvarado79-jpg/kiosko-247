@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
         h.calls.push(s);
         if (s.includes('SELECT 1 FROM orders WHERE id')) return { rows: [{ '?column?': 1 }] };
         if (s.includes('SELECT status FROM orders WHERE id')) return { rows: [{ status: 'cancelado' }] };
+        if (s.includes('SELECT id FROM orders WHERE id')) return { rows: [{ id: 'ORD-1' }] };
         if (s.includes('SELECT * FROM orders WHERE id')) return { rows: [{ id: 'ORD-1', status: 'pendiente', phone: '04140000001', items: [], total: 5, credit: false }] };
         if (s.includes('SELECT status FROM orders')) return { rows: [{ status: 'cancelado' }] };
         return { rows: [] };
@@ -75,6 +76,21 @@ describe('mutaciones atómicas en Postgres', () => {
     expect(sqls.some((s) => s.includes('UPDATE orders SET status') && s.includes('WHERE id'))).toBe(true);
     expect(sqls.some((s) => /DELETE FROM orders\b(?!\s*WHERE)/.test(s))).toBe(false);
     expect(sqls.some((s) => s.includes('DELETE FROM orders WHERE id'))).toBe(false);
+  });
+
+  it('updateOrderPayment usa placeholders correctos (el primer campo no colisiona con el id)', async () => {
+    const store = await loadPgStore();
+    const result = await store.updateOrderPayment('ORD-1', {
+      paymentStatus: 'confirmado',
+      paymentReference: 'REF-1',
+      paymentProof: 'data:image/png;base64,AAAA'
+    });
+    expect(result.error).toBeUndefined();
+    const update = h.calls.find((s) => s.includes('UPDATE orders SET') && s.includes('"paymentProof"'));
+    expect(update).toContain('"paymentStatus" = $2');
+    expect(update).toContain('"paymentProof" = $3');
+    expect(update).toContain('"paymentReference" = $4');
+    expect(update).toContain('WHERE id = $1');
   });
 
   it('cancelOrder restaura stock por id y no borra la tabla', async () => {

@@ -1020,6 +1020,8 @@ export const getAdminCredential = (phone) => store.getAdminCredential(phone);
 
 export const setAdminCredential = (phone, entry) => store.setAdminCredential(phone, entry);
 
+export const getAdminPassword = () => store.getAdminPassword();
+
 export const listCollections = () => store.listCollections();
 
 export const saveCollections = (collections) => store.saveCollections(collections);

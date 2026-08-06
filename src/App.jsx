@@ -1508,7 +1508,6 @@ export default function App() {
           onClose={() => setProductDetailModal(null)}
           onAddToCart={(qty, rect) => {
             addToCart(productDetailModal, qty, rect);
-            setProductDetailModal(null);
           }}
         />
       )}
@@ -3177,7 +3176,10 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
           </div>
 
           <button
-            onClick={(e) => onAddToCart(quantity, e.currentTarget.getBoundingClientRect())}
+            onClick={(e) => {
+              onAddToCart(quantity, e.currentTarget.getBoundingClientRect());
+              setQuantity(1);
+            }}
             disabled={isOut}
             className={`w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
               isOut

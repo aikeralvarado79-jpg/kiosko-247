@@ -948,8 +948,8 @@ const pgStore = {
       const params = [id];
       fields.forEach((f) => {
         if (data[f] !== undefined) {
-          clauses.push(`"${f}" = $${params.length}`);
           params.push(data[f]);
+          clauses.push(`"${f}" = $${params.length}`);
         }
       });
       if (clauses.length === 0) return { error: 'Sin cambios de pago' };

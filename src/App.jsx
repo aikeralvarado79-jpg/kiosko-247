@@ -16,6 +16,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     edit: <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />,
     x: <path d="M18 6 6 18M6 6l12 12" />,
     check: <path d="M20 6 9 17l-5-5" />,
+    bell: <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />,
     package: <path d="m16.5 9.4-9-5.19M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" />,
     alertTriangle: <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3zM12 9v4M12 17h.01" />,
     trendingUp: <path d="m22 7-8.5 8.5-5-5L1 18M16 7h6v6" />,
@@ -187,6 +188,45 @@ const markNewProductViewed = (id) => {
   } catch {}
 };
 const wasNewProductViewed = (id) => loadNewProductViews().includes(id);
+
+// Convierte la clave VAPID (base64url) al ArrayBuffer que exige el navegador.
+const urlBase64ToUint8Array = (base64) => {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+};
+
+// Suscribe el dispositivo a Web Push usando la clave VAPID del servidor.
+const subscribeToPush = async (phone) => {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      return false;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    if (!reg.pushManager) return false;
+    let subscription = await reg.pushManager.getSubscription();
+    if (!subscription) {
+      const keyRes = await api.getVapidKey();
+      if (!keyRes.ok || !keyRes.data?.publicKey) return false;
+      subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyRes.data.publicKey)
+      });
+    }
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!key || key.length < 7) return false;
+    await api.subscribePush(key, {
+      endpoint: subscription.endpoint,
+      keys: subscription.toJSON().keys
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 // Mini calendario compacto (popover) para filtro de fecha
 function MiniCalendar({ value, onChange, onClose }) {
@@ -459,6 +499,7 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [promos, setPromos] = useState([]);
   const [storeLocation, setStoreLocation] = useState(null);
+  const [paymentConfig, setPaymentConfig] = useState(null);
   const [rate, setRate] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -485,6 +526,7 @@ export default function App() {
     setOrders(res.data.orders || []);
     if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
+    if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
     setIsLoading(false);
   }, []);
@@ -575,6 +617,11 @@ export default function App() {
 
   // Tour tutorial para usuarios nuevos (se muestra tras la bienvenida).
   const [showTour, setShowTour] = useState(false);
+
+  // Banner de notificaciones: ocultable, se recuerda la decisión del usuario.
+  const [pushBannerHidden, setPushBannerHidden] = useState(() => {
+    try { return localStorage.getItem('kiosko_push_banner_hidden') === '1'; } catch { return false; }
+  });
 
   // True si el cliente identificado figura en la lista de administradores por teléfono
   const isCurrentAdmin = useMemo(() => {
@@ -1005,6 +1052,8 @@ export default function App() {
       })),
       total: cartTotal,
       credit: Boolean(formData.credit),
+      paymentMethod: formData.paymentMethod || 'efectivo',
+      paymentReference: formData.paymentReference || '',
       timestamp: formatTimestamp(),
       estimatedMinutes: formData.type === 'delivery' ? 25 : 10
     };
@@ -1034,11 +1083,30 @@ export default function App() {
       };
       saveCustomerData(customerRecord);
       setSavedCustomer(customerRecord);
+      autoSubscribePushIfAllowed();
 
       if (res.data.state) {
         setProducts(res.data.state.products || []);
         setOrders(res.data.state.orders || []);
       }
+
+      // Adjuntar el comprobante de pago digital tras confirmar el pedido.
+      if (formData.paymentProof && res.data.order?.id) {
+        try {
+          const attach = await api.attachPaymentProof(
+            res.data.order.id,
+            orderPayload.phone,
+            formData.paymentProof,
+            orderPayload.paymentReference
+          );
+          if (!attach.ok) {
+            console.warn('[kiosko] No se pudo adjuntar el comprobante:', attach.data?.error);
+          }
+        } catch (proofErr) {
+          console.warn('[kiosko] Error al adjuntar comprobante:', proofErr);
+        }
+      }
+
       haptic([20, 40, 20]);
       playChime();
       addToast('¡Pedido realizado con éxito!', 'success');
@@ -1132,6 +1200,7 @@ export default function App() {
       const res = await api.upsertCustomer(phoneKey, { customerName });
       if (res.ok && res.data?.phone) setCustomerProfile(res.data);
     }
+    autoSubscribePushIfAllowed();
   };
 
   // Confirmación por biometría del modal de identidad. "switchback" = volver al
@@ -1150,6 +1219,32 @@ export default function App() {
     setIdentityMode('login');
     setIsIdentityOpen(false);
     addToast('Sesión cerrada', 'info');
+  };
+
+  // Pide permiso de notificaciones y suscribe el dispositivo al teléfono activo.
+  const handleEnableNotifications = async () => {
+    if (!('Notification' in window) || !('PushManager' in window)) {
+      addToast('Tu navegador no soporta notificaciones', 'error');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      addToast('Notificaciones bloqueadas. Actívalas en los ajustes del navegador', 'error');
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      addToast('Notificaciones no activadas', 'info');
+      return;
+    }
+    const ok = await subscribeToPush(savedCustomer?.phoneNumber || '');
+    addToast(ok ? 'Notificaciones activadas. Te avisaremos de tu pedido.' : 'No se pudieron activar las notificaciones', ok ? 'success' : 'error');
+  };
+
+  // Re-suscribe en silencio si el permiso ya está concedido (al entrar o pedir).
+  const autoSubscribePushIfAllowed = async () => {
+    if (!savedCustomer?.phoneNumber) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    subscribeToPush(savedCustomer.phoneNumber).catch(() => {});
   };
 
   const handleSaveProduct = async (productData) => {
@@ -1198,6 +1293,17 @@ export default function App() {
     }
     setOrders(res.data.state.orders || []);
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
+  };
+
+  // Admin confirma o rechaza el pago digital de un pedido (dispara push al cliente).
+  const handleUpdateOrderPayment = async (orderId, newStatus) => {
+    const res = await api.updateOrderPayment(orderId, newStatus);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el pago', 'error');
+      return;
+    }
+    setOrders(res.data.state.orders || []);
+    addToast(`Pago del pedido ${orderId} ${newStatus === 'confirmado' ? 'confirmado' : 'rechazado'}`);
   };
 
   // Envía la posición en vivo del repartidor (el admin que entrega) al servidor.
@@ -1251,6 +1357,17 @@ export default function App() {
     }
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     addToast('Ubicación del comercio guardada');
+    return true;
+  };
+
+  const handleSavePaymentConfig = async (cfg) => {
+    const res = await api.saveSettings({ promos, paymentConfig: cfg });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar la configuración de pagos', 'error');
+      return false;
+    }
+    if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
+    addToast('Configuración de pagos guardada');
     return true;
   };
 
@@ -1506,6 +1623,7 @@ export default function App() {
             }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onUpdateOrderPayment={handleUpdateOrderPayment}
             onUpdateCourierLocation={handleUpdateCourierLocation}
             onDeleteOrder={(order) => setDeleteOrderTarget(order)}
             allCustomers={allCustomers}
@@ -1520,6 +1638,7 @@ export default function App() {
             addToast={addToast}
             storeLocation={storeLocation}
             onSaveStoreLocation={handleSaveStoreLocation}
+            adminPhone={savedCustomer ? `${savedCustomer.phoneCode || ''} ${savedCustomer.phoneNumber || ''}`.trim() : ''}
           />
         ) : (
           <AdminLoginView
@@ -1611,6 +1730,7 @@ export default function App() {
           customerProfile={customerProfile}
           onSaveAddress={handleSaveCustomerAddress}
           addToast={addToast}
+          paymentConfig={paymentConfig}
         />
       )}
 
@@ -1769,6 +1889,22 @@ export default function App() {
         <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
       </footer>
 
+      {/* Banner de notificaciones push (solo cliente identificado y permiso sin decidir) */}
+      {activeView === 'customer' &&
+        savedCustomer?.phoneNumber &&
+        !pushBannerHidden &&
+        'Notification' in window &&
+        'PushManager' in window &&
+        Notification.permission === 'default' && (
+        <PushBanner
+          onEnable={handleEnableNotifications}
+          onDismiss={() => {
+            setPushBannerHidden(true);
+            try { localStorage.setItem('kiosko_push_banner_hidden', '1'); } catch {}
+          }}
+        />
+      )}
+
       {/* Bienvenida a pantalla completa tras el inicio de sesión */}
       {welcome && (
         <WelcomeOverlay
@@ -1823,10 +1959,42 @@ function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
   );
 }
 
+// Banner que invita a activar las notificaciones push tras identificarse.
+function PushBanner({ onEnable, onDismiss }) {
+  return (
+    <div className="fixed left-4 right-4 sm:left-6 sm:right-auto bottom-24 sm:bottom-6 z-[45] sm:max-w-sm rounded-2xl border border-teal-500/40 bg-slate-900/95 p-4 shadow-2xl backdrop-blur animate-screen-up">
+      <div className="flex items-start gap-3">
+        <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+          <Icon name="bell" className="w-5 h-5" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-white">Activa las notificaciones</p>
+          <p className="text-xs text-slate-400 mt-0.5 leading-snug">
+            Te avisamos al instante cuando tu pedido está listo o en camino.
+          </p>
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              onClick={onEnable}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all active:scale-95"
+            >
+              Activar ahora
+            </button>
+            <button
+              onClick={onDismiss}
+              className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+            >
+              Ahora no
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Tour tutorial para clientes nuevos: se muestra tras la bienvenida para que
 // descubran cómo pedir, seguir sus pedidos y revisar su saldo.
-function NewUserTour({ onClose }) {
-  const steps = [
+function NewUserTour({ onClose }) {  const steps = [
     {
       icon: 'store',
       title: 'Explora el catálogo',
@@ -4844,6 +5012,14 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
 function LiveTrackingModal({ order, onClose, storeLocation }) {
   const [track, setTrack] = useState(order);
   const [error, setError] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [messageText, setMessageText] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const loadMessages = async () => {
+    const res = await api.getOrderMessages(order.id, order.phone);
+    if (res.ok && Array.isArray(res.data.messages)) setMessages(res.data.messages);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -4856,6 +5032,7 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
       } else {
         setError(res.data?.error || 'No se pudo obtener el rastreo del pedido.');
       }
+      loadMessages();
     };
     load();
     const timer = setInterval(load, 5000);
@@ -4864,6 +5041,20 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
       clearInterval(timer);
     };
   }, [order.id]);
+
+  const handleSendMessage = async () => {
+    const text = messageText.trim();
+    if (!text || sending) return;
+    setSending(true);
+    const res = await api.sendOrderMessage(order.id, order.phone, text);
+    setSending(false);
+    if (res.ok) {
+      setMessageText('');
+      loadMessages();
+    } else {
+      setError(res.data?.error || 'No se pudo enviar el mensaje.');
+    }
+  };
 
   const status = track?.status || order.status;
   const style = STATUS_STYLES[status] || STATUS_STYLES.pendiente;
@@ -4940,6 +5131,62 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
             <p className="text-slate-500">La posición se actualiza automáticamente cada 5 segundos.</p>
           </div>
 
+          {/* Chat del pedido con la tienda */}
+          <div className="rounded-2xl bg-slate-800/60 border border-slate-700 overflow-hidden">
+            <div className="p-3 border-b border-slate-700/70 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+              <span className="text-xs font-bold text-white">Chat con la tienda</span>
+            </div>
+            <div className="p-3 space-y-2 max-h-52 overflow-y-auto">
+              {messages.length === 0 && (
+                <p className="text-xs text-slate-500 text-center py-3">
+                  Sin mensajes todavía. Escríbenos si necesitas algo.
+                </p>
+              )}
+              {messages.map((m, idx) => {
+                const mine = m.from === 'customer';
+                return (
+                  <div key={idx} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs leading-snug ${
+                        mine
+                          ? 'bg-teal-500/20 text-teal-100 rounded-br-md'
+                          : 'bg-slate-700/70 text-slate-200 rounded-bl-md'
+                      }`}
+                    >
+                      <p className="break-words">{m.text}</p>
+                      {m.createdAt && (
+                        <p className={`text-[9px] mt-1 ${mine ? 'text-teal-300/70' : 'text-slate-400'}`}>
+                          {new Date(m.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="p-3 border-t border-slate-700/70 flex gap-2">
+              <input
+                type="text"
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSendMessage();
+                }}
+                placeholder="Escribe un mensaje…"
+                maxLength={300}
+                className="flex-1 min-w-0 px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={sending || !messageText.trim()}
+                className="shrink-0 px-3.5 py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-50 disabled:pointer-events-none transition-all active:scale-95"
+              >
+                Enviar
+              </button>
+            </div>
+          </div>
+
           {error && (
             <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
               {error} Se seguirá intentando.
@@ -4958,7 +5205,7 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig }) {
   const [formData, setFormData] = useState({
     customerName: savedCustomer?.customerName || '',
     phoneCode: savedCustomer?.phoneCode || '0412',
@@ -4969,7 +5216,10 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     credit: false,
     lat: null,
     lng: null,
-    mapAddress: null
+    mapAddress: null,
+    paymentMethod: '',
+    paymentReference: '',
+    paymentProof: null
   });
 
   const [errors, setErrors] = useState({});
@@ -5059,6 +5309,9 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     if (!/^\d{7}$/.test(formData.phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
     if (formData.type === 'delivery' && !formData.address.trim() && (formData.lat == null || formData.lng == null)) {
       newErrors.address = 'Ingresa la dirección o comparte tu ubicación';
+    }
+    if (!formData.credit && formData.paymentMethod !== 'efectivo' && !formData.paymentProof) {
+      newErrors.payment = 'Adjunta el comprobante del pago (foto de la transferencia o pago móvil)';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -5381,6 +5634,125 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
             </div>
           )}
 
+          {/* Método de pago */}
+          {!formData.credit && (
+            <div className="space-y-2.5">
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Método de pago</span>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { key: 'efectivo', label: 'Efectivo', icon: 'dollarSign' },
+                  { key: 'pago_movil', label: 'Pago Móvil', icon: 'zap' },
+                  { key: 'transferencia', label: 'Transferencia', icon: 'creditCard' }
+                ].map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() =>
+                      setFormData({ ...formData, paymentMethod: formData.paymentMethod === m.key ? '' : m.key })
+                    }
+                    className={`px-2 py-3 rounded-xl border text-[11px] sm:text-xs font-bold flex flex-col items-center gap-1.5 transition-all ${
+                      formData.paymentMethod === m.key
+                        ? 'bg-teal-500/15 border-teal-500/50 text-teal-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-teal-500/40'
+                    }`}
+                  >
+                    <Icon name={m.icon} className="w-4 h-4" />
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {formData.paymentMethod === 'pago_movil' && paymentConfig?.pagoMovil && (
+                <p className="text-[11px] text-slate-300 bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                  <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">
+                    Datos para el pago móvil
+                  </span>
+                  Banco: <span className="text-white font-bold">{paymentConfig.pagoMovil.bank || '—'}</span> · Teléfono:{' '}
+                  <span className="text-white font-bold">{paymentConfig.pagoMovil.phone || '—'}</span> · Cedula:{' '}
+                  <span className="text-white font-bold">{paymentConfig.pagoMovil.id || '—'}</span>
+                </p>
+              )}
+
+              {formData.paymentMethod === 'transferencia' && paymentConfig?.bank && (
+                <p className="text-[11px] text-slate-300 bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                  <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">
+                    Datos para la transferencia
+                  </span>
+                  Banco: <span className="text-white font-bold">{paymentConfig.bank.name || '—'}</span> · Número de cuenta:{' '}
+                  <span className="text-white font-bold">{paymentConfig.bank.account || '—'}</span>
+                  {paymentConfig.bank.titular ? (
+                    <> · Titular: <span className="text-white font-bold">{paymentConfig.bank.titular}</span></>
+                  ) : null}
+                </p>
+              )}
+
+              {formData.paymentMethod !== '' && formData.paymentMethod !== 'efectivo' && (
+                <div className="space-y-2.5 animate-fade-in">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Número de referencia / comprobante (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.paymentReference}
+                      onChange={(e) => setFormData({ ...formData, paymentReference: e.target.value })}
+                      placeholder="Ej: 12H3456789"
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Foto del comprobante *
+                    </label>
+                    <label className="w-full flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-xl border-2 border-dashed border-slate-700 bg-slate-800/60 cursor-pointer hover:border-teal-500/50 transition-all text-center">
+                      {formData.paymentProof ? (
+                        <>
+                          <img
+                            src={formData.paymentProof}
+                            alt="Comprobante de pago"
+                            className="max-h-36 rounded-lg object-contain"
+                          />
+                          <span className="text-[11px] text-teal-300 font-semibold flex items-center gap-1">
+                            <Icon name="check" className="w-3.5 h-3.5" />
+                            Comprobante adjunto — toca para cambiarlo
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="upload" className="w-6 h-6 text-slate-500" />
+                          <span className="text-xs text-slate-400">
+                            Toca para tomar o subir la foto de la transferencia / pago móvil
+                          </span>
+                          <span className="text-[10px] text-slate-500">Máx 1.5 MB</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files && e.target.files[0];
+                          if (!file) return;
+                          if (file.size > 1.5 * 1024 * 1024) {
+                            addToast('La imagen supera 1.5 MB. Elige una más liviana.', 'error');
+                            e.target.value = '';
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onload = () =>
+                            setFormData({ ...formData, paymentProof: String(reader.result) });
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {errors.payment && <p className="text-xs text-rose-400 mt-1">{errors.payment}</p>}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isPlacingOrder}
@@ -5430,6 +5802,7 @@ function AdminView({
   onEditProduct,
   onDeleteProduct,
   onUpdateOrderStatus,
+  onUpdateOrderPayment,
   onUpdateCourierLocation,
   onDeleteOrder,
   allCustomers,
@@ -5443,11 +5816,53 @@ function AdminView({
   onDeleteCollection,
   addToast,
   storeLocation,
-  onSaveStoreLocation
+  onSaveStoreLocation,
+  adminPhone
 }) {
   // Order status filter state
   const [statusFilter, setStatusFilter] = useState('todos');
   const [showStorePicker, setShowStorePicker] = useState(false);
+  const [proofOrder, setProofOrder] = useState(null);
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [broadcastBody, setBroadcastBody] = useState('');
+  const [reminderPhone, setReminderPhone] = useState('');
+
+  const handlePushBroadcast = async () => {
+    if (!broadcastTitle.trim()) return;
+    const res = await api.pushBroadcast(broadcastTitle.trim(), broadcastBody.trim());
+    if (res.ok) {
+      addToast(`Promoción enviada a ${res.data.sent || 0} dispositivo(s)`, 'success');
+      setBroadcastTitle('');
+      setBroadcastBody('');
+    } else {
+      addToast(res.data?.error || 'No se pudo enviar la notificación', 'error');
+    }
+  };
+
+  const handlePushTest = async () => {
+    const phone = (reminderPhone || adminPhone || '').trim();
+    if (!phone) {
+      addToast('Escribe tu teléfono para enviar la prueba', 'warning');
+      return;
+    }
+    const res = await api.pushTest(phone, 'Notificación de prueba', 'Si ves esto, las notificaciones están funcionando.');
+    if (res.ok) {
+      addToast(`Prueba enviada${res.data.sent > 0 ? '' : ' (sin suscripciones activas)'}`, res.data.sent > 0 ? 'success' : 'warning');
+    } else {
+      addToast(res.data?.error || 'No se pudo enviar la prueba', 'error');
+    }
+  };
+
+  const handlePushReminder = async () => {
+    if (!reminderPhone.trim()) return;
+    const res = await api.pushReminder(reminderPhone.trim());
+    if (res.ok) {
+      addToast(`Recordatorio enviado a ${res.data.sent || 0} dispositivo(s)`, 'success');
+      setReminderPhone('');
+    } else {
+      addToast(res.data?.error || 'No se pudo enviar el recordatorio', 'error');
+    }
+  };
 
   // Modo Repartidor: cuando un pedido a domicilio está en "En Camino", el admin
   // (que reparte) comparte su GPS en vivo para que el cliente lo rastree.
@@ -5600,6 +6015,53 @@ function AdminView({
       .filter(Boolean)
       .slice(0, 4);
   }, [orders, products]);
+
+  // Tendencia de ventas por día (últimos 7 días): cantidad de pedidos y ventas en $.
+  const salesByDay = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      days.push({
+        key: d.toISOString().slice(0, 10),
+        label: d.toLocaleDateString('es-ES', { weekday: 'short' }),
+        orders: 0,
+        revenue: 0
+      });
+    }
+    const map = {};
+    days.forEach((d) => (map[d.key] = d));
+    orders.forEach((o) => {
+      const ts = o.timestamp ? new Date(o.timestamp) : null;
+      const key = ts && !isNaN(ts) ? new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).toISOString().slice(0, 10) : null;
+      if (key && map[key]) {
+        map[key].orders += 1;
+        if (o.status === 'entregado') map[key].revenue += o.total || 0;
+      }
+    });
+    return days;
+  }, [orders]);
+
+  // Clientes con mayor volumen de pedidos (segmentación por actividad).
+  const topCustomers = useMemo(() => {
+    const counts = {};
+    orders.forEach((o) => {
+      const key = (o.phone || 'desconocido').trim();
+      counts[key] = counts[key] || { phone: key, orders: 0, revenue: 0 };
+      counts[key].orders += 1;
+      if (o.status === 'entregado') counts[key].revenue += o.total || 0;
+    });
+    return Object.values(counts)
+      .sort((a, b) => b.orders - a.orders)
+      .slice(0, 5);
+  }, [orders]);
+
+  const lowStockMessage = useMemo(() => {
+    if (lowStockProducts.length === 0) return '';
+    const lines = lowStockProducts.slice(0, 10).map((p) => `• ${p.name}: ${p.stock} un.`);
+    return `⚠️ *ALERTA DE STOCK BAJO* en Kiosko 247\n\nProductos con pocas unidades:\n${lines.join('\n')}\n\nRevisa el inventario y repón lo antes posible.`;
+  }, [lowStockProducts]);
 
   return (
     <div className="space-y-5 sm:space-y-8 animate-fade-in">
@@ -5933,6 +6395,21 @@ function AdminView({
                           <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
                           {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
                         </span>
+                        {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+                          <span
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold ${
+                              order.paymentStatus === 'confirmado'
+                                ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
+                                : order.paymentStatus === 'rechazado'
+                                  ? 'border-rose-400/40 bg-rose-500/15 text-rose-300'
+                                  : 'border-amber-400/40 bg-amber-500/15 text-amber-300'
+                            }`}
+                          >
+                            <Icon name="creditCard" className="w-3 h-3" />
+                            {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago'} ·{' '}
+                            {({ pendiente: 'En revisión', confirmado: 'Confirmado', rechazado: 'Rechazado' })[order.paymentStatus] || 'Pendiente'}
+                          </span>
+                        )}
                         {order.credit && (
                           <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
                             <Icon name="creditCard" className="w-3 h-3" />
@@ -6021,6 +6498,60 @@ function AdminView({
                           "{order.notes}"
                         </p>
                       )}
+
+                      {/* Pago digital: comprobante y estado */}
+                      {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+                        <div className="space-y-2">
+                          {order.paymentReference && (
+                            <p className="text-xs text-slate-300 bg-slate-900/40 p-2 rounded-xl">
+                              Ref: <span className="font-mono font-bold text-white">{order.paymentReference}</span>
+                            </p>
+                          )}
+                          {order.paymentProof ? (
+                            <button
+                              onClick={() => setProofOrder(order)}
+                              className="w-full flex items-center gap-3 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
+                            >
+                              <img
+                                src={order.paymentProof}
+                                alt="Comprobante de pago"
+                                className="w-14 h-14 rounded-lg object-cover border border-slate-700"
+                              />
+                              <span className="min-w-0">
+                                <span className="block text-xs font-bold text-white">Ver comprobante</span>
+                                <span className="block text-[11px] text-slate-400">Toca para ampliar</span>
+                              </span>
+                              <Icon name="eye" className="w-4 h-4 text-teal-400 ml-auto shrink-0" />
+                            </button>
+                          ) : (
+                            <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
+                              <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+                              Pago digital sin comprobante adjunto
+                            </p>
+                          )}
+                          {order.paymentStatus === 'pendiente' && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => onUpdateOrderPayment(order.id, 'confirmado')}
+                                className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                              >
+                                <Icon name="check" className="w-3.5 h-3.5" />
+                                Confirmar pago
+                              </button>
+                              <button
+                                onClick={() => onUpdateOrderPayment(order.id, 'rechazado')}
+                                className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                              >
+                                <Icon name="x" className="w-3.5 h-3.5" />
+                                Rechazar pago
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Chat con el cliente */}
+                      <OrderChat order={order} />
                     </div>
 
                     {/* Status Update Controls */}
@@ -6184,6 +6715,78 @@ function AdminView({
               ))}
             </div>
           )}
+
+          {/* Notificaciones Push */}
+          <div className="p-4 sm:p-6 rounded-3xl bg-slate-800/60 border border-slate-700 space-y-4">
+            <div className="flex items-center gap-2">
+              <Icon name="bell" className="w-5 h-5 text-teal-400" />
+              <div>
+                <h4 className="font-bold text-white text-sm">Notificaciones Push</h4>
+                <p className="text-[11px] text-slate-400">
+                  Envía avisos directos al teléfono de los clientes que activaron las notificaciones.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2.5">
+                <span className="text-xs font-bold text-slate-200 block">Notificación a todos</span>
+                <input
+                  type="text"
+                  value={broadcastTitle}
+                  onChange={(e) => setBroadcastTitle(e.target.value)}
+                  placeholder="Título (ej: ¡Nuevas promos!)"
+                  maxLength={80}
+                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+                />
+                <input
+                  type="text"
+                  value={broadcastBody}
+                  onChange={(e) => setBroadcastBody(e.target.value)}
+                  placeholder="Mensaje (ej: Visita la tienda y aprovecha 2x1 esta semana)"
+                  maxLength={200}
+                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+                />
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={() => handlePushBroadcast()}
+                    disabled={!broadcastTitle.trim()}
+                    className="py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-50 disabled:pointer-events-none transition-all active:scale-95"
+                  >
+                    Enviar a todos
+                  </button>
+                  <button
+                    onClick={() => handlePushTest()}
+                    className="py-2.5 rounded-xl bg-slate-700 text-slate-200 font-bold text-xs hover:bg-slate-600 transition-all active:scale-95"
+                  >
+                    Enviar prueba
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2.5">
+                <span className="text-xs font-bold text-slate-200 block">Recordatorio de deuda</span>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={reminderPhone}
+                  onChange={(e) => setReminderPhone(e.target.value)}
+                  placeholder="Teléfono del cliente (0412 1234567)"
+                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+                />
+                <button
+                  onClick={() => handlePushReminder()}
+                  disabled={!reminderPhone.trim()}
+                  className="w-full py-2.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-xs hover:bg-amber-500/30 transition-all disabled:opacity-50 disabled:pointer-events-none active:scale-95"
+                >
+                  Enviar recordatorio
+                </button>
+                <p className="text-[10px] text-slate-500">
+                  El cliente recibe: "Recordatorio de deuda" con el saldo pendiente.
+                </p>
+              </div>
+            </div>
+          </div>
 
           {/* Promo Editor Modal */}
           {isPromoModalOpen && promoDraft && (
@@ -6401,10 +7004,23 @@ function AdminView({
       {/* Tab 6: Analytics */}
       {adminTab === 'analytics' && (
         <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl space-y-5 sm:space-y-6 backdrop-blur-md">
-          <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-            <Icon name="trendingUp" className="w-5 h-5 text-teal-400" />
-            Resumen de Métricas del Negocio
-          </h3>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+              <Icon name="trendingUp" className="w-5 h-5 text-teal-400" />
+              Resumen de Métricas del Negocio
+            </h3>
+            {lowStockMessage && (
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(lowStockMessage)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all text-xs font-bold w-fit"
+              >
+                <Icon name="whatsapp" className="w-4 h-4" />
+                Enviar alerta de stock bajo por WhatsApp
+              </a>
+            )}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
             <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
@@ -6438,6 +7054,55 @@ function AdminView({
                 )}
               </ul>
             </div>
+
+            {/* Tendencia de ventas por día */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm">Ventas por Día (últimos 7 días)</h4>
+              <div className="flex items-end gap-2 h-32">
+                {salesByDay.map((d) => {
+                  const max = Math.max(...salesByDay.map((x) => x.orders), 1);
+                  const h = Math.round((d.orders / max) * 100);
+                  return (
+                    <div key={d.key} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                      <span className="text-[10px] font-bold text-slate-300">{d.orders}</span>
+                      <div
+                        className={`w-full rounded-t-lg ${d.orders > 0 ? 'bg-gradient-to-t from-teal-600 to-emerald-400' : 'bg-slate-700/50'}`}
+                        style={{ height: `${Math.max(d.orders > 0 ? h : 4, 4)}%` }}
+                      />
+                      <span className="text-[9px] text-slate-500 capitalize truncate">{d.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {salesByDay.some((d) => d.revenue > 0) && (
+                <p className="text-[11px] text-slate-400">
+                  Ingresos (entregados) 7 días:{' '}
+                  <span className="font-bold text-teal-300">{formatUsd(salesByDay.reduce((a, d) => a + d.revenue, 0))}</span>
+                </p>
+              )}
+            </div>
+
+            {/* Segmentación de clientes */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm">Clientes con Mayor Actividad</h4>
+              {topCustomers.length === 0 ? (
+                <p className="text-xs text-slate-400">Aún no hay pedidos registrados.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {topCustomers.map((c, idx) => (
+                    <li key={c.phone} className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-slate-300 font-medium truncate">
+                        #{idx + 1} {c.phone}
+                      </span>
+                      <span className="text-teal-400 font-bold shrink-0">{c.orders} pedidos</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-[11px] text-slate-500">
+                Total clientes registrados: <span className="font-bold text-white">{allCustomers.length}</span>
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -6455,12 +7120,179 @@ function AdminView({
           onDismiss={handleDismissOverdue}
         />
       )}
+
+      {proofOrder && (
+        <PaymentProofModal
+          order={proofOrder}
+          onClose={() => setProofOrder(null)}
+          onUpdateOrderPayment={onUpdateOrderPayment}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal para que el admin revise el comprobante de pago a pantalla completa
+// y confirme o rechace el pago digital.
+function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up">
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm sm:text-base font-black text-white">
+              Comprobante #{order.id}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago digital'} ·{' '}
+              {order.customerName}
+              {order.paymentReference ? ` · Ref ${order.paymentReference}` : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-4 sm:p-5 space-y-4">
+          {order.paymentProof ? (
+            <img
+              src={order.paymentProof}
+              alt="Comprobante de pago"
+              className="w-full rounded-2xl border border-slate-700 object-contain max-h-[55vh]"
+            />
+          ) : (
+            <p className="text-xs text-slate-400 bg-slate-800/60 p-4 rounded-2xl text-center">
+              Este pedido no tiene comprobante adjunto.
+            </p>
+          )}
+          {order.paymentStatus === 'pendiente' && (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => onUpdateOrderPayment(order.id, 'confirmado')}
+                className="py-3 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Icon name="check" className="w-4 h-4" />
+                Confirmar pago
+              </button>
+              <button
+                onClick={() => onUpdateOrderPayment(order.id, 'rechazado')}
+                className="py-3 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Icon name="x" className="w-4 h-4" />
+                Rechazar pago
+              </button>
+            </div>
+          )}
+          {order.paymentStatus === 'confirmado' && (
+            <p className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-xl text-center font-bold">
+              Pago confirmado
+            </p>
+          )}
+          {order.paymentStatus === 'rechazado' && (
+            <p className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 p-3 rounded-xl text-center font-bold">
+              Pago rechazado
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Chat interno de un pedido para el admin: consulta y envía mensajes con el
+// cliente (el cliente responde desde el rastreo del pedido). Se actualiza cada 5s.
+function OrderChat({ order }) {
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const listRef = useRef(null);
+
+  const load = async () => {
+    const res = await api.getOrderMessages(order.id, order.phone);
+    if (res.ok && Array.isArray(res.data.messages)) setMessages(res.data.messages);
+  };
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, [order.id]);
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages]);
+
+  const send = async () => {
+    const value = text.trim();
+    if (!value || sending) return;
+    setSending(true);
+    const res = await api.sendOrderMessage(order.id, order.phone, value);
+    setSending(false);
+    if (res.ok) {
+      setText('');
+      load();
+    }
+  };
+
+  return (
+    <div className="rounded-2xl bg-slate-900/60 border border-slate-700 overflow-hidden">
+      <div className="p-2.5 border-b border-slate-700/70 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
+          <Icon name="whatsapp" className="w-3.5 h-3.5 text-emerald-400" />
+          Chat con el cliente
+        </span>
+        <span className="text-[9px] text-slate-500">se actualiza solo</span>
+      </div>
+      <div ref={listRef} className="p-2.5 space-y-1.5 max-h-44 overflow-y-auto">
+        {messages.length === 0 && (
+          <p className="text-[11px] text-slate-500 text-center py-2">Sin mensajes aún.</p>
+        )}
+        {messages.map((m, idx) => {
+          const mine = m.from === 'admin';
+          return (
+            <div key={idx} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className={`max-w-[85%] px-2.5 py-1.5 rounded-2xl text-[11px] leading-snug ${
+                  mine ? 'bg-teal-500/20 text-teal-100 rounded-br-md' : 'bg-slate-700/70 text-slate-200 rounded-bl-md'
+                }`}
+              >
+                <p className="break-words">{m.text}</p>
+                {m.createdAt && (
+                  <p className={`text-[9px] mt-0.5 ${mine ? 'text-teal-300/70' : 'text-slate-400'}`}>
+                    {new Date(m.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="p-2.5 border-t border-slate-700/70 flex gap-2">
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') send();
+          }}
+          placeholder="Responder al cliente…"
+          maxLength={300}
+          className="flex-1 min-w-0 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+        />
+        <button
+          onClick={send}
+          disabled={sending || !text.trim()}
+          className="shrink-0 px-3 py-2 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-50 disabled:pointer-events-none transition-all active:scale-95"
+        >
+          Enviar
+        </button>
+      </div>
     </div>
   );
 }
 
 const BEAUTY_CATEGORIES = ['higiene', 'limpieza', 'perfum', 'cosmetic', 'belleza', 'farmacia', 'salud', 'cuidado'];
-
 // Toast persistente de cobro vencido. No se quita solo; el admin debe pulsar
 // "Enviar cobro" (abre WhatsApp) o "✕" (descartar en esta sesión).
 function OverdueCollectionToast({ collection, onSend, onDismiss }) {

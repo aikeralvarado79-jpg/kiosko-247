@@ -23,6 +23,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     users: <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
     creditCard: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM2 10h20M6 15h4" />,
     chevronRight: <path d="m9 18 6-6-6-6" />,
+    chevronLeft: <path d="m15 18-6-6 6-6" />,
+    maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
     clock: <path d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
@@ -1397,9 +1399,13 @@ export default function App() {
       {productDetailModal && (
         <ProductDetailModal
           product={productDetailModal}
+          sameBrandProducts={productDetailModal.brand
+            ? products.filter((p) => p.brand === productDetailModal.brand)
+            : [productDetailModal]}
           rate={rate}
           isFavorite={favorites.includes(productDetailModal.id)}
           onToggleFavorite={() => toggleFavorite(productDetailModal.id)}
+          onNavigate={(p) => setProductDetailModal(p)}
           onClose={() => setProductDetailModal(null)}
           onAddToCart={(qty, rect) => {
             addToCart(productDetailModal, qty, rect);
@@ -2024,7 +2030,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             type="button"
             onClick={handleBiometricLogin}
             disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
-            className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-sm hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2.5 active:scale-95 disabled:opacity-60"
+            className="w-full py-3 rounded-2xl text-slate-200 hover:text-white hover:bg-slate-800/40 transition-all flex items-center justify-center gap-2.5 disabled:opacity-60"
           >
             {bioStatus === 'working' || bioStatus === 'register' ? (
               <>
@@ -2824,20 +2830,55 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   );
 }
 
-function ProductDetailModal({ product, rate, onClose, onAddToCart, isFavorite, onToggleFavorite }) {
+function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, onAddToCart, isFavorite, onToggleFavorite, onNavigate }) {
   const [quantity, setQuantity] = useState(1);
+  const [showFullscreen, setShowFullscreen] = useState(false);
+  const [touchX, setTouchX] = useState(null);
   const isOut = product.stock <= 0;
   const unitBs = usdToBs(product.price, rate?.rate);
   const lineTotal = product.price * quantity;
 
+  const currentIndex = useMemo(() => {
+    const idx = (sameBrandProducts || []).findIndex((p) => p.id === product.id);
+    return idx >= 0 ? idx : 0;
+  }, [product.id, sameBrandProducts]);
+
+  const totalInBrand = (sameBrandProducts || []).length;
+  const hasSameBrand = totalInBrand > 1;
+
+  const goTo = useCallback(
+    (dir) => {
+      if (!hasSameBrand) return;
+      const next = currentIndex + dir;
+      if (next < 0 || next >= totalInBrand) return;
+      onNavigate?.(sameBrandProducts[next]);
+      setQuantity(1);
+    },
+    [currentIndex, hasSameBrand, totalInBrand, onNavigate, sameBrandProducts]
+  );
+
+  // Navegación por swipe (deslizar) entre productos de la misma marca.
+  const handleTouchStart = (e) => setTouchX(e.touches?.[0]?.clientX ?? null);
+  const handleTouchEnd = (e) => {
+    if (touchX == null) return;
+    const delta = (e.changedTouches?.[0]?.clientX ?? 0) - touchX;
+    if (Math.abs(delta) > 40) goTo(delta > 0 ? -1 : 1);
+    setTouchX(null);
+  };
+
   // Handle ESC key press
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (showFullscreen) setShowFullscreen(false);
+        else onClose();
+      }
+      if (e.key === 'ArrowLeft') goTo(-1);
+      if (e.key === 'ArrowRight') goTo(1);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onClose, showFullscreen, goTo]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
@@ -2868,7 +2909,12 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart, isFavorite, o
           />
         </button>
 
-        <div className="relative h-52 sm:h-64 bg-slate-950 shrink-0">
+        {/* Imagen + full screen + paginación de la marca */}
+        <div
+          className="relative h-52 sm:h-64 bg-slate-950 shrink-0"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
           <img
             src={product.image}
             alt={product.name}
@@ -2879,7 +2925,65 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart, isFavorite, o
               {product.category}
             </span>
           </div>
+
+          {/* Botón full screen: agranda la imagen */}
+          <button
+            onClick={() => setShowFullscreen(true)}
+            className="absolute bottom-3 right-3 z-20 p-2 rounded-xl bg-slate-950/70 backdrop-blur-md border border-white/15 text-slate-200 hover:text-white hover:border-teal-400/50 transition-all active:scale-90"
+            aria-label="Ver imagen en pantalla completa"
+          >
+            <Icon name="maximize" className="w-5 h-5" />
+          </button>
+
+          {/* Paginación de la misma marca */}
+          {hasSameBrand && (
+            <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5">
+              <button
+                onClick={() => goTo(-1)}
+                className="p-1.5 rounded-lg bg-slate-950/70 backdrop-blur-md border border-white/15 text-slate-200 hover:text-white hover:border-teal-400/50 transition-all active:scale-90"
+                aria-label="Producto anterior de la marca"
+              >
+                <Icon name="chevronLeft" className="w-4 h-4" />
+              </button>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-950/80 backdrop-blur-md border border-teal-500/30 text-[10px] font-bold text-teal-300">
+                {currentIndex + 1}/{totalInBrand} · {product.brand}
+              </span>
+              <button
+                onClick={() => goTo(1)}
+                className="p-1.5 rounded-lg bg-slate-950/70 backdrop-blur-md border border-white/15 text-slate-200 hover:text-white hover:border-teal-400/50 transition-all active:scale-90"
+                aria-label="Siguiente producto de la marca"
+              >
+                <Icon name="chevronRight" className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Miniaturas de la misma marca (paginación) */}
+        {hasSameBrand && (
+          <div className="flex gap-2 px-4 sm:px-6 pt-3 pb-1 shrink-0">
+            {sameBrandProducts.map((p, i) => (
+              <button
+                key={p.id}
+                onClick={() => {
+                  onNavigate?.(p);
+                  setQuantity(1);
+                }}
+                className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border-2 transition-all shrink-0 ${
+                  i === currentIndex
+                    ? 'border-teal-400 ring-2 ring-teal-500/30'
+                    : 'border-slate-700 hover:border-teal-500/50'
+                }`}
+                aria-label={`Ver ${p.name}`}
+              >
+                <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                {i === currentIndex && (
+                  <span className="absolute inset-0 bg-teal-500/20" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1">
           <div>
@@ -2950,6 +3054,65 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart, isFavorite, o
           </button>
         </div>
       </div>
+
+      {/* Visor full screen de la imagen (deslizá para ver la misma marca) */}
+      {showFullscreen && (
+        <div
+          className="fixed inset-0 z-[70] bg-slate-950/98 bg-black flex flex-col"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="flex items-center justify-between px-4 py-3 shrink-0">
+            <div className="flex items-center gap-2">
+              {hasSameBrand && (
+                <>
+                  <button
+                    onClick={() => goTo(-1)}
+                    className="p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:text-white transition-all active:scale-90"
+                    aria-label="Producto anterior de la marca"
+                  >
+                    <Icon name="chevronLeft" className="w-5 h-5" />
+                  </button>
+                  <span className="text-xs font-bold text-teal-300 px-2">
+                    {currentIndex + 1}/{totalInBrand} · {product.brand}
+                  </span>
+                  <button
+                    onClick={() => goTo(1)}
+                    className="p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:text-white transition-all active:scale-90"
+                    aria-label="Siguiente producto de la marca"
+                  >
+                    <Icon name="chevronRight" className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+            </div>
+            <button
+              onClick={() => setShowFullscreen(false)}
+              className="p-2 rounded-full bg-slate-800 text-slate-200 hover:text-white transition-all active:scale-90"
+              aria-label="Cerrar imagen en pantalla completa"
+            >
+              <Icon name="x" className="w-6 h-6" />
+            </button>
+          </div>
+
+          <div className="flex-1 flex items-center justify-center px-2 pb-6 min-h-0">
+            <img
+              src={product.image}
+              alt={product.name}
+              className="max-w-full max-h-full object-contain select-none"
+              draggable={false}
+            />
+          </div>
+
+          <div className="px-4 pb-6 text-center shrink-0">
+            <p className="text-sm font-bold text-white line-clamp-1">{product.name}</p>
+            {product.brand && <p className="text-xs text-teal-400 mt-0.5">{product.brand}</p>}
+            {hasSameBrand && (
+              <p className="text-[10px] text-slate-500 mt-1">Deslizá para ver más productos de {product.brand}</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3007,14 +3170,9 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     throw new Error(res.data.error || 'No se pudo consultar tu registro biométrico');
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const newErrors = {};
-    if (!customerName.trim()) newErrors.customerName = 'Ingresa tu nombre';
-    if (!/^\d{7}$/.test(phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
-    setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0) return;
-
+  // Ejecuta el flujo de biometría (huella/Face ID) para el cliente. El número de
+  // teléfono debe estar completo; se asume que ya pasó la validación del form.
+  const runWebAuthn = async () => {
     if (!webauthnSupported) {
       setStep('form');
       setWebauthnError('Tu dispositivo no soporta biometría. Usá un celular actualizado con huella o Face ID.');
@@ -3068,6 +3226,26 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
       setWebauthnError(friendlyAuthError(err));
       setStep('form');
     }
+  };
+
+  // Botón de biometría accionable: exige el número de teléfono antes de continuar.
+  const handleBiometricAction = () => {
+    if (!/^\d{7}$/.test(phoneNumber)) {
+      setErrors((prev) => ({ ...prev, phone: 'Ingresa los 7 dígitos del número para verificar con biometría' }));
+      return;
+    }
+    runWebAuthn();
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const newErrors = {};
+    if (!customerName.trim()) newErrors.customerName = 'Ingresa tu nombre';
+    if (!/^\d{7}$/.test(phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
+    setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) return;
+
+    await runWebAuthn();
   };
 
   const resetForm = () => {
@@ -3163,23 +3341,32 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
               {errors.phone && <p className="text-xs text-rose-400 mt-1">{errors.phone}</p>}
             </div>
 
-            {/* Indicador de biometría */}
-            <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-800/70 border border-teal-500/25">
+            {/* Botón de biometría accionable (huella / Face ID) */}
+            <button
+              type="button"
+              onClick={handleBiometricAction}
+              disabled={isWorking}
+              className="w-full flex items-center gap-3 p-3.5 rounded-2xl bg-slate-800/70 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
               <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
                 {IS_IOS ? (
                   <span className="flex items-center gap-1">
-                    <Icon name="apple" className="w-3.5 h-3.5" />
-                    <Icon name="faceId" className="w-3.5 h-3.5" />
+                    <Icon name="apple" className="w-4 h-4" />
+                    <Icon name="faceId" className="w-4 h-4" />
                   </span>
                 ) : (
-                  <Icon name="fingerprint" className="w-4 h-4" />
+                  <Icon name="fingerprint" className="w-5 h-5" />
                 )}
               </span>
-              <p className="text-[11px] text-slate-300 leading-snug">
-                Verificación por <span className="font-bold text-teal-300">biometría del celular</span>
-                {!webauthnSupported && <span className="block text-rose-400 mt-1">Tu dispositivo no lo soporta.</span>}
-              </p>
-            </div>
+              <span className="flex-1 text-left">
+                <span className="block text-[11px] font-bold text-teal-300">Verificar con biometría</span>
+                <span className="block text-[11px] text-slate-400 leading-snug">
+                  {IS_IOS ? 'Usa tu Face ID' : 'Usa tu huella'}
+                  {!webauthnSupported && <span className="text-rose-400"> · Tu dispositivo no lo soporta</span>}
+                </span>
+              </span>
+              <Icon name="arrowRight" className="w-4 h-4 text-teal-400 shrink-0" />
+            </button>
 
             {webauthnError && (
               <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5">{webauthnError}</p>

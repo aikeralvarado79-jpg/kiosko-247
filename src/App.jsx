@@ -5217,7 +5217,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     lat: null,
     lng: null,
     mapAddress: null,
-    paymentMethod: '',
+    paymentMethod: 'efectivo',
     paymentReference: '',
     paymentProof: null
   });
@@ -5310,7 +5310,12 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     if (formData.type === 'delivery' && !formData.address.trim() && (formData.lat == null || formData.lng == null)) {
       newErrors.address = 'Ingresa la dirección o comparte tu ubicación';
     }
-    if (!formData.credit && formData.paymentMethod !== 'efectivo' && !formData.paymentProof) {
+    if (
+      !formData.credit &&
+      formData.paymentMethod &&
+      formData.paymentMethod !== 'efectivo' &&
+      !formData.paymentProof
+    ) {
       newErrors.payment = 'Adjunta el comprobante del pago (foto de la transferencia o pago móvil)';
     }
     setErrors(newErrors);

@@ -48,6 +48,18 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
      settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
      zap: <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />,
      bag: <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0" />,
+     apple: <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.58,7.86 7.09,6.91 8.65,6.88C9.94,6.86 11.17,7.68 12.06,7.68C12.96,7.68 14.42,6.74 15.95,6.88C16.57,6.91 18.23,7.09 19.3,8.68C19.2,8.74 16.79,10.05 16.83,12.9C16.88,16.24 19.88,17.37 19.92,17.39C19.88,17.47 19.25,19.11 18.71,19.5ZM13.3,5.41C13.98,4.57 14.46,3.4 14.32,2.21C13.28,2.26 12.05,2.88 11.34,3.72C10.7,4.48 10.13,5.65 10.28,6.83C11.44,6.94 12.62,6.26 13.3,5.41Z" fill="currentColor" stroke="none" />,
+     faceId: (
+       <>
+         <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+         <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+         <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+         <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+         <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+         <path d="M9 9h.01" />
+         <path d="M15 9h.01" />
+       </>
+     ),
     };
 
   return (
@@ -66,6 +78,12 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     </svg>
   );
 };
+
+// Detección de plataforma para elegir el logo de biometría correcto:
+// iOS → manzana de Apple + Face ID; Android/otros → huella dactilar.
+const IS_IOS =
+  /iPad|iPhone|iPod/.test(typeof navigator !== 'undefined' ? navigator.userAgent : '') ||
+  (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 const formatTimestamp = (date = new Date()) =>
   date.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -1992,14 +2010,21 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             type="button"
             onClick={handleBiometricLogin}
             disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
-            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-sm hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
+            className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-sm hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2.5 active:scale-95 disabled:opacity-60"
           >
-            <Icon name="fingerprint" className="w-4 h-4" />
-            {bioStatus === 'working'
-              ? 'Esperando huella o Face ID...'
-              : bioStatus === 'register'
-                ? 'Registrando tu biometría...'
-                : 'Ingresar con huella o Face ID'}
+            {bioStatus === 'working' || bioStatus === 'register' ? (
+              <>
+                {IS_IOS ? <Icon name="apple" className="w-5 h-5" /> : <Icon name="fingerprint" className="w-5 h-5" />}
+                <span>{bioStatus === 'working' ? 'Esperando...' : 'Registrando...'}</span>
+              </>
+            ) : IS_IOS ? (
+              <>
+                <Icon name="apple" className="w-6 h-6" />
+                <Icon name="faceId" className="w-6 h-6" />
+              </>
+            ) : (
+              <Icon name="fingerprint" className="w-7 h-7" />
+            )}
           </button>
 
           <div className="flex items-center gap-3 py-1">
@@ -3127,10 +3152,17 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
             {/* Indicador de biometría */}
             <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-800/70 border border-teal-500/25">
               <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
-                <Icon name="check" className="w-4 h-4" />
+                {IS_IOS ? (
+                  <span className="flex items-center gap-1">
+                    <Icon name="apple" className="w-3.5 h-3.5" />
+                    <Icon name="faceId" className="w-3.5 h-3.5" />
+                  </span>
+                ) : (
+                  <Icon name="fingerprint" className="w-4 h-4" />
+                )}
               </span>
               <p className="text-[11px] text-slate-300 leading-snug">
-                Verificación por <span className="font-bold text-teal-300">biometría del celular</span> (huella o Face ID).
+                Verificación por <span className="font-bold text-teal-300">biometría del celular</span>
                 {!webauthnSupported && <span className="block text-rose-400 mt-1">Tu dispositivo no lo soporta.</span>}
               </p>
             </div>
@@ -3470,6 +3502,9 @@ function BottomTabBar({
     if (t.key === 'cart') return cartCount > 0;
     return customerTab === t.key;
   };
+
+  // En el login admin (admin sin autenticar) no se muestran opciones de navegación.
+  if (activeView === 'admin' && !isAdminAuthed) return null;
 
   return (
     <nav

@@ -960,6 +960,27 @@ const pgStore = {
     return { state: await this.getState() };
   },
 
+  // Convierte un pedido con pago rechazado/pendiente a "a cuenta" (crédito):
+  // lo marca como crédito y limpia los campos de pago. Solo para beneficiados,
+  // verificado por la ruta. Devuelve el estado actualizado.
+  async atomicConvertToCredit(id) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('orders')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT * FROM ${q('orders')} WHERE id = $1 FOR UPDATE`, [id]);
+      if (!rows[0]) return { error: 'Pedido no encontrado' };
+      const existing = rows[0];
+      if (existing.credit) return { error: 'El pedido ya está a cuenta' };
+      if (existing.paymentStatus === 'confirmado') return { error: 'El pago ya fue confirmado' };
+      await client.query(
+        `UPDATE ${q('orders')} SET credit = true, "paymentMethod" = '', "paymentStatus" = NULL, "paymentProof" = NULL, "paymentReference" = NULL WHERE id = $1`,
+        [id]
+      );
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return { state: await this.getState() };
+  },
+
   // Agrega un mensaje de chat al pedido (JSONB, sin tabla extra).
   async atomicAddOrderMessage(id, message) {
     const result = await this.withTx(async (client) => {
@@ -1317,6 +1338,22 @@ export const updateOrderPayment = async (id, data) => {
   await store.saveOrders(orders);
   const newState = await store.getState();
   return { state: newState };
+};
+
+export const convertToCredit = async (id) => {
+  if (pgPool) return pgStore.atomicConvertToCredit(id);
+  const state = await store.getState();
+  const existing = state.orders.find((o) => o.id === id);
+  if (!existing) return { error: 'Pedido no encontrado' };
+  if (existing.credit) return { error: 'El pedido ya está a cuenta' };
+  if (existing.paymentStatus === 'confirmado') return { error: 'El pago ya fue confirmado' };
+  const orders = state.orders.map((o) =>
+    o.id === id
+      ? { ...o, credit: true, paymentMethod: '', paymentStatus: null, paymentProof: null, paymentReference: null }
+      : o
+  );
+  await store.saveOrders(orders);
+  return { state: await store.getState() };
 };
 
 export const getOrderMessages = async (id) => {

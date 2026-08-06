@@ -578,6 +578,15 @@ export default function App() {
     };
   }, [loadState]);
 
+  // Mantiene sincronizadas las vistas del cliente (detalle / rastreo) con la
+  // última copia del pedido que trae el polling, para que un cambio de pago o
+  // de estado hecho por el admin se refleje en vivo.
+  useEffect(() => {
+    setOrderDetailOrder((prev) => (prev ? orders.find((o) => o.id === prev.id) || prev : prev));
+    setLiveTrackingOrder((prev) => (prev ? orders.find((o) => o.id === prev.id) || prev : prev));
+    setCurrentOrderTracking((prev) => (prev ? orders.find((o) => o.id === prev.id) || prev : prev));
+  }, [orders]);
+
   // Cart State
   const [cart, setCart] = useState(() => {
     try {
@@ -1339,6 +1348,16 @@ export default function App() {
     addToast(`Pago del pedido ${orderId} ${newStatus === 'confirmado' ? 'confirmado' : 'rechazado'}`);
   };
 
+  // Refresca la copia de un pedido en todos los sitios donde el cliente lo ve
+  // (historial, detalle y rastreo) tras subir comprobante o pasar a cuenta.
+  const handleOrderUpdated = useCallback((updatedOrder) => {
+    if (!updatedOrder) return;
+    setOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
+    setOrderDetailOrder((prev) => (prev && prev.id === updatedOrder.id ? updatedOrder : prev));
+    setLiveTrackingOrder((prev) => (prev && prev.id === updatedOrder.id ? updatedOrder : prev));
+    setCurrentOrderTracking((prev) => (prev && prev.id === updatedOrder.id ? updatedOrder : prev));
+  }, []);
+
   // Envía la posición en vivo del repartidor (el admin que entrega) al servidor.
   const handleUpdateCourierLocation = async (orderId, lat, lng) => {
     const res = await api.updateCourierLocation(orderId, lat, lng);
@@ -1791,6 +1810,9 @@ export default function App() {
         <OrderDetailModal
           order={orderDetailOrder}
           rate={rate}
+          isBenefited={Boolean(customerProfile?.isBenefited)}
+          onOrderUpdated={handleOrderUpdated}
+          addToast={addToast}
           onClose={() => setOrderDetailOrder(null)}
           onTrackLiveOrder={(order) => {
             setOrderDetailOrder(null);
@@ -1807,6 +1829,9 @@ export default function App() {
       {liveTrackingOrder && (
         <LiveTrackingModal
           order={liveTrackingOrder}
+          isBenefited={Boolean(customerProfile?.isBenefited)}
+          onOrderUpdated={handleOrderUpdated}
+          addToast={addToast}
           onClose={() => setLiveTrackingOrder(null)}
           storeLocation={storeLocation}
         />
@@ -5042,7 +5067,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
 
 // Modal de rastreo en vivo para el cliente: consulta el estado del pedido y la
 // posición del repartidor cada 5s mientras está abierto, mostrando el mapa.
-function LiveTrackingModal({ order, onClose, storeLocation }) {
+function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrderUpdated, addToast }) {
   const [track, setTrack] = useState(order);
   const [error, setError] = useState('');
   const [messages, setMessages] = useState([]);
@@ -5145,6 +5170,9 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
           {/* Mapa: destino + repartidor en vivo */}
           <DeliveryMap order={track} storeLocation={storeLocation} />
 
+          {/* Estado del pago digital y acciones si fue rechazado */}
+          <PaymentStatusCard order={order} isBenefited={isBenefited} onOrderUpdated={onOrderUpdated} addToast={addToast} />
+
           {/* Estado del repartidor */}
           <div className="rounded-xl bg-slate-800/60 p-3 text-xs space-y-1">
             <div className="flex items-center gap-2">
@@ -5170,33 +5198,15 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
               <span className="text-xs font-bold text-white">Chat con la tienda</span>
             </div>
-            <div className="p-3 space-y-2 max-h-52 overflow-y-auto">
+            <div className="p-3 space-y-2.5 max-h-52 overflow-y-auto">
               {messages.length === 0 && (
                 <p className="text-xs text-slate-500 text-center py-3">
                   Sin mensajes todavía. Escríbenos si necesitas algo.
                 </p>
               )}
-              {messages.map((m, idx) => {
-                const mine = m.from === 'customer';
-                return (
-                  <div key={idx} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs leading-snug ${
-                        mine
-                          ? 'bg-teal-500/20 text-teal-100 rounded-br-md'
-                          : 'bg-slate-700/70 text-slate-200 rounded-bl-md'
-                      }`}
-                    >
-                      <p className="break-words">{m.text}</p>
-                      {m.createdAt && (
-                        <p className={`text-[9px] mt-1 ${mine ? 'text-teal-300/70' : 'text-slate-400'}`}>
-                          {new Date(m.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {messages.map((m, idx) => (
+                <ChatBubble key={m.id || idx} m={m} order={order} perspective="customer" />
+              ))}
             </div>
             <div className="p-3 border-t border-slate-700/70 flex gap-2">
               <input
@@ -6570,6 +6580,13 @@ function AdminView({
                               Pago digital sin comprobante adjunto
                             </p>
                           )}
+                          {order.paymentStatus === 'rechazado' && (
+                            <p className="text-xs text-rose-300/90 bg-rose-500/10 border border-rose-500/30 p-2 rounded-xl flex items-start gap-1.5">
+                              <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                              Pago rechazado: el cliente debe subir otro comprobante o
+                              pasar el pedido a cuenta (si es beneficiado) antes de avanzar.
+                            </p>
+                          )}
                           {order.paymentStatus === 'pendiente' && (
                             <div className="grid grid-cols-2 gap-2">
                               <button
@@ -7231,9 +7248,15 @@ function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
             </p>
           )}
           {order.paymentStatus === 'rechazado' && (
-            <p className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 p-3 rounded-xl text-center font-bold">
-              Pago rechazado
-            </p>
+            <div className="space-y-2">
+              <p className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 p-3 rounded-xl text-center font-bold">
+                Pago rechazado
+              </p>
+              <p className="text-[11px] text-slate-400 text-center">
+                El cliente verá la opción de subir otro comprobante o pasar el pedido
+                a cuenta (si es beneficiado).
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -7285,29 +7308,13 @@ function OrderChat({ order }) {
         </span>
         <span className="text-[9px] text-slate-500">se actualiza solo</span>
       </div>
-      <div ref={listRef} className="p-2.5 space-y-1.5 max-h-44 overflow-y-auto">
+      <div ref={listRef} className="p-2.5 space-y-2 max-h-44 overflow-y-auto">
         {messages.length === 0 && (
           <p className="text-[11px] text-slate-500 text-center py-2">Sin mensajes aún.</p>
         )}
-        {messages.map((m, idx) => {
-          const mine = m.from === 'admin';
-          return (
-            <div key={idx} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[85%] px-2.5 py-1.5 rounded-2xl text-[11px] leading-snug ${
-                  mine ? 'bg-teal-500/20 text-teal-100 rounded-br-md' : 'bg-slate-700/70 text-slate-200 rounded-bl-md'
-                }`}
-              >
-                <p className="break-words">{m.text}</p>
-                {m.createdAt && (
-                  <p className={`text-[9px] mt-0.5 ${mine ? 'text-teal-300/70' : 'text-slate-400'}`}>
-                    {new Date(m.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {messages.map((m, idx) => (
+          <ChatBubble key={m.id || idx} m={m} order={order} perspective="admin" />
+        ))}
       </div>
       <div className="p-2.5 border-t border-slate-700/70 flex gap-2">
         <input
@@ -8794,7 +8801,166 @@ function DeleteOrderModal({ order, onClose, onConfirm }) {
   );
 }
 
-function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder }) {
+// Burbuja de chat compartida por cliente y admin: separa los mensajes a lados
+// opuestos según quién los envió, con avatar (inicial del nombre), nombre y hora.
+function ChatBubble({ m, order, perspective = 'customer' }) {
+  const mine = m.sender === perspective;
+  const isCustomerMsg = m.sender === 'customer';
+  const name = isCustomerMsg ? order.customerName || 'Cliente' : m.senderName || 'Tienda';
+  const initial = (name || 'T').trim().charAt(0).toUpperCase() || 'T';
+  const time = m.at
+    ? new Date(m.at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  return (
+    <div className={`flex items-end gap-1.5 ${mine ? 'justify-end' : 'justify-start'}`}>
+      {!mine && (
+        <span className="w-6 h-6 rounded-full bg-slate-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">
+          {initial}
+        </span>
+      )}
+      <div className={`max-w-[80%] min-w-0 flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+        <span className={`text-[9px] font-bold px-1 ${mine ? 'text-teal-300/80' : 'text-slate-400'}`}>{name}</span>
+        <div
+          className={`px-3 py-2 rounded-2xl text-xs leading-snug ${
+            mine ? 'bg-teal-500/20 text-teal-100 rounded-br-md' : 'bg-slate-700/70 text-slate-200 rounded-bl-md'
+          }`}
+        >
+          <p className="break-words">{m.text}</p>
+        </div>
+        {time && <span className="text-[9px] mt-0.5 px-1 opacity-70 text-slate-500">{time}</span>}
+      </div>
+      {mine && (
+        <span className="w-6 h-6 rounded-full bg-teal-500 text-slate-950 flex items-center justify-center text-[10px] font-black shrink-0">
+          {initial}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Tarjeta de estado del pago digital visible para el cliente: si fue rechazado
+// ofrece subir otro comprobante o, para beneficiados, pasar el pedido a cuenta.
+// Si fue confirmado, lo avisa.
+function PaymentStatusCard({ order, isBenefited, onOrderUpdated, addToast }) {
+  const [uploading, setUploading] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const fileRef = useRef(null);
+
+  const applyUpdated = (res) => {
+    if (res.ok && res.data?.state?.orders) {
+      const updated = res.data.state.orders.find((o) => o.id === order.id);
+      if (updated) onOrderUpdated?.(updated);
+    }
+  };
+
+  const handlePick = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      addToast('La imagen supera 8 MB. Elige una más liviana.', 'error');
+      return;
+    }
+    setUploading(true);
+    try {
+      const proof = await compressImage(file);
+      const res = await api.attachPaymentProof(order.id, order.phone, proof, order.paymentReference || '');
+      if (res.ok) {
+        applyUpdated(res);
+        addToast('Comprobante enviado. Tu pago está en revisión.', 'success');
+      } else {
+        addToast(res.data?.error || 'No se pudo adjuntar el comprobante', 'error');
+      }
+    } catch {
+      addToast('No se pudo procesar la imagen. Prueba con otra.', 'error');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleToAccount = async () => {
+    if (converting) return;
+    setConverting(true);
+    try {
+      const res = await api.convertOrderToCredit(order.id, order.phone);
+      if (res.ok) {
+        applyUpdated(res);
+        addToast('Pedido enviado a tu cuenta.', 'success');
+      } else {
+        addToast(res.data?.error || 'No se pudo pasar el pedido a cuenta', 'error');
+      }
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  if (!order.paymentMethod || order.paymentMethod === 'efectivo') return null;
+
+  const status = order.paymentStatus || 'pendiente';
+
+  if (status === 'confirmado') {
+    return (
+      <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/40 p-3 flex items-center gap-2.5">
+        <Icon name="check" className="w-5 h-5 text-emerald-400 shrink-0" />
+        <div>
+          <p className="text-sm font-bold text-emerald-300">Pago confirmado</p>
+          <p className="text-[11px] text-emerald-200/70">¡Gracias! Tu pago fue aceptado.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === 'rechazado') {
+    return (
+      <div className="rounded-xl bg-rose-500/10 border border-rose-500/40 p-3 space-y-3">
+        <div className="flex items-center gap-2.5">
+          <Icon name="alertTriangle" className="w-5 h-5 text-rose-400 shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-rose-300">Tu pago fue rechazado</p>
+            <p className="text-[11px] text-rose-200/70">
+              {isBenefited
+                ? 'Puedes subir otro comprobante o pasar el pedido a tu cuenta.'
+                : 'Sube otro comprobante para que lo revisemos de nuevo.'}
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-2">
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="py-2.5 px-3 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-xs font-bold hover:bg-teal-500/25 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+          >
+            <Icon name="upload" className="w-4 h-4" />
+            {uploading ? 'Subiendo…' : 'Subir otro comprobante'}
+          </button>
+          {isBenefited && (
+            <button
+              onClick={handleToAccount}
+              disabled={converting}
+              className="py-2.5 px-3 rounded-xl bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 text-xs font-bold hover:bg-indigo-500/25 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+            >
+              <Icon name="creditCard" className="w-4 h-4" />
+              {converting ? 'Enviando…' : 'Añadir a mi cuenta'}
+            </button>
+          )}
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePick} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-amber-500/10 border border-amber-500/40 p-3 flex items-center gap-2.5">
+      <Icon name="clock" className="w-5 h-5 text-amber-400 shrink-0" />
+      <div>
+        <p className="text-sm font-bold text-amber-300">Pago en revisión</p>
+        <p className="text-[11px] text-amber-200/70">Estamos verificando tu comprobante.</p>
+      </div>
+    </div>
+  );
+}
+
+function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast }) {
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
   const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
@@ -8854,6 +9020,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
               <span className="text-teal-300 font-bold">Retiro por mostrador</span>
             )}
           </div>
+
+          {/* Estado del pago digital (confirmado / en revisión / rechazado con acciones) */}
+          <PaymentStatusCard order={order} isBenefited={isBenefited} onOrderUpdated={onOrderUpdated} addToast={addToast} />
 
           {/* Mapa de entrega a domicilio */}
           <DeliveryMap order={order} />

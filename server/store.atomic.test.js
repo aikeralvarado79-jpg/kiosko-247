@@ -93,6 +93,18 @@ describe('mutaciones atómicas en Postgres', () => {
     expect(update).toContain('WHERE id = $1');
   });
 
+  it('convertToCredit marca crédito y limpia los campos de pago por id', async () => {
+    const store = await loadPgStore();
+    const result = await store.convertToCredit('ORD-1');
+    expect(result.error).toBeUndefined();
+    const update = h.calls.find((s) => s.includes('UPDATE orders SET credit'));
+    expect(update).toContain('credit = true');
+    expect(update).toContain('"paymentMethod"');
+    expect(update).toContain('"paymentStatus"');
+    expect(update).toContain('WHERE id = $1');
+    expect(h.calls.some((s) => /DELETE FROM orders\b(?!\s*WHERE)/.test(s))).toBe(false);
+  });
+
   it('cancelOrder restaura stock por id y no borra la tabla', async () => {
     const store = await loadPgStore();
     await store.cancelOrder('ORD-1', '04140000001');

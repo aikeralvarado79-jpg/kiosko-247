@@ -474,6 +474,9 @@ app.post('/api/orders/:id/payment-proof', async (req, res) => {
     if (String(order.phone || '').replace(/\D/g, '').slice(-11) !== String(phone || '').replace(/\D/g, '').slice(-11)) {
       return res.status(403).json({ error: 'No autorizado para este pedido' });
     }
+    if (order.paymentStatus === 'confirmado') {
+      return res.status(400).json({ error: 'Este pago ya fue confirmado' });
+    }
     if (!proof || typeof proof !== 'string' || !proof.startsWith('data:image/')) {
       return res.status(400).json({ error: 'Comprobante inválido' });
     }
@@ -483,7 +486,7 @@ app.post('/api/orders/:id/payment-proof', async (req, res) => {
     const result = await store.updateOrderPayment(req.params.id, {
       paymentProof: proof,
       paymentReference: String(reference || '').slice(0, 120),
-      paymentStatus: order.paymentStatus || 'pendiente'
+      paymentStatus: 'pendiente'
     });
     console.log(`[kiosko] payment-proof resultado: ${result.error ? 'error=' + result.error : 'ok'}`);
     if (result.error) return res.status(404).json({ error: result.error });
@@ -494,6 +497,43 @@ app.post('/api/orders/:id/payment-proof', async (req, res) => {
 });
 
 // ---- Chat del pedido ----
+
+// Pasa un pedido con pago rechazado/pendiente a la cuenta del cliente (crédito).
+// Solo el dueño del pedido y si el cliente es beneficiado.
+app.post('/api/orders/:id/payment/credit', async (req, res) => {
+  try {
+    const { phone } = req.body || {};
+    const order = await store.getOrderById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (String(order.phone || '').replace(/\D/g, '').slice(-11) !== String(phone || '').replace(/\D/g, '').slice(-11)) {
+      return res.status(403).json({ error: 'No autorizado para este pedido' });
+    }
+    const customer = await store.getCustomerByPhone(order.phone);
+    if (!customer || !customer.isBenefited) {
+      return res.status(403).json({ error: 'Solo los clientes beneficiados pueden pedir a cuenta' });
+    }
+    const result = await store.convertToCredit(req.params.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+    const updated = await store.getOrderById(req.params.id);
+    if (updated && updated.phone) {
+      push.sendToPhone([updated.phone], {
+        title: `Pedido ${updated.id} a cuenta`,
+        body: 'Tu pedido pasó a tu cuenta. Se sumará a tu saldo al entregarse.',
+        url: '/'
+      }).catch(() => {});
+    }
+    if (ADMIN_PHONES.length) {
+      push.sendToPhone(ADMIN_PHONES, {
+        title: `Pedido ${updated?.id || req.params.id} a cuenta`,
+        body: `${order.customerName || 'Cliente'} convirtió su pago a cuenta (beneficiado).`,
+        url: '/'
+      }).catch(() => {});
+    }
+  } catch (err) {
+    fail(res, err, 'No se pudo pasar el pedido a cuenta.');
+  }
+});
 
 const authorizeOrderChat = async (req, orderId) => {
   const order = await store.getOrderById(orderId);
@@ -515,10 +555,17 @@ app.post('/api/orders/:id/messages', async (req, res) => {
     if (auth.error) return res.status(auth.status).json({ error: auth.error });
     const text = String(req.body?.text || '').trim().slice(0, 500);
     if (!text) return res.status(400).json({ error: 'Escribe un mensaje' });
-    const sender = auth.order.phone && (req.headers.authorization || '').startsWith('Bearer ')
-      ? 'admin'
-      : 'customer';
-    const message = { id: `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sender, text, at: new Date().toISOString() };
+    const isAdminSender = auth.order.phone && (req.headers.authorization || '').startsWith('Bearer ');
+    const sender = isAdminSender ? 'admin' : 'customer';
+    let senderName = sender === 'customer' ? auth.order.customerName || 'Cliente' : 'Tienda';
+    if (isAdminSender) {
+      try {
+        const adminPhone = (verifyToken((req.headers.authorization || '').slice(7)) || {}).phone;
+        const adminCustomer = adminPhone ? await store.getCustomerByPhone(adminPhone) : null;
+        if (adminCustomer?.customerName) senderName = adminCustomer.customerName;
+      } catch {}
+    }
+    const message = { id: `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sender, senderName, text, at: new Date().toISOString() };
     const result = await store.addOrderMessage(req.params.id, message);
     if (result.error) return res.status(404).json({ error: result.error });
     res.json({ ok: true, message });

@@ -50,6 +50,17 @@ const verifyToken = (token) => {
   return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
 };
 
+// Devuelve el payload del token (verifyToken solo valida y devuelve booleano).
+const decodeToken = (token) => {
+  try {
+    const [data] = String(token).split('.');
+    if (!data) return null;
+    return JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+};
+
 const requireAdmin = (req, res, next) => {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -560,7 +571,7 @@ app.post('/api/orders/:id/messages', async (req, res) => {
     let senderName = sender === 'customer' ? auth.order.customerName || 'Cliente' : 'Tienda';
     if (isAdminSender) {
       try {
-        const adminPhone = (verifyToken((req.headers.authorization || '').slice(7)) || {}).phone;
+        const adminPhone = (decodeToken((req.headers.authorization || '').slice(7)) || {}).phone;
         const adminCustomer = adminPhone ? await store.getCustomerByPhone(adminPhone) : null;
         if (adminCustomer?.customerName) senderName = adminCustomer.customerName;
       } catch {}

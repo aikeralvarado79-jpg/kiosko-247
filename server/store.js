@@ -329,7 +329,7 @@ export async function refreshMirror() {
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[kiosko] Error refrescando el espejo:', err);
-    return { ok: false, error: 'No se pudo actualizar la base de datos de calidad. Intentá de nuevo.' };
+    return { ok: false, error: 'No se pudo actualizar la base de datos de calidad. Intenta de nuevo.' };
   } finally {
     client.release();
   }

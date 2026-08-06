@@ -475,7 +475,7 @@ export default function App() {
     const res = await api.getState();
     if (!res.ok) {
       if (!silent) {
-        setLoadError('No se pudo conectar con el servidor. Verificá tu conexión a internet e intentá de nuevo.');
+        setLoadError('No se pudo conectar con el servidor. Verifica tu conexión a internet e intenta de nuevo.');
       }
       setIsLoading(false);
       return;
@@ -774,7 +774,7 @@ export default function App() {
       addToast('Sesión iniciada en el panel admin');
       return true;
     } catch {
-      addToast('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
+      addToast('No se pudo conectar con el servidor. Intenta de nuevo.', 'error');
       return false;
     }
   };
@@ -796,7 +796,7 @@ export default function App() {
       addToast('Sesión iniciada en el panel admin');
       return true;
     } catch {
-      addToast('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
+      addToast('No se pudo conectar con el servidor. Intenta de nuevo.', 'error');
       return false;
     }
   };
@@ -817,7 +817,7 @@ export default function App() {
       addToast('Sesión iniciada en el panel admin');
       return true;
     } catch {
-      addToast('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
+      addToast('No se pudo conectar con el servidor. Intenta de nuevo.', 'error');
       return false;
     }
   };
@@ -1044,7 +1044,7 @@ export default function App() {
       addToast('¡Pedido realizado con éxito!', 'success');
     } catch (err) {
       console.error('[kiosko] Error al crear pedido:', err);
-      addToast('No se pudo enviar el pedido. Revisá tu conexión e intentá de nuevo.', 'error');
+      addToast('No se pudo enviar el pedido. Revisa tu conexión e intenta de nuevo.', 'error');
     } finally {
       setIsPlacingOrder(false);
     }
@@ -1818,23 +1818,23 @@ function NewUserTour({ onClose }) {
   const steps = [
     {
       icon: 'store',
-      title: 'Explorá el catálogo',
-      desc: 'Buscá productos por nombre o navegá por categorías y marcas para descubrir todo lo que tenemos para vos.'
+      title: 'Explora el catálogo',
+      desc: 'Busca productos por nombre o navega por categorías y marcas para descubrir todo lo que tenemos para ti.'
     },
     {
       icon: 'shoppingBag',
-      title: 'Agregá al carrito',
-      desc: 'Tocá cualquier producto para ver sus fotos y precio en $ y Bs. Presioná "Agregar al Carrito" cuando lo decidas.'
+      title: 'Agrega al carrito',
+      desc: 'Toca cualquier producto para ver sus fotos y precio en $ y Bs. Presiona "Agregar al Carrito" cuando lo decidas.'
     },
     {
       icon: 'list',
-      title: 'Seguí tus pedidos',
-      desc: 'En "Mis Pedidos" podés ver tu historial y rastrear en vivo la entrega a domicilio desde la barra inferior.'
+      title: 'Sigue tus pedidos',
+      desc: 'En "Mis Pedidos" puedes ver tu historial y rastrear en vivo la entrega a domicilio desde la barra inferior.'
     },
     {
       icon: 'creditCard',
       title: 'Pago a la entrega',
-      desc: 'Elegí retiro en tienda o delivery. Los beneficiados pueden pedir a crédito y revisar su saldo en "Mi Cuenta".'
+      desc: 'Elige retiro en tienda o delivery. Los beneficiados pueden pedir a crédito y revisar su saldo en "Mi Cuenta".'
     }
   ];
   const [stepIdx, setStepIdx] = useState(0);
@@ -1860,7 +1860,7 @@ function NewUserTour({ onClose }) {
           </span>
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-widest text-teal-400 mb-1">
-              Conocé la app · {stepIdx + 1}/{steps.length}
+              Conoce la app · {stepIdx + 1}/{steps.length}
             </p>
             <h3 className="text-base font-black text-white">{s.title}</h3>
             <p className="text-xs text-slate-400 mt-1 leading-relaxed">{s.desc}</p>
@@ -2042,11 +2042,11 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!/^\d{7}$/.test(loginPhone.number)) {
-      setError('Ingresá tu teléfono de administrador.');
+      setError('Ingresa tu teléfono de administrador.');
       return;
     }
     if (!password) {
-      setError('Ingresá la contraseña de administrador.');
+      setError('Ingresa la contraseña de administrador.');
       return;
     }
     setIsSubmitting(true);
@@ -2054,9 +2054,9 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     try {
       const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
       const ok = await onLogin(phoneKey, password);
-      if (!ok) setError('Contraseña incorrecta. Verificá tu teléfono y contraseña.');
+      if (!ok) setError('Contraseña incorrecta. Verifica tu teléfono y contraseña.');
     } catch {
-      setError('No se pudo conectar con el servidor. Intentá de nuevo.');
+      setError('No se pudo conectar con el servidor. Intenta de nuevo.');
     } finally {
       setIsSubmitting(false);
     }
@@ -2067,7 +2067,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   // ese teléfono en este dominio, se registra en el momento (primera vez).
   const handleBiometricLogin = async () => {
     if (!/^\d{7}$/.test(loginPhone.number)) {
-      setError('Ingresá tu teléfono de administrador.');
+      setError('Ingresa tu teléfono de administrador.');
       return;
     }
     const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
@@ -2087,11 +2087,11 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
           setBioNeedsRegister(true);
           setBioOptions(null);
         } else {
-          setBioError('No se pudo iniciar la verificación con biometría. Intentá de nuevo.');
+          setBioError('No se pudo iniciar la verificación con biometría. Intenta de nuevo.');
           return;
         }
       } catch {
-        setBioError('No se pudo conectar con el servidor. Intentá de nuevo.');
+        setBioError('No se pudo conectar con el servidor. Intenta de nuevo.');
         return;
       }
     }
@@ -2104,13 +2104,13 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
         if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el registro');
         const regResponse = await startRegistration({ optionsJSON: rres.data.options });
         const ok = await onBiometricRegister(phoneKey, regResponse);
-        if (!ok) setBioError('No se pudo guardar tu biometría. Intentá de nuevo.');
+        if (!ok) setBioError('No se pudo guardar tu biometría. Intenta de nuevo.');
         setBioNeedsRegister(false);
         return;
       }
       const authResponse = await startAuthentication({ optionsJSON: bioOptions });
       const ok = await onBiometricLogin(phoneKey, authResponse);
-      if (!ok) setBioError('La biometría no coincidió. Verificá que tu número sea de administrador.');
+      if (!ok) setBioError('La biometría no coincidió. Verifica que tu número sea de administrador.');
     } catch (err) {
       // Si la credencial se registró bajo un rpID anterior (dominio distinto),
       // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
@@ -2127,7 +2127,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
         if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
         const regResponse = await startRegistration({ optionsJSON: rres.data.options });
         const ok = await onBiometricRegister(phoneKey, regResponse);
-        if (!ok) setBioError('No se pudo guardar tu biometría. Intentá de nuevo.');
+        if (!ok) setBioError('No se pudo guardar tu biometría. Intenta de nuevo.');
       } catch (regErr) {
         setBioError(friendlyAuthError(regErr));
       }
@@ -2138,7 +2138,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
 
   const startRecovery = async () => {
     if (!/^\d{7}$/.test(recoverPhone.number)) {
-      setRecoverError('Ingresá el número de teléfono de administrador.');
+      setRecoverError('Ingresa el número de teléfono de administrador.');
       return;
     }
     const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
@@ -2154,7 +2154,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
         recoveryFetchKeyRef.current = phoneKey;
         setRecoverOptions(res.data.options);
       } catch {
-        setRecoverError('No se pudo conectar con el servidor. Intentá de nuevo.');
+        setRecoverError('No se pudo conectar con el servidor. Intenta de nuevo.');
         return;
       }
     }
@@ -2165,7 +2165,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       setRecoverStep('newpass');
       setRecoverError('');
     } catch {
-      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intentá de nuevo.');
+      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intenta de nuevo.');
       setRecoverStep('phone');
     }
   };
@@ -2193,7 +2193,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     setRecoverOptions(null);
     setBiometricResponse(null);
     setRecoverPhone({ code: '0412', number: '' });
-    setError('Contraseña restablecida. Ahora podés iniciar sesión.');
+    setError('Contraseña restablecida. Ahora puedes iniciar sesión.');
   };
 
   if (recoverMode) {
@@ -2205,7 +2205,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               <Icon name="key" className="w-7 h-7" />
             </span>
             <h2 className="text-xl font-black text-white">Recuperar Contraseña</h2>
-            <p className="text-xs text-slate-400">Verificá con biometría y creá una nueva contraseña.</p>
+            <p className="text-xs text-slate-400">Verifica con biometría y crea una nueva contraseña.</p>
           </div>
 
           {recoverStep === 'phone' && (
@@ -2265,7 +2265,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                   type="password"
                   value={newPassword.b}
                   onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
-                  placeholder="Repetí la contraseña"
+                  placeholder="Repite la contraseña"
                   className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
                 />
               </div>
@@ -2299,7 +2299,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             <Icon name="layers" className="w-7 h-7" />
           </span>
           <h2 className="text-xl font-black text-white">Acceso al Panel Admin</h2>
-          <p className="text-xs text-slate-400">Iniciá sesión con tu contraseña o biometría para gestionar inventario y pedidos.</p>
+          <p className="text-xs text-slate-400">Inicia sesión con tu contraseña o biometría para gestionar inventario y pedidos.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -2415,7 +2415,7 @@ class ErrorBoundary extends Component {
             </div>
             <h3 className="text-base font-black text-white mb-1">Algo salió mal</h3>
             <p className="text-xs text-slate-400 leading-relaxed mb-4">
-              Ocurrió un problema inesperado al cargar esta sección. Tocá Reintentar para intentarlo de nuevo.
+              Ocurrió un problema inesperado al cargar esta sección. Toca Reintentar para intentarlo de nuevo.
             </p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
@@ -3362,7 +3362,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
         </div>
       </div>
 
-      {/* Visor full screen de la imagen (deslizá para ver la misma marca) */}
+      {/* Visor full screen de la imagen (desliza para ver la misma marca) */}
       {showFullscreen && (
         <div
           className="fixed inset-0 z-[70] bg-slate-950/98 bg-black flex flex-col"
@@ -3415,7 +3415,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             <p className="text-sm font-bold text-white line-clamp-1">{product.name}</p>
             {product.brand && <p className="text-xs text-teal-400 mt-0.5">{product.brand}</p>}
             {hasSameBrand && (
-              <p className="text-[10px] text-slate-500 mt-1">Deslizá para ver más productos de {product.brand}</p>
+              <p className="text-[10px] text-slate-500 mt-1">Desliza para ver más productos de {product.brand}</p>
             )}
           </div>
         </div>
@@ -3543,7 +3543,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
   const runWebAuthn = async () => {
     if (!webauthnSupported) {
       setStep('form');
-      setWebauthnError('Tu dispositivo no soporta biometría. Usá un celular actualizado con huella o Face ID.');
+      setWebauthnError('Tu dispositivo no soporta biometría. Usa un celular actualizado con huella o Face ID.');
       return;
     }
     setWebauthnError('');
@@ -3591,7 +3591,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
       return;
     }
     if (!webauthnSupported) {
-      setWebauthnError('Tu dispositivo no soporta biometría. Usá un celular actualizado con huella o Face ID.');
+      setWebauthnError('Tu dispositivo no soporta biometría. Usa un celular actualizado con huella o Face ID.');
       return;
     }
     setWebauthnError('');
@@ -3639,16 +3639,16 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
                 ? 'Cerrar sesión'
                 : `Volver a ${savedCustomer?.customerName?.split(' ')[0] || 'tu cuenta'}`
               : registerMode
-              ? 'Creá tu cuenta'
+              ? 'Crea tu cuenta'
               : savedCustomer?.customerName
               ? 'Cambiar de usuario'
               : 'Bienvenido a Empresas Alvarados'}
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             {panel === 'confirm'
-              ? 'Confirmá tu identidad con biometría para continuar.'
+              ? 'Confirma tu identidad con biometría para continuar.'
               : registerMode
-              ? 'Registrate en segundos con tu teléfono y biometría. El nombre se autocompleta en tus próximos accesos.'
+              ? 'Regístrate en segundos con tu teléfono y biometría. El nombre se autocompleta en tus próximos accesos.'
               : 'Identifícate para pedir. Tu teléfono + biometría es tu tarjeta de cliente.'}
           </p>
         </div>
@@ -3708,12 +3708,12 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
               </div>
               <div>
                 <h3 className="text-base sm:text-lg font-bold text-white">
-                  {webAuthnStep === 'login' ? 'Confirmá tu identidad' : 'Registrá tu biometría'}
+                  {webAuthnStep === 'login' ? 'Confirma tu identidad' : 'Registra tu biometría'}
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                   {webAuthnStep === 'login'
-                    ? 'Usá tu huella o Face ID para confirmar que sos vos.'
-                    : 'Usá tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
+                    ? 'Usa tu huella o Face ID para confirmar que eres tú.'
+                    : 'Usa tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
                 </p>
               </div>
               <button
@@ -3883,12 +3883,12 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white">
-                {webAuthnStep === 'login' ? 'Confirmá tu identidad' : 'Registrá tu biometría'}
+                {webAuthnStep === 'login' ? 'Confirma tu identidad' : 'Registra tu biometría'}
               </h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 {webAuthnStep === 'login'
-                  ? 'Usá tu huella o Face ID para confirmar que sos vos.'
-                  : 'Usá tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
+                  ? 'Usa tu huella o Face ID para confirmar que eres tú.'
+                  : 'Usa tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
               </p>
             </div>
             <button
@@ -4111,8 +4111,8 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
           {(!orders || orders.length === 0) ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-3 text-slate-500">
               <Icon name="package" className="w-16 h-16 stroke-1 text-slate-700" />
-              <p className="font-semibold text-slate-400">Todavía no tenés pedidos</p>
-              <p className="text-xs">Hacé tu primer pedido y aparecerá aquí.</p>
+              <p className="font-semibold text-slate-400">Todavía no tienes pedidos</p>
+              <p className="text-xs">Haz tu primer pedido y aparecerá aquí.</p>
             </div>
           ) : (
             <>
@@ -4736,7 +4736,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
 
   const confirm = () => {
     if (!point) {
-      setLocError('Tocá el mapa o buscá una dirección para elegir el punto.');
+      setLocError('Toca el mapa o busca una dirección para elegir el punto.');
       return;
     }
     onPick({ lat: Number(point.lat), lng: Number(point.lng), address: search.trim() || null });
@@ -4753,7 +4753,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
               {title || 'Elegir punto en el mapa'}
             </h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Buscá una dirección, tocá el mapa o arrastrá el marcador.
+              Busca una dirección, toca el mapa o arrastra el marcador.
             </p>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
@@ -4978,7 +4978,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
   const handleUseMyLocation = async () => {
     setLocError('');
     if (!navigator.geolocation) {
-      setLocError('Tu navegador no soporta geolocalización. Ingresá la dirección manualmente.');
+      setLocError('Tu navegador no soporta geolocalización. Ingresa la dirección manualmente.');
       addToast('Tu navegador no soporta geolocalización', 'error');
       return;
     }
@@ -4990,7 +4990,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
         const state = await perm;
         if (state && state.state === 'denied') {
           setLocError(
-            'El navegador tiene la ubicación bloqueada. Para que pregunte de nuevo, activá el permiso de ubicación para este sitio en los ajustes del navegador (icono del candado junto a la URL) y recargá la página.'
+            'El navegador tiene la ubicación bloqueada. Para que pregunte de nuevo, activa el permiso de ubicación para este sitio en los ajustes del navegador (icono del candado junto a la URL) y recarga la página.'
           );
           addToast('Permiso de ubicación bloqueado en el navegador', 'error');
           return;
@@ -5012,8 +5012,8 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
         setLocating(false);
         const denied = err && err.code === 1;
         const msg = denied
-          ? 'Permiso de ubicación denegado. Activalo en los ajustes del navegador (candado junto a la URL) y recargá, o ingresá la dirección manualmente.'
-          : 'No se pudo obtener la ubicación. Ingresá la dirección manualmente.';
+          ? 'Permiso de ubicación denegado. Actívalo en los ajustes del navegador (candado junto a la URL) y recarga, o ingresa la dirección manualmente.'
+          : 'No se pudo obtener la ubicación. Ingresa la dirección manualmente.';
         setLocError(msg);
         addToast(msg, 'error');
       },
@@ -6361,7 +6361,7 @@ function AdminView({
             </div>
           ) : (
             <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
-              Aún no configuraste la ubicación del comercio. Usá el botón para elegirla en el mapa.
+              Aún no configuraste la ubicación del comercio. Usa el botón para elegirla en el mapa.
             </div>
           )}
 
@@ -6735,11 +6735,11 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
   const handleConfirm = async () => {
     const key = customerPhone.replace(/\D/g, '').slice(-11);
     if (key.length < 7) {
-      setError('Ingresá el número de teléfono del deudor');
+      setError('Ingresa el número de teléfono del deudor');
       return;
     }
     if (selectedItems.length === 0) {
-      setError('Seleccioná al menos un producto');
+      setError('Selecciona al menos un producto');
       return;
     }
     setError('');
@@ -6759,7 +6759,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
               Añadir productos a la deuda
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Seleccioná el cliente y los productos que debe (ventas presenciales o deudas viejas).
+              Selecciona el cliente y los productos que debe (ventas presenciales o deudas viejas).
             </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
@@ -7313,21 +7313,21 @@ const friendlyAuthError = (err) => {
   // del servidor o un fallback amigable, así que se muestran tal cual.
   if (name === 'Error' && err?.message) return err.message;
   if (name === 'NotAllowedError') {
-    return 'Verificación cancelada. Para continuar, aceptá la huella o Face ID cuando tu teléfono lo pida.';
+    return 'Verificación cancelada. Para continuar, acepta la huella o Face ID cuando tu teléfono lo pida.';
   }
   if (name === 'NotFoundError' || name === 'NotSupportedError') {
-    return 'Tu dispositivo no tiene biometría configurada. Activá la huella o Face ID en los ajustes y probá de nuevo.';
+    return 'Tu dispositivo no tiene biometría configurada. Activa la huella o Face ID en los ajustes y prueba de nuevo.';
   }
   if (name === 'AbortError') {
-    return 'La verificación tardó demasiado y se canceló. Intentá de nuevo.';
+    return 'La verificación tardó demasiado y se canceló. Intenta de nuevo.';
   }
   if (name === 'TimeoutError') {
-    return 'El tiempo de espera se agotó. Intentá de nuevo.';
+    return 'El tiempo de espera se agotó. Intenta de nuevo.';
   }
   if (name === 'SecurityError' || name === 'InvalidStateError') {
-    return 'Tu dispositivo no pudo completar la verificación. Intentá de nuevo o usá un teléfono más reciente.';
+    return 'Tu dispositivo no pudo completar la verificación. Intenta de nuevo o usa un teléfono más reciente.';
   }
-  return 'No se pudo completar la verificación. Intentá de nuevo.';
+  return 'No se pudo completar la verificación. Intenta de nuevo.';
 };
 
 // Recordatorio corto para un cobro programado que ya venció.
@@ -7536,7 +7536,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     }
 
     setImageSearchError(
-      'No se pudieron cargar las sugerencias de imágenes. Verificá tu conexión a internet e intentá de nuevo.'
+      'No se pudieron cargar las sugerencias de imágenes. Verifica tu conexión a internet e intenta de nuevo.'
     );
   };
 
@@ -7810,7 +7810,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                       >
                         {imageSource}
                       </a>{' '}
-                      (CC BY-SA). Hacé clic en una miniatura para usarla.
+                      (CC BY-SA). Haz clic en una miniatura para usarla.
                     </>
                   ) : (
                     <>
@@ -7823,7 +7823,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                       >
                         Pexels
                       </a>
-                      . Hacé clic en una miniatura para usarla.
+                      . Haz clic en una miniatura para usarla.
                     </>
                   )}
                 </p>

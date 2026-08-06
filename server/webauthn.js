@@ -43,7 +43,7 @@ const deriveRp = (req) => {
   return { expectedOrigin: `${proto}://${host}`, rpID };
 };
 
-// Registro: Paso 1 - generá los options para navigator.credentials.create
+// Registro: Paso 1 - genera los options para navigator.credentials.create
 export const registrationOptions = async (req, res) => {
   try {
     const { phone, customerName } = req.body || {};
@@ -82,7 +82,7 @@ export const registrationOptions = async (req, res) => {
     res.json({ options });
   } catch (err) {
     console.error('[kiosko] No se pudo generar la opción de registro:', err);
-    res.status(500).json({ error: 'No se pudo iniciar el registro con biometría. Intentá de nuevo.' });
+    res.status(500).json({ error: 'No se pudo iniciar el registro con biometría. Intenta de nuevo.' });
   }
 };
 
@@ -95,7 +95,7 @@ export const registrationVerify = async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[kiosko] Error verificando el registro:', err);
-    res.status(500).json({ error: 'No se pudo guardar tu biometría. Intentá de nuevo.' });
+    res.status(500).json({ error: 'No se pudo guardar tu biometría. Intenta de nuevo.' });
   }
 };
 
@@ -133,7 +133,7 @@ export const verifyRegistration = async (phone, response, req) => {
   return { ok: true };
 };
 
-// Login: Paso 1 - generá los options para navigator.credentials.get
+// Login: Paso 1 - genera los options para navigator.credentials.get
 export const authenticationOptions = async (req, res) => {
   try {
     const { phone } = req.body || {};
@@ -154,7 +154,7 @@ export const authenticationOptions = async (req, res) => {
     res.json({ options, credentialId: credential.credentialId });
   } catch (err) {
     console.error('[kiosko] No se pudo generar la opción de autenticación:', err);
-    res.status(500).json({ error: 'No se pudo iniciar la verificación con biometría. Intentá de nuevo.' });
+    res.status(500).json({ error: 'No se pudo iniciar la verificación con biometría. Intenta de nuevo.' });
   }
 };
 
@@ -169,7 +169,7 @@ export const authenticationVerify = async (req, res) => {
     res.json({ ok: true, customer: customer || { phone: key } });
   } catch (err) {
     console.error('[kiosko] Error verificando la autenticación:', err);
-    res.status(500).json({ error: 'No se pudo verificar tu biometría. Intentá de nuevo.' });
+    res.status(500).json({ error: 'No se pudo verificar tu biometría. Intenta de nuevo.' });
   }
 };
 

@@ -307,6 +307,21 @@ export async function refreshMirror() {
   try {
     await client.query('BEGIN');
     await client.query(`CREATE SCHEMA IF NOT EXISTS ${MIRROR_TARGET_SCHEMA}`);
+
+    // Conservar ajustes propios del entorno de calidad (VAPID y suscripciones
+    // push) antes de que el espejo borre la tabla settings: el esquema de
+    // producción no los conoce y sin ellos las notificaciones se romperían.
+    let localVapid = null;
+    let localPushSubs = null;
+    try {
+      const v = await client.query(`SELECT value FROM ${MIRROR_TARGET_SCHEMA}.settings WHERE key = $1`, ['vapid']);
+      if (v.rows[0]) localVapid = v.rows[0].value;
+    } catch {}
+    try {
+      const s = await client.query(`SELECT value FROM ${MIRROR_TARGET_SCHEMA}.settings WHERE key = $1`, ['pushSubs']);
+      if (s.rows[0]) localPushSubs = s.rows[0].value;
+    } catch {}
+
     for (const t of MIRROR_TABLES) {
       const exists = await client.query('SELECT to_regclass($1) AS r', [`${MIRROR_SOURCE_SCHEMA}.${t}`]);
       if (!exists.rows[0].r) {
@@ -338,6 +353,23 @@ export async function refreshMirror() {
       }
       tables[t] = ins.rowCount;
     }
+
+    // Restaurar VAPID y suscripciones push de calidad tras recrear settings.
+    const restoreLocal = async (key, value) => {
+      const up = await client.query(
+        `UPDATE ${MIRROR_TARGET_SCHEMA}.settings SET value = $2::jsonb WHERE key = $1`,
+        [key, value]
+      );
+      if (up.rowCount === 0) {
+        await client.query(
+          `INSERT INTO ${MIRROR_TARGET_SCHEMA}.settings (key, value) VALUES ($1, $2::jsonb) ON CONFLICT DO NOTHING`,
+          [key, value]
+        );
+      }
+    };
+    if (localVapid != null) await restoreLocal('vapid', localVapid);
+    if (localPushSubs != null) await restoreLocal('pushSubs', localPushSubs);
+
     await client.query('COMMIT');
     return { ok: true, source: MIRROR_SOURCE_SCHEMA, target: MIRROR_TARGET_SCHEMA, tables };
   } catch (err) {

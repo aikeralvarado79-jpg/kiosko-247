@@ -44,7 +44,6 @@ export async function ensureVapid() {
 }
 
 export async function getVapidPublicKey() {
-  await ensureVapid();
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   if (publicKey) return publicKey;
   let stored = null;
@@ -54,7 +53,8 @@ export async function getVapidPublicKey() {
     stored = null;
   }
   if (stored && stored.publicKey) return stored.publicKey;
-  // Caso extremo: la persistencia anterior falló. Se regenera y se vuelve a guardar.
+  // Sin clave persistida (p.ej. tras un refresco del espejo que la borró):
+  // se regenera y se guarda para mantenerla estable entre dispositivos.
   await ensureVapid();
   try {
     stored = await store.getSetting('vapid');

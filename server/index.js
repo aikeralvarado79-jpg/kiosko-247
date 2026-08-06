@@ -11,7 +11,7 @@ import { getBcvRate } from './rate.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '8mb' }));
 
 let config = {};
 try {
@@ -464,6 +464,12 @@ app.post('/api/orders/:id/payment-proof', async (req, res) => {
   try {
     const { phone, proof, reference } = req.body || {};
     const order = await store.getOrderById(req.params.id);
+    const orderPhoneOk =
+      String(order?.phone || '').replace(/\D/g, '').slice(-11) === String(phone || '').replace(/\D/g, '').slice(-11);
+    console.log(
+      `[kiosko] payment-proof id=${req.params.id} found=${!!order} phoneOk=${orderPhoneOk} ` +
+        `proof=${proof ? `${proof.slice(0, 30)}... len=${proof.length}` : 'null'}`
+    );
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
     if (String(order.phone || '').replace(/\D/g, '').slice(-11) !== String(phone || '').replace(/\D/g, '').slice(-11)) {
       return res.status(403).json({ error: 'No autorizado para este pedido' });
@@ -471,7 +477,7 @@ app.post('/api/orders/:id/payment-proof', async (req, res) => {
     if (!proof || typeof proof !== 'string' || !proof.startsWith('data:image/')) {
       return res.status(400).json({ error: 'Comprobante inválido' });
     }
-    if (proof.length > 1500000) {
+    if (proof.length > 3000000) {
       return res.status(400).json({ error: 'La imagen es demasiado grande' });
     }
     const result = await store.updateOrderPayment(req.params.id, {
@@ -479,6 +485,7 @@ app.post('/api/orders/:id/payment-proof', async (req, res) => {
       paymentReference: String(reference || '').slice(0, 120),
       paymentStatus: order.paymentStatus || 'pendiente'
     });
+    console.log(`[kiosko] payment-proof resultado: ${result.error ? 'error=' + result.error : 'ok'}`);
     if (result.error) return res.status(404).json({ error: result.error });
     res.json(result);
   } catch (err) {

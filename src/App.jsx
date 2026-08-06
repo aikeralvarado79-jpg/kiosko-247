@@ -289,6 +289,32 @@ const parsePhone = (phone) => {
   return { code: num.slice(0, 4), number: num.slice(-7) };
 };
 
+// Redimensiona y comprime una imagen (p. ej. comprobante de pago) a un data URL
+// liviano para que quepa en los límites del servidor, sin perder legibilidad.
+const compressImage = (file, maxDimension = 1280, quality = 0.72) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Imagen inválida'));
+      img.onload = () => {
+        const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const out = canvas.toDataURL('image/jpeg', quality);
+        resolve(out);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
 const loadSavedCustomer = () => {
   try {
     const raw = localStorage.getItem(CUSTOMER_KEY);
@@ -1101,9 +1127,16 @@ export default function App() {
           );
           if (!attach.ok) {
             console.warn('[kiosko] No se pudo adjuntar el comprobante:', attach.data?.error);
+            addToast(
+              'Pedido enviado, pero el comprobante no se adjuntó (' +
+                (attach.data?.error || 'error desconocido') +
+                '). Contacta al kiosko para enviarlo.',
+              'warning'
+            );
           }
         } catch (proofErr) {
           console.warn('[kiosko] Error al adjuntar comprobante:', proofErr);
+          addToast('Pedido enviado, pero el comprobante no se pudo adjuntar.', 'warning');
         }
       }
 
@@ -5728,25 +5761,29 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
                           <span className="text-xs text-slate-400">
                             Toca para tomar una foto, elegir de la galería o subir un archivo del comprobante
                           </span>
-                          <span className="text-[10px] text-slate-500">Máx 1.5 MB</span>
+                          <span className="text-[10px] text-slate-500">Se comprime automáticamente</span>
                         </>
                       )}
                       <input
                         type="file"
                         accept="image/*"
                         className="hidden"
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const file = e.target.files && e.target.files[0];
                           if (!file) return;
-                          if (file.size > 1.5 * 1024 * 1024) {
-                            addToast('La imagen supera 1.5 MB. Elige una más liviana.', 'error');
+                          if (file.size > 8 * 1024 * 1024) {
+                            addToast('La imagen supera 8 MB. Elige una más liviana.', 'error');
                             e.target.value = '';
                             return;
                           }
-                          const reader = new FileReader();
-                          reader.onload = () =>
-                            setFormData({ ...formData, paymentProof: String(reader.result) });
-                          reader.readAsDataURL(file);
+                          try {
+                            const compressed = await compressImage(file);
+                            setFormData({ ...formData, paymentProof: compressed });
+                          } catch {
+                            addToast('No se pudo procesar la imagen. Prueba con otra.', 'error');
+                          } finally {
+                            e.target.value = '';
+                          }
                         }}
                       />
                     </label>

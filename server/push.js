@@ -17,30 +17,29 @@ export async function ensureVapid() {
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
 
-  if (!publicKey || !privateKey) {
-    let stored = null;
-    try {
-      stored = await store.getSetting('vapid');
-    } catch {
-      stored = null;
-    }
-    if (stored && stored.publicKey && stored.privateKey) {
-      webpush.setVapidDetails(VAPID_SUBJECT, stored.publicKey, stored.privateKey);
-      vapidReady = true;
-      return;
-    }
-    const keys = webpush.generateVAPIDKeys();
-    try {
-      await store.setSetting('vapid', keys);
-    } catch (err) {
-      console.warn('[kiosko] No se pudo persistir VAPID:', err.message);
-    }
-    webpush.setVapidDetails(VAPID_SUBJECT, keys.publicKey, keys.privateKey);
+  if (publicKey && privateKey) {
+    webpush.setVapidDetails(VAPID_SUBJECT, publicKey, privateKey);
     vapidReady = true;
     return;
   }
 
-  webpush.setVapidDetails(VAPID_SUBJECT, publicKey, privateKey);
+  let stored = null;
+  try {
+    stored = await store.getSetting('vapid');
+  } catch {
+    stored = null;
+  }
+  if (stored && stored.publicKey && stored.privateKey) {
+    webpush.setVapidDetails(VAPID_SUBJECT, stored.publicKey, stored.privateKey);
+    vapidReady = true;
+    return;
+  }
+
+  // Sin claves previas: se generan y se persisten. Si la persistencia falla,
+  // NO marcamos "ready" para reintentar en la próxima llamada.
+  const keys = webpush.generateVAPIDKeys();
+  await store.setSetting('vapid', keys);
+  webpush.setVapidDetails(VAPID_SUBJECT, keys.publicKey, keys.privateKey);
   vapidReady = true;
 }
 
@@ -48,7 +47,20 @@ export async function getVapidPublicKey() {
   await ensureVapid();
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   if (publicKey) return publicKey;
-  const stored = await store.getSetting('vapid');
+  let stored = null;
+  try {
+    stored = await store.getSetting('vapid');
+  } catch {
+    stored = null;
+  }
+  if (stored && stored.publicKey) return stored.publicKey;
+  // Caso extremo: la persistencia anterior falló. Se regenera y se vuelve a guardar.
+  await ensureVapid();
+  try {
+    stored = await store.getSetting('vapid');
+  } catch {
+    stored = null;
+  }
   return stored?.publicKey || null;
 }
 

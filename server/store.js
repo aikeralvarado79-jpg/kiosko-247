@@ -525,24 +525,12 @@ const pgStore = {
   },
 
   async saveSettings(settings) {
-    await this.pool.query(
-      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      ['promos', JSON.stringify(settings.promos || [])]
-    );
+    await this.setSetting('promos', settings.promos || []);
     if (settings.storeLocation && typeof settings.storeLocation === 'object') {
-      await this.pool.query(
-        `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        ['storeLocation', JSON.stringify(settings.storeLocation)]
-      );
+      await this.setSetting('storeLocation', settings.storeLocation);
     }
     if (settings.paymentConfig && typeof settings.paymentConfig === 'object') {
-      await this.pool.query(
-        `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        ['paymentConfig', JSON.stringify(settings.paymentConfig)]
-      );
+      await this.setSetting('paymentConfig', settings.paymentConfig);
     }
   },
 
@@ -556,11 +544,7 @@ const pgStore = {
   },
 
   async setAdminPassword(entry) {
-    await this.pool.query(
-      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      ['adminPassword', JSON.stringify(entry)]
-    );
+    await this.setSetting('adminPassword', entry);
   },
 
   async getAdminCredential(phone) {
@@ -594,11 +578,7 @@ const pgStore = {
   },
 
   async saveCollections(collections) {
-    await this.pool.query(
-      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      ['collections', JSON.stringify(Array.isArray(collections) ? collections : [])]
-    );
+    await this.setSetting('collections', Array.isArray(collections) ? collections : []);
   },
 
   async getSetting(key) {
@@ -616,11 +596,17 @@ const pgStore = {
   },
 
   async setSetting(key, value) {
-    await this.pool.query(
-      `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [key, JSON.stringify(value)]
+    const json = JSON.stringify(value);
+    const res = await this.pool.query(
+      `UPDATE ${q('settings')} SET value = $2::jsonb WHERE key = $1`,
+      [key, json]
     );
+    if (res.rowCount === 0) {
+      await this.pool.query(
+        `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb) ON CONFLICT DO NOTHING`,
+        [key, json]
+      );
+    }
   },
 
   async getCustomerByPhone(phone) {

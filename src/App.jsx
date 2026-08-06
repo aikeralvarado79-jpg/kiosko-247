@@ -47,7 +47,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
      fingerprint: <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88M17.29 21.02c.12-.6.43-2.3.5-3.02M2 12a10 10 0 0 1 18-6M2 16h.01M21.8 16c.2-2 .131-5.354 0-6M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2M8.65 22c.21-.66.45-1.32.57-2M9 6.8a6 6 0 0 1 9 5.2v2" />,
      heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z" />,
      heartFilled: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z" fill="currentColor" stroke="none" />,
-     home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h5v-6h4v6h5V9.5" />,
+      home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h5v-6h4v6h5V9.5" />,
+      logOut: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
      list: <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
      settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
      zap: <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />,
@@ -101,6 +102,24 @@ const formatSize = (product) => {
 
 const formatUsd = (n) => `$${Number(n || 0).toLocaleString('es-AR')}`;
 
+// Formatea un número como monto con separador de miles (.) y decimales (,),
+// ej: 1100 → "1.100,00". Se usa en la calculadora del header.
+const formatAmount = (n, decimals = 2) =>
+  Number.isFinite(n) ? n.toLocaleString('es-AR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) : '';
+
+// Convierte un texto de monto (con formato es-VE "1.100,00" o simple "1000.00")
+// a número, tolerando ambos estilos de separadores.
+const parseAmount = (value) => {
+  const s = String(value || '').replace(/[^\d.,]/g, '').trim();
+  if (!s) return NaN;
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  if (hasComma && hasDot) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+  if (hasComma && !hasDot) return parseFloat(s.replace(',', '.'));
+  if (!hasComma && hasDot && (s.match(/\./g) || []).length > 1) return parseFloat(s.replace(/\./g, ''));
+  return parseFloat(s);
+};
+
 const formatBs = (n) => `Bs ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
@@ -111,6 +130,28 @@ const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
 const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'];
 
 const CUSTOMER_KEY = 'kiosko_customer';
+
+// Memoria de login ("Recordarme"): conserva los campos de identificación para
+// que el siguiente login los pre-cargue sin vaciarlos.
+const LOGIN_MEMORY_KEY = 'kiosko_login_memory';
+const loadLoginMemory = () => {
+  try {
+    const raw = localStorage.getItem(LOGIN_MEMORY_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+const saveLoginMemory = (data) => {
+  try {
+    localStorage.setItem(LOGIN_MEMORY_KEY, JSON.stringify(data));
+  } catch {}
+};
+const clearLoginMemory = () => {
+  try {
+    localStorage.removeItem(LOGIN_MEMORY_KEY);
+  } catch {}
+};
 
 // Parse fecha de pedido: prioriza createdAt (ISO), fallback timestamp "DD/MM, HH:MM" asumiendo año actual.
 const parseOrderDate = (o) => {
@@ -328,15 +369,15 @@ function RateBanner({ rate }) {
   const handleUsd = (value) => {
     const v = value.replace(/[^\d.,]/g, '');
     setUsdInput(v);
-    const num = parseFloat(v.replace(',', '.'));
-    setBsInput(Number.isFinite(num) ? (num * r).toFixed(2) : '');
+    const num = parseAmount(v);
+    setBsInput(Number.isFinite(num) ? formatAmount(num * r) : '');
   };
 
   const handleBs = (value) => {
     const v = value.replace(/[^\d.,]/g, '');
     setBsInput(v);
-    const num = parseFloat(v.replace(',', '.'));
-    setUsdInput(Number.isFinite(num) && r > 0 ? (num / r).toFixed(2) : '');
+    const num = parseAmount(v);
+    setUsdInput(Number.isFinite(num) && r > 0 ? formatAmount(num / r) : '');
   };
 
   return (
@@ -528,9 +569,12 @@ export default function App() {
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
 
   // Bienvenida a pantalla completa tras iniciar sesión (cliente o admin).
-  // { name, tag }: name = primer nombre a mostrar, tag = texto superior.
+  // { name, tag, isNew }: name = primer nombre a mostrar, tag = texto superior.
   // Se muestra justo tras identificarse y se cierra al instante con un toque.
   const [welcome, setWelcome] = useState(null);
+
+  // Tour tutorial para usuarios nuevos (se muestra tras la bienvenida).
+  const [showTour, setShowTour] = useState(false);
 
   // True si el cliente identificado figura en la lista de administradores por teléfono
   const isCurrentAdmin = useMemo(() => {
@@ -539,12 +583,31 @@ export default function App() {
     return ADMIN_PHONES.includes(key);
   }, [savedCustomer]);
 
-  // Identificación obligatoria: se abre al entrar como cliente sin datos guardados
+  // Identificación obligatoria: se abre al entrar como cliente sin datos guardados.
+  // identityMode: 'login' (formulario) | 'confirm' (solo biometría para volver/salir).
+  // identityConfirmKind: 'switchback' | 'logout'.
   const [isIdentityOpen, setIsIdentityOpen] = useState(() => !loadSavedCustomer());
+  const [identityMode, setIdentityMode] = useState('login');
+  const [identityConfirmKind, setIdentityConfirmKind] = useState('switchback');
+
+  // Abre el login normal (cambiar de usuario / identificarse).
+  const openIdentityLogin = () => {
+    setIdentityMode('login');
+    setIdentityConfirmKind('switchback');
+    setIsIdentityOpen(true);
+  };
+
+  // Abre la confirmación por biometría para cerrar sesión.
+  const openIdentityLogout = () => {
+    setIdentityMode('confirm');
+    setIdentityConfirmKind('logout');
+    setIsIdentityOpen(true);
+  };
 
   // Reabrir la identificación si el usuario entra a la tienda sin estar identificado
   useEffect(() => {
     if (activeView === 'customer' && !savedCustomer) {
+      setIdentityMode('login');
       setIsIdentityOpen(true);
     }
   }, [activeView, savedCustomer]);
@@ -1034,6 +1097,10 @@ export default function App() {
 
   // Identificación obligatoria del cliente al entrar
   const handleIdentifyCustomer = async ({ customerName, phoneCode, phoneNumber }) => {
+    const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
+    // "Nuevo" = no tiene historial de pedidos previo con este teléfono. Se calcula
+    // ANTES de guardar el registro local para no contarse a sí mismo como conocido.
+    const isReturning = orders.some((o) => normalizePhoneDigits(o.phone) === phoneKey);
     const record = {
       customerName,
       phoneCode,
@@ -1047,25 +1114,31 @@ export default function App() {
     // Bienvenida a pantalla completa con el nombre del usuario (primer nombre).
     // Se monta en el mismo render en que se cierra el modal, así la app nunca
     // se ve antes de la animación.
-    setWelcome({ name: customerName.trim().split(' ')[0] || customerName.trim(), tag: 'Bienvenido' });
-    const known = buildKnownCustomers(orders, record);
-    const isReturning = known.some((c) => c.number === phoneNumber && c.code === phoneCode);
+    setWelcome({ name: customerName.trim().split(' ')[0] || customerName.trim(), tag: 'Bienvenido', isNew: !isReturning });
     addToast(isReturning ? `¡Hola de nuevo, ${customerName.split(' ')[0]}!` : `¡Bienvenido, ${customerName.split(' ')[0]}!`);
     // Registrar/actualizar el cliente en el servidor para que aparezca en el historial
-    const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
     if (phoneKey.length >= 7) {
       const res = await api.upsertCustomer(phoneKey, { customerName });
       if (res.ok && res.data?.phone) setCustomerProfile(res.data);
     }
   };
 
-  // Cambiar de cliente: limpia la identidad y reabre el modal
-  const handleSwitchCustomer = () => {
+  // Confirmación por biometría del modal de identidad. "switchback" = volver al
+  // cliente actual sin pedir datos; "logout" = cerrar sesión.
+  const handleIdentityConfirmBiometric = (kind) => {
+    setIsIdentityOpen(false);
+    if (kind === 'logout') handleCustomerLogout();
+  };
+
+  // Cerrar sesión del cliente: limpia identidad y carrito, y reabre el login.
+  const handleCustomerLogout = () => {
     localStorage.removeItem(CUSTOMER_KEY);
     setSavedCustomer(null);
     setCustomerProfile(null);
     setCart([]);
-    setIsIdentityOpen(true);
+    setIdentityMode('login');
+    setIsIdentityOpen(false);
+    addToast('Sesión cerrada', 'info');
   };
 
   const handleSaveProduct = async (productData) => {
@@ -1322,7 +1395,7 @@ export default function App() {
           {/* Customer identity chip */}
           {activeView === 'customer' && savedCustomer?.customerName && (
             <button
-              onClick={() => setIsIdentityOpen(true)}
+              onClick={openIdentityLogin}
               className="flex items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all shrink-0"
               title="Cambiar de usuario"
               aria-label="Cambiar de usuario"
@@ -1611,8 +1684,11 @@ export default function App() {
         <IdentityModal
           knownCustomers={knownCustomers}
           savedCustomer={savedCustomer}
+          mode={identityMode}
+          confirmKind={identityConfirmKind}
           onConfirm={handleIdentifyCustomer}
-          onSwitchCustomer={handleSwitchCustomer}
+          onConfirmBiometric={handleIdentityConfirmBiometric}
+          onClose={() => setIsIdentityOpen(false)}
           isCurrentAdmin={isCurrentAdmin}
           onGoToAdmin={() => {
             setIsIdentityOpen(false);
@@ -1666,6 +1742,7 @@ export default function App() {
           setCustomerTab('store');
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
+        onCustomerLogout={openIdentityLogout}
         adminTab={adminTab}
         onAdminTab={handleAdminTabChange}
         pendingOrders={orders.filter((o) => o.status === 'pendiente').length}
@@ -1686,9 +1763,15 @@ export default function App() {
         <WelcomeOverlay
           name={welcome.name}
           tag={welcome.tag}
-          onDone={() => setWelcome(null)}
+          onDone={() => {
+            setWelcome(null);
+            if (welcome.isNew) setShowTour(true);
+          }}
         />
       )}
+
+      {/* Tour tutorial para usuarios nuevos */}
+      {showTour && <NewUserTour onClose={() => setShowTour(false)} />}
     </div>
   );
 }
@@ -1724,6 +1807,90 @@ function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
         <p className="text-xs sm:text-sm text-teal-100/70 animate-welcome-pop">
           Toca en cualquier parte para continuar
         </p>
+      </div>
+    </div>
+  );
+}
+
+// Tour tutorial para clientes nuevos: se muestra tras la bienvenida para que
+// descubran cómo pedir, seguir sus pedidos y revisar su saldo.
+function NewUserTour({ onClose }) {
+  const steps = [
+    {
+      icon: 'store',
+      title: 'Explorá el catálogo',
+      desc: 'Buscá productos por nombre o navegá por categorías y marcas para descubrir todo lo que tenemos para vos.'
+    },
+    {
+      icon: 'shoppingBag',
+      title: 'Agregá al carrito',
+      desc: 'Tocá cualquier producto para ver sus fotos y precio en $ y Bs. Presioná "Agregar al Carrito" cuando lo decidas.'
+    },
+    {
+      icon: 'list',
+      title: 'Seguí tus pedidos',
+      desc: 'En "Mis Pedidos" podés ver tu historial y rastrear en vivo la entrega a domicilio desde la barra inferior.'
+    },
+    {
+      icon: 'creditCard',
+      title: 'Pago a la entrega',
+      desc: 'Elegí retiro en tienda o delivery. Los beneficiados pueden pedir a crédito y revisar su saldo en "Mi Cuenta".'
+    }
+  ];
+  const [stepIdx, setStepIdx] = useState(0);
+
+  // Avanza automáticamente al siguiente paso; al terminar, cierra el tour.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (stepIdx < steps.length - 1) setStepIdx((i) => i + 1);
+      else onClose();
+    }, 7000);
+    return () => clearTimeout(t);
+  }, [stepIdx, steps.length, onClose]);
+
+  const s = steps[stepIdx];
+
+  return (
+    <div className="fixed inset-0 z-[75] flex flex-col justify-end bg-slate-950/70 backdrop-blur-sm animate-fade-in" role="dialog" aria-label="Tour de bienvenida">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative m-4 sm:m-6 bg-slate-900 border border-teal-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl animate-screen-up space-y-4">
+        <div className="flex items-start gap-3.5">
+          <span className="p-2.5 rounded-2xl bg-teal-500/20 text-teal-400 shrink-0">
+            <Icon name={s.icon} className="w-6 h-6" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-teal-400 mb-1">
+              Conocé la app · {stepIdx + 1}/{steps.length}
+            </p>
+            <h3 className="text-base font-black text-white">{s.title}</h3>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">{s.desc}</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between pt-1">
+          <button
+            onClick={onClose}
+            className="px-2 py-1 text-xs text-slate-500 hover:text-white transition-colors"
+          >
+            Omitir
+          </button>
+          <div className="flex gap-1.5">
+            {steps.map((_, i) => (
+              <span
+                key={i}
+                className={`h-1.5 rounded-full transition-all ${i === stepIdx ? 'w-6 bg-teal-400' : 'w-1.5 bg-slate-700'}`}
+              />
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              if (stepIdx < steps.length - 1) setStepIdx((i) => i + 1);
+              else onClose();
+            }}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all active:scale-95"
+          >
+            {stepIdx < steps.length - 1 ? 'Siguiente' : '¡Listo!'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2132,7 +2299,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             <Icon name="layers" className="w-7 h-7" />
           </span>
           <h2 className="text-xl font-black text-white">Acceso al Panel Admin</h2>
-          <p className="text-xs text-slate-400">Ingresá la contraseña para gestionar inventario y pedidos.</p>
+          <p className="text-xs text-slate-400">Iniciá sesión con tu contraseña o biometría para gestionar inventario y pedidos.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -2160,33 +2327,6 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             {bioError && <p className="text-xs text-rose-400 mt-2">{bioError}</p>}
           </div>
 
-          <button
-            type="button"
-            onClick={handleBiometricLogin}
-            disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
-            className="w-full py-3 rounded-2xl text-slate-200 hover:text-white hover:bg-slate-800/40 transition-all flex items-center justify-center gap-2.5 disabled:opacity-60"
-          >
-            {bioStatus === 'working' || bioStatus === 'register' ? (
-              <>
-                {IS_IOS ? <Icon name="apple" className="w-5 h-5" /> : <Icon name="fingerprint" className="w-5 h-5" />}
-                <span>{bioStatus === 'working' ? 'Esperando...' : 'Registrando...'}</span>
-              </>
-            ) : IS_IOS ? (
-              <>
-                <Icon name="apple" className="w-6 h-6" />
-                <Icon name="faceId" className="w-6 h-6" />
-              </>
-            ) : (
-              <Icon name="fingerprint" className="w-7 h-7" />
-            )}
-          </button>
-
-          <div className="flex items-center gap-3 py-1">
-            <span className="flex-1 h-px bg-slate-800" />
-            <span className="text-[10px] uppercase tracking-widest text-slate-500">o con contraseña</span>
-            <span className="flex-1 h-px bg-slate-800" />
-          </div>
-
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Contraseña</label>
             <input
@@ -2194,7 +2334,6 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              autoFocus
               className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
             />
           </div>
@@ -2205,7 +2344,33 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold text-sm hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
           >
             <Icon name="check" className="w-4 h-4" />
-            {isSubmitting ? 'Verificando...' : 'Ingresar con contraseña'}
+            {isSubmitting ? 'Verificando...' : 'Iniciar sesión'}
+          </button>
+
+          {/* Biometría: debajo de Iniciar sesión, sin separador */}
+          <button
+            type="button"
+            onClick={handleBiometricLogin}
+            disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
+            className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl bg-slate-800/70 border border-cyan-500/30 hover:border-cyan-400/60 hover:bg-slate-700/60 text-slate-200 transition-all disabled:opacity-60"
+          >
+            {bioStatus === 'working' || bioStatus === 'register' ? (
+              <>
+                {IS_IOS ? <Icon name="apple" className="w-5 h-5" /> : <Icon name="fingerprint" className="w-5 h-5" />}
+                <span>{bioStatus === 'working' ? 'Esperando...' : 'Registrando...'}</span>
+              </>
+            ) : IS_IOS ? (
+              <>
+                <Icon name="apple" className="w-5 h-5" />
+                <Icon name="faceId" className="w-5 h-5" />
+                <span className="font-semibold">Entrar con Face ID</span>
+              </>
+            ) : (
+              <>
+                <Icon name="fingerprint" className="w-6 h-6" />
+                <span className="font-semibold">Entrar con huella</span>
+              </>
+            )}
           </button>
         </form>
 
@@ -3259,18 +3424,22 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   );
 }
 
-function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCustomer, onGoToAdmin, isCurrentAdmin }) {
+function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, mode = 'login', confirmKind = 'switchback', onClose }) {
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [errors, setErrors] = useState({});
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [step, setStep] = useState('form'); // 'form' | 'webauthn'
   const [webAuthnStep, setWebAuthnStep] = useState(''); // '' | 'login' | 'register'
   const [webauthnError, setWebauthnError] = useState('');
   const [webauthnSupported, setWebauthnSupported] = useState(true);
+  const [registerMode, setRegisterMode] = useState(false);
+  const [remember, setRemember] = useState(false);
+  const [panel, setPanel] = useState(mode === 'confirm' ? 'confirm' : 'login'); // 'login' | 'confirm'
+  const [confirmKindState, setConfirmKindState] = useState(confirmKind);
 
+  // Soporte WebAuthn (huella / Face ID)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -3284,24 +3453,50 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     return () => { cancelled = true; };
   }, []);
 
-  const suggestions = useMemo(() => {
-    if (phoneNumber.length < 3) return [];
-    return knownCustomers
-      .filter((c) => (c.number || '').startsWith(phoneNumber))
-      .slice(0, 3);
-  }, [knownCustomers, phoneNumber]);
+  // "Recordarme": precarga los campos del último login recordado (no los vacía).
+  useEffect(() => {
+    const mem = loadLoginMemory();
+    if (mem) {
+      setCustomerName(mem.customerName || '');
+      setPhoneCode(mem.phoneCode || '0412');
+      setPhoneNumber(mem.phoneNumber || '');
+      setRemember(true);
+    }
+  }, []);
+
+  // Autocompleta el nombre cuando el teléfono ya está registrado (historial),
+  // sin interferir con el nombre que el usuario escriba manualmente.
+  const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
+  useEffect(() => {
+    if (phoneNumber.length < 7) return;
+    const match = (knownCustomers || []).find((c) => normalizePhoneDigits(c.phone) === phoneKey);
+    if (match && match.name && !customerName.trim()) {
+      setCustomerName(match.name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phoneCode, phoneNumber, knownCustomers]);
 
   const handlePhoneNumber = (value) => {
-    const digits = value.replace(/\D/g, '').slice(0, 7);
-    setPhoneNumber(digits);
-    setShowSuggestions(digits.length >= 3);
+    setPhoneNumber(value.replace(/\D/g, '').slice(0, 7));
   };
 
-  const applyCustomer = (customer) => {
-    setCustomerName(customer.name || customerName);
-    setPhoneCode(customer.code || phoneCode);
-    setPhoneNumber(customer.number || phoneNumber);
-    setShowSuggestions(false);
+  // Interruptor "Recordarme": al activarlo guarda los campos; al desactivarlo los limpia.
+  const toggleRemember = (on) => {
+    setRemember(on);
+    if (on) {
+      saveLoginMemory({ customerName: customerName.trim(), phoneCode, phoneNumber });
+    } else {
+      clearLoginMemory();
+    }
+  };
+
+  // Persiste (o limpia) los campos según el estado de "Recordarme" al iniciar sesión.
+  const persistRemember = () => {
+    if (remember) {
+      saveLoginMemory({ customerName: customerName.trim(), phoneCode, phoneNumber });
+    } else {
+      clearLoginMemory();
+    }
   };
 
   // Determina si el teléfono ya tiene biometría registrada
@@ -3312,56 +3507,52 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     throw new Error(res.data.error || 'No se pudo consultar tu registro biométrico');
   };
 
-  // Ejecuta el flujo de biometría (huella/Face ID) para el cliente. El número de
-  // teléfono debe estar completo; se asume que ya pasó la validación del form.
+  const registerBiometry = async (phoneKey, customerName) => {
+    setWebAuthnStep('register');
+    const res = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: customerName.trim() });
+    if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar el registro');
+    const regResponse = await startRegistration({ optionsJSON: res.data.options });
+    const verifyRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
+    if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'No se pudo guardar tu biometría');
+  };
+
+  // Login o registro con biometría. Si no hay credencial previa, la registra en
+  // el momento (primera vez en este dispositivo/dominio).
+  const authenticateWithBiometry = async ({ phoneKey, customerName }) => {
+    const hasBio = await hasRegisteredBiometry(phoneKey);
+    if (hasBio) {
+      setWebAuthnStep('login');
+      const res = await api.webauthnLoginOptions({ phone: phoneKey });
+      if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar la verificación');
+      try {
+        const authResponse = await startAuthentication({ optionsJSON: res.data.options });
+        const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
+        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
+      } catch (authErr) {
+        // rpID distinto (dominio anterior): re-registra en el dominio actual.
+        const isRpidMismatch = authErr?.name === 'NotAllowedError';
+        if (!isRpidMismatch) throw authErr;
+        await registerBiometry(phoneKey, customerName);
+      }
+    } else {
+      await registerBiometry(phoneKey, customerName);
+    }
+  };
+
+  // Flujo del formulario (login o registro nuevo).
   const runWebAuthn = async () => {
     if (!webauthnSupported) {
       setStep('form');
       setWebauthnError('Tu dispositivo no soporta biometría. Usá un celular actualizado con huella o Face ID.');
       return;
     }
-
     setWebauthnError('');
     setStep('webauthn');
     setIsWorking(true);
-
     try {
-      const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
-      const hasBio = await hasRegisteredBiometry(phoneKey);
-
-      if (hasBio) {
-        // Login: pedir huella / Face ID
-        setWebAuthnStep('login');
-        const res = await api.webauthnLoginOptions({ phone: phoneKey });
-        if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar la verificación');
-        try {
-          const authResponse = await startAuthentication({ optionsJSON: res.data.options });
-          const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
-          if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
-        } catch (authErr) {
-          // Si la credencial se registró bajo un rpID anterior (dominio distinto),
-          // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
-          // actual para que quede válida (el server permite el replace por rpID).
-          const isRpidMismatch = authErr?.name === 'NotAllowedError';
-          if (!isRpidMismatch) throw authErr;
-          setWebAuthnStep('register');
-          const rres = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: customerName.trim() });
-          if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
-          const regResponse = await startRegistration({ optionsJSON: rres.data.options });
-          const vRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
-          if (!vRes.ok) throw new Error(vRes.data.error || 'No se pudo guardar tu biometría');
-        }
-      } else {
-        // Registro: crear biometría
-        setWebAuthnStep('register');
-        const res = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: customerName.trim() });
-        if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar el registro');
-        const regResponse = await startRegistration({ optionsJSON: res.data.options });
-        const verifyRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
-        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'No se pudo guardar tu biometría');
-      }
-
+      await authenticateWithBiometry({ phoneKey, customerName });
       setIsWorking(false);
+      persistRemember();
       onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
     } catch (err) {
       setIsWorking(false);
@@ -3370,7 +3561,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     }
   };
 
-  // Botón de biometría accionable: exige el número de teléfono antes de continuar.
+  // Botón de biometría del formulario: exige el número antes de continuar.
   const handleBiometricAction = () => {
     if (!/^\d{7}$/.test(phoneNumber)) {
       setErrors((prev) => ({ ...prev, phone: 'Ingresa los 7 dígitos del número para verificar con biometría' }));
@@ -3386,8 +3577,36 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     if (!/^\d{7}$/.test(phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
-
     await runWebAuthn();
+  };
+
+  // Confirmación solo-biometría (volver al cliente actual / cerrar sesión):
+  // NO vuelve a pedir nombre ni teléfono, solo huella o Face ID.
+  const handleConfirmBiometric = async () => {
+    const phone = savedCustomer?.phoneNumber || phoneNumber;
+    const code = savedCustomer?.phoneCode || phoneCode;
+    const name = savedCustomer?.customerName || customerName.trim();
+    if (!/^\d{7}$/.test(phone)) {
+      setWebauthnError('No hay un usuario activo para confirmar.');
+      return;
+    }
+    if (!webauthnSupported) {
+      setWebauthnError('Tu dispositivo no soporta biometría. Usá un celular actualizado con huella o Face ID.');
+      return;
+    }
+    setWebauthnError('');
+    setStep('webauthn');
+    setIsWorking(true);
+    const confirmKey = `${code}${phone}`.replace(/\D/g, '').slice(-11);
+    try {
+      await authenticateWithBiometry({ phoneKey: confirmKey, customerName: name });
+      setIsWorking(false);
+      onConfirmBiometric(confirmKindState);
+    } catch (err) {
+      setIsWorking(false);
+      setWebauthnError(friendlyAuthError(err));
+      setStep('form');
+    }
   };
 
   const resetForm = () => {
@@ -3400,35 +3619,116 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
       <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] overflow-y-auto">
         {/* Header */}
-        <div className="p-5 sm:p-7 border-b border-slate-800 text-center">
+        <div className="relative p-5 sm:p-7 border-b border-slate-800 text-center">
+          {(savedCustomer?.customerName || panel === 'confirm') && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Cerrar"
+              className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+            >
+              <Icon name="x" className="w-5 h-5" />
+            </button>
+          )}
           <div className="mx-auto w-14 h-14 sm:w-16 sm:h-16 rounded-3xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 shadow-lg shadow-teal-500/25">
-            <Icon name="user" className="w-7 h-7 sm:w-8 sm:h-8" />
+            <Icon name={panel === 'confirm' && confirmKindState === 'logout' ? 'logOut' : 'user'} className="w-7 h-7 sm:w-8 sm:h-8" />
           </div>
           <h2 className="text-lg sm:text-xl font-black text-white mt-3">
-            {savedCustomer?.customerName ? 'Cambiar de usuario' : 'Bienvenido a Empresas Alvarados'}
+            {panel === 'confirm'
+              ? confirmKindState === 'logout'
+                ? 'Cerrar sesión'
+                : `Volver a ${savedCustomer?.customerName?.split(' ')[0] || 'tu cuenta'}`
+              : registerMode
+              ? 'Creá tu cuenta'
+              : savedCustomer?.customerName
+              ? 'Cambiar de usuario'
+              : 'Bienvenido a Empresas Alvarados'}
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Identifícate para pedir. Tu teléfono + biometría es tu tarjeta de cliente.
+            {panel === 'confirm'
+              ? 'Confirmá tu identidad con biometría para continuar.'
+              : registerMode
+              ? 'Registrate en segundos con tu teléfono y biometría. El nombre se autocompleta en tus próximos accesos.'
+              : 'Identifícate para pedir. Tu teléfono + biometría es tu tarjeta de cliente.'}
           </p>
         </div>
 
-        {step === 'form' ? (
-          <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-4">
-            {/* Nombre */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Tu Nombre *</label>
-              <input
-                type="text"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="Ej: Juan Pérez"
-                autoFocus
-                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
-              />
-              {errors.customerName && <p className="text-xs text-rose-400 mt-1">{errors.customerName}</p>}
-            </div>
+        {panel === 'confirm' ? (
+          step === 'form' ? (
+            <div className="p-5 sm:p-7 space-y-4">
+              <button
+                type="button"
+                onClick={handleConfirmBiometric}
+                disabled={isWorking}
+                className="w-full flex items-center gap-3 p-4 rounded-2xl bg-slate-800/70 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+                  {IS_IOS ? (
+                    <span className="flex items-center gap-1">
+                      <Icon name="apple" className="w-4 h-4" />
+                      <Icon name="faceId" className="w-4 h-4" />
+                    </span>
+                  ) : (
+                    <Icon name="fingerprint" className="w-5 h-5" />
+                  )}
+                </span>
+                <span className="flex-1 text-left">
+                  <span className="block text-[11px] font-bold text-teal-300">Confirmar con biometría</span>
+                  <span className="block text-[11px] text-slate-400 leading-snug">
+                    {IS_IOS ? 'Usa tu Face ID' : 'Usa tu huella'}
+                    {!webauthnSupported && <span className="text-rose-400"> · Tu dispositivo no lo soporta</span>}
+                  </span>
+                </span>
+                <Icon name="arrowRight" className="w-4 h-4 text-teal-400 shrink-0" />
+              </button>
 
-            {/* Teléfono */}
+              {webauthnError && (
+                <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5">{webauthnError}</p>
+              )}
+
+              {confirmKindState === 'logout' && (
+                <button
+                  type="button"
+                  onClick={() => onConfirmBiometric('logout')}
+                  className="w-full py-2 text-[11px] text-slate-500 hover:text-rose-300 transition-colors"
+                >
+                  Prefiero salir sin biometría
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="p-8 sm:p-10 flex flex-col items-center text-center space-y-4">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 shadow-xl shadow-teal-500/30 animate-pulse">
+                  <Icon name={webAuthnStep === 'login' ? 'user' : 'check'} className="w-10 h-10" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-4 border-slate-900 flex items-center justify-center">
+                  <Icon name="check" className="w-3 h-3 text-slate-950" />
+                </span>
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-bold text-white">
+                  {webAuthnStep === 'login' ? 'Confirmá tu identidad' : 'Registrá tu biometría'}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  {webAuthnStep === 'login'
+                    ? 'Usá tu huella o Face ID para confirmar que sos vos.'
+                    : 'Usá tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={resetForm}
+                disabled={isWorking}
+                className="text-xs text-slate-500 hover:text-teal-300 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          )
+        ) : step === 'form' ? (
+          <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-4">
+            {/* Teléfono primero (el nombre se autocompleta si ya está registrado) */}
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono / WhatsApp *</label>
               <div className="flex gap-2">
@@ -3446,42 +3746,47 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
                   inputMode="numeric"
                   value={phoneNumber}
                   onChange={(e) => handlePhoneNumber(e.target.value)}
-                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                   placeholder="1234567"
                   maxLength={7}
+                  autoFocus={!savedCustomer?.customerName}
                   className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
                 />
               </div>
-
-              {showSuggestions && suggestions.length > 0 && (
-                <div className="mt-2 space-y-1.5 animate-fade-in">
-                  <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-                    Clientes conocidos — toca para autocompletar
-                  </p>
-                  {suggestions.map((c) => (
-                    <button
-                      key={c.phone}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        applyCustomer(c);
-                      }}
-                      className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-slate-800 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all text-left"
-                    >
-                      <span className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 shrink-0">
-                        <Icon name="user" className="w-3.5 h-3.5" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-xs font-bold text-white truncate">{c.name}</span>
-                        <span className="block text-[10px] text-slate-400 truncate">{c.code} {c.number}</span>
-                      </span>
-                      <Icon name="arrowRight" className="w-3.5 h-3.5 text-teal-400 shrink-0 ml-auto" />
-                    </button>
-                  ))}
-                </div>
-              )}
               {errors.phone && <p className="text-xs text-rose-400 mt-1">{errors.phone}</p>}
             </div>
+
+            {/* Nombre */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Tu Nombre *</label>
+              <input
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+              />
+              {errors.customerName && <p className="text-xs text-rose-400 mt-1">{errors.customerName}</p>}
+            </div>
+
+            {/* Recordarme: conserva los campos para el próximo login */}
+            <button
+              type="button"
+              onClick={() => toggleRemember(!remember)}
+              className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-800/50 border border-slate-700/70 hover:border-teal-500/40 transition-all"
+            >
+              <span className="flex items-center gap-2.5">
+                <span className={`p-1.5 rounded-lg transition-all ${remember ? 'bg-teal-500/25 text-teal-400' : 'bg-slate-700/50 text-slate-500'}`}>
+                  <Icon name="check" className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-left">
+                  <span className="block text-xs font-semibold text-slate-200">Recordarme</span>
+                  <span className="block text-[10px] text-slate-500">Conservo estos datos para tu próxima visita</span>
+                </span>
+              </span>
+              <span className={`relative w-11 h-6 rounded-full transition-all shrink-0 ${remember ? 'bg-teal-500' : 'bg-slate-700'}`}>
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${remember ? 'left-5' : 'left-0.5'}`} />
+              </span>
+            </button>
 
             {/* Botón de biometría accionable (huella / Face ID) */}
             <button
@@ -3522,12 +3827,29 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Icon name="check" className="w-4 h-4" />
-                Entrar a Empresas Alvarados
+                {registerMode ? 'Crear mi cuenta' : 'Entrar a Empresas Alvarados'}
               </button>
+              {registerMode ? (
+                <button
+                  type="button"
+                  onClick={() => setRegisterMode(false)}
+                  className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
+                >
+                  ¿Ya tienes cuenta? Iniciar sesión
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setRegisterMode(true)}
+                  className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-teal-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
+                >
+                  ¿Primera vez? Regístrate
+                </button>
+              )}
               {savedCustomer?.customerName && (
                 <button
                   type="button"
-                  onClick={onSwitchCustomer}
+                  onClick={() => { setConfirmKindState('switchback'); setPanel('confirm'); }}
                   className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
                 >
                   Volver a {savedCustomer.customerName.split(' ')[0]}
@@ -3973,6 +4295,7 @@ function BottomTabBar({
   onOpenCart,
   onGoAdmin,
   onGoStore,
+  onCustomerLogout,
   adminTab,
   onAdminTab,
   pendingOrders,
@@ -4084,6 +4407,16 @@ function BottomTabBar({
         >
           <Icon name="layers" className="w-5 h-5" />
           <span className="text-[10px] font-bold leading-none">Panel</span>
+        </button>
+      )}
+      {activeView === 'customer' && hasCustomer && (
+        <button
+          onClick={onCustomerLogout}
+          className={`${base} text-rose-400 hover:text-rose-300 ${idleTab}`}
+          aria-label="Cerrar sesión"
+        >
+          <Icon name="logOut" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Salir</span>
         </button>
       )}
       {activeView === 'admin' && isAdminAuthed && (

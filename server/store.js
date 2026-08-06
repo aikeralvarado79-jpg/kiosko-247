@@ -287,9 +287,11 @@ export async function refreshMirror() {
   if (MIRROR_SOURCE_SCHEMA === MIRROR_TARGET_SCHEMA) {
     return { ok: false, error: 'El schema fuente y destino deben ser distintos' };
   }
-  // Seguridad: nunca permitir reemplazar el schema donde vive la app (producción).
-  if (MIRROR_TARGET_SCHEMA === DB_SCHEMA || MIRROR_TARGET_SCHEMA === 'public') {
-    return { ok: false, error: 'El schema destino del espejo no puede ser public ni el de la app' };
+  // Seguridad: nunca permitir reemplazar el schema de producción (public). El
+  // destino legítimo es el schema aislado de calidad (por ejemplo "staging"), que
+  // es donde la app de staging lee sus datos, así que NO se compara contra DB_SCHEMA.
+  if (MIRROR_TARGET_SCHEMA === 'public') {
+    return { ok: false, error: 'El schema destino del espejo no puede ser public (producción)' };
   }
   const client = await pgPool.connect();
   const tables = {};

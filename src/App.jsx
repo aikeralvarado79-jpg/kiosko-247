@@ -41,7 +41,14 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
      key: <path d="M12 2a9.92 9.92 0 0 0-7 2.82L2.82 7.01a1 1 0 0 0 0 1.42l2.59 2.59a1 1 0 0 0 1.42 0L12 5.34l6.17 6.17a1 1 0 0 0 1.42 0l2.59-2.59a1 1 0 0 0 0-1.42L13 4.83c-.35-.35-.5-.83-.5-1.31A5.5 5.5 0 0 0 12 2z" />,
      fingerprint: <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88M17.29 21.02c.12-.6.43-2.3.5-3.02M2 12a10 10 0 0 1 18-6M2 16h.01M21.8 16c.2-2 .131-5.354 0-6M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2M8.65 22c.21-.66.45-1.32.57-2M9 6.8a6 6 0 0 1 9 5.2v2" />,
-   };
+     heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z" />,
+     heartFilled: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z" fill="currentColor" stroke="none" />,
+     home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h5v-6h4v6h5V9.5" />,
+     list: <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
+     settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+     zap: <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />,
+     bag: <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0" />,
+    };
 
   return (
     <svg
@@ -238,6 +245,25 @@ const playChime = (() => {
   };
 })();
 
+// Vibración sutil en dispositivos móviles (no soportada en iOS Safari: no-op).
+const haptic = (ms = 12) => {
+  try {
+    if (navigator.vibrate) navigator.vibrate(ms);
+  } catch {}
+};
+
+// Persistencia de favoritos del cliente (ids de productos, localStorage)
+const FAVORITES_KEY = 'kiosko_favorites';
+const loadFavorites = () => {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'en_camino', 'entregado'];
 
 const STATUS_LABELS = {
@@ -408,6 +434,48 @@ export default function App() {
     }
   });
   const [isCartOpen, setIsCartOpen] = useState(false);
+
+  // Pestaña activa del cliente en la barra inferior (móvil)
+  const [customerTab, setCustomerTab] = useState('store'); // 'store' | 'orders' | 'account'
+  const [focusCustomerSection, setFocusCustomerSection] = useState(null); // pedido de scroll/expansión
+
+  // Favoritos: ids de productos marcados con corazón (persistidos localmente)
+  const [favorites, setFavorites] = useState(loadFavorites);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+    } catch {}
+  }, [favorites]);
+
+  const toggleFavorite = (id) => {
+    setFavorites((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
+    haptic(8);
+  };
+
+  // Vuelo del ítem agregado al carrito: imagen clonada animada hacia la barra
+  const [flyItem, setFlyItem] = useState(null);
+  const flyTimerRef = useRef(null);
+
+  const flyToCart = (product, sourceRect) => {
+    const target = document.querySelector('[data-cart-target]');
+    const toRect = target ? target.getBoundingClientRect() : null;
+    if (!sourceRect || !toRect) return;
+    const fromX = sourceRect.left + sourceRect.width / 2;
+    const fromY = sourceRect.top + sourceRect.height / 2;
+    const toX = toRect.left + toRect.width / 2;
+    const toY = toRect.top + toRect.height / 2;
+    setFlyItem({
+      id: `${product.id}-${Date.now()}`,
+      image: product.image,
+      fx: fromX,
+      fy: fromY,
+      tx: toX,
+      ty: toY
+    });
+    if (flyTimerRef.current) clearTimeout(flyTimerRef.current);
+    flyTimerRef.current = setTimeout(() => setFlyItem(null), 750);
+  };
 
   // Cliente reconocido (pre-llenado automático del checkout)
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
@@ -646,7 +714,17 @@ export default function App() {
     setIsAdminAuthed(false);
     setActiveView('customer');
     setAdminTab('inventory');
+    setCustomerTab('store');
     addToast('Sesión cerrada', 'info');
+  };
+
+  // Cambio de tab del admin desde la barra inferior: carga clientes/cobros
+  // cuando hace falta (mismo comportamiento que las pestañas del panel).
+  const handleAdminTabChange = (key) => {
+    setActiveView('admin');
+    if (key === 'benefited' || key === 'blacklist') loadCustomers();
+    if (key === 'blacklist') loadCollections();
+    setAdminTab(key);
   };
 
   const handleToggleBenefited = async (phone, benefited) => {
@@ -682,7 +760,7 @@ export default function App() {
     return true;
   };
 
-  const addToCart = (product, quantityToAdd = 1) => {
+  const addToCart = (product, quantityToAdd = 1, sourceRect = null) => {
     if (product.stock <= 0) {
       addToast('Este producto no tiene stock disponible', 'error');
       return;
@@ -705,6 +783,8 @@ export default function App() {
       setCart([...cart, { product, quantity: quantityToAdd }]);
     }
 
+    haptic(12);
+    if (sourceRect) flyToCart(product, sourceRect);
     addToast(`Agregado: ${product.name} (x${quantityToAdd})`);
   };
 
@@ -743,7 +823,9 @@ export default function App() {
 
   const filteredProducts = useMemo(() => {
     let list = products.filter((p) => {
-      const matchesCategory = selectedCategory === 'Todas' || p.category === selectedCategory;
+      const matchesCategory =
+        selectedCategory === 'Todas' ||
+        (selectedCategory === 'Favoritos' ? favorites.includes(p.id) : p.category === selectedCategory);
       const matchesSearch =
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -768,7 +850,7 @@ export default function App() {
     }
 
     return list;
-  }, [products, selectedCategory, searchQuery, sortOption, orders]);
+  }, [products, selectedCategory, searchQuery, sortOption, orders, favorites]);
 
   const handlePlaceOrder = async (formData) => {
     if (cart.length === 0) return;
@@ -818,6 +900,8 @@ export default function App() {
     setIsCheckoutOpen(false);
     setIsCartOpen(false);
     setCurrentOrderTracking(order.id);
+    haptic([20, 40, 20]);
+    playChime();
     addToast('¡Pedido realizado con éxito!', 'success');
   };
 
@@ -1079,7 +1163,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 ring-2 ring-white/10 shrink-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 ring-2 ring-white/10 shrink-0 animate-glow-pulse">
               <Icon name="store" className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div className="min-w-0">
@@ -1156,13 +1240,17 @@ export default function App() {
           {/* Customer Cart Quick Button */}
           {activeView === 'customer' && (
             <button
+              data-cart-target
               onClick={() => setIsCartOpen(true)}
               className="relative p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 group shrink-0"
               aria-label="Abrir carrito"
             >
               <Icon name="shoppingBag" className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110" />
               {cartCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-teal-400 text-slate-950 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg animate-scale-up ring-2 ring-slate-900">
+                <span
+                  key={cartCount}
+                  className="absolute -top-1.5 -right-1.5 bg-teal-400 text-slate-950 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg animate-badge-pop ring-2 ring-slate-900"
+                >
                   {cartCount}
                 </span>
               )}
@@ -1175,7 +1263,7 @@ export default function App() {
       <RateBanner rate={rate} />
 
       {/* Main Container */}
-      <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-28 sm:pb-8' : ''}`}>
+      <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
         {isLoading ? (
           <LoadingScreen />
         ) : loadError ? (
@@ -1208,6 +1296,9 @@ export default function App() {
             onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
             onTrackLiveOrder={(order) => setLiveTrackingOrder(order)}
             storeLocation={storeLocation}
+            favorites={favorites}
+            onToggleFavorite={toggleFavorite}
+            focusSection={focusCustomerSection}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -1276,9 +1367,11 @@ export default function App() {
         <ProductDetailModal
           product={productDetailModal}
           rate={rate}
+          isFavorite={favorites.includes(productDetailModal.id)}
+          onToggleFavorite={() => toggleFavorite(productDetailModal.id)}
           onClose={() => setProductDetailModal(null)}
-          onAddToCart={(qty) => {
-            addToCart(productDetailModal, qty);
+          onAddToCart={(qty, rect) => {
+            addToCart(productDetailModal, qty, rect);
             setProductDetailModal(null);
           }}
         />
@@ -1392,8 +1485,61 @@ export default function App() {
         />
       )}
 
+      {/* Item volando al carrito (overlay animado) */}
+      {flyItem && (
+        <img
+          key={flyItem.id}
+          src={flyItem.image}
+          alt=""
+          className="fly-to-cart-img"
+          style={{
+            '--fx': `${flyItem.fx}px`,
+            '--fy': `${flyItem.fy}px`,
+            '--tx': `${flyItem.tx}px`,
+            '--ty': `${flyItem.ty}px`
+          }}
+          onAnimationEnd={() => setFlyItem(null)}
+        />
+      )}
+
+      {/* Barra de navegación inferior (móvil) */}
+      <BottomTabBar
+        activeView={activeView}
+        customerTab={customerTab}
+        onCustomerTab={(tab) => {
+          setActiveView('customer');
+          setCustomerTab(tab);
+          setFocusCustomerSection(tab);
+        }}
+        cartCount={cartCount}
+        hasCustomer={Boolean(savedCustomer)}
+        isAdmin={isCurrentAdmin || isAdminAuthed}
+        onOpenCart={() => {
+          setActiveView('customer');
+          setIsCartOpen(true);
+        }}
+        onGoAdmin={() => {
+          setIsIdentityOpen(false);
+          setActiveView('admin');
+          setAdminTab('inventory');
+        }}
+        onGoStore={() => {
+          setActiveView('customer');
+          setCustomerTab('store');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        adminTab={adminTab}
+        onAdminTab={handleAdminTabChange}
+        pendingOrders={orders.filter((o) => o.status === 'pendiente').length}
+        onLogout={handleAdminLogout}
+        isAdminAuthed={isAdminAuthed}
+      />
+
       {/* Footer */}
-      <footer className="mt-auto border-t border-slate-800/80 bg-slate-950/60 py-5 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500">
+      <footer
+        style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
+        className="mt-auto border-t border-slate-800/80 bg-slate-950/60 pt-5 pb-20 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500"
+      >
         <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
       </footer>
 
@@ -1447,13 +1593,40 @@ function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
 
 function LoadingScreen() {
   return (
-    <div className="py-24 flex flex-col items-center justify-center text-center space-y-4">
-      <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 animate-pulse">
-        <Icon name="store" className="w-7 h-7" />
+    <div className="space-y-6 sm:space-y-8 animate-fade-in" aria-busy="true" aria-label="Cargando la tienda">
+      {/* Hero skeleton */}
+      <div className="rounded-2xl sm:rounded-3xl p-4 sm:p-8 bg-slate-800/40 border border-slate-700/40">
+        <div className="skeleton-block w-32 h-5 mb-3" />
+        <div className="skeleton-block w-56 h-8 mb-2" />
+        <div className="skeleton-block w-40 h-4" />
       </div>
-      <div>
-        <h2 className="text-lg font-bold text-white">Cargando Empresas Alvarados...</h2>
-        <p className="text-xs text-slate-400 mt-1">Sincronizando productos y pedidos desde el servidor.</p>
+
+      {/* Buscador + pills skeleton */}
+      <div className="space-y-3">
+        <div className="skeleton-block h-12 rounded-2xl w-full" />
+        <div className="flex gap-2 overflow-hidden">
+          <div className="skeleton-block h-9 w-20 shrink-0" />
+          <div className="skeleton-block h-9 w-24 shrink-0" />
+          <div className="skeleton-block h-9 w-28 shrink-0" />
+          <div className="skeleton-block h-9 w-20 shrink-0" />
+        </div>
+      </div>
+
+      {/* Grid de tarjetas skeleton */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="rounded-2xl sm:rounded-3xl bg-slate-800/40 border border-slate-700/40 overflow-hidden">
+            <div className="skeleton-block aspect-square w-full rounded-none" />
+            <div className="p-3 sm:p-4 space-y-2">
+              <div className="skeleton-block h-4 w-3/4" />
+              <div className="skeleton-block h-3 w-1/2" />
+              <div className="flex justify-between items-center pt-2">
+                <div className="skeleton-block h-5 w-14" />
+                <div className="skeleton-block h-9 w-9 rounded-xl" />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1922,7 +2095,10 @@ function CustomerView({
   onViewOrderDetail,
   onRequestCancelOrder,
   onTrackLiveOrder,
-  storeLocation
+  storeLocation,
+  favorites,
+  onToggleFavorite,
+  focusSection
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
@@ -1930,7 +2106,17 @@ function CustomerView({
   const [orderDateFilter, setOrderDateFilter] = useState({ preset: 'all', date: null });
   const [showCalendar, setShowCalendar] = useState(false);
   const [showDebtDetail, setShowDebtDetail] = useState(false);
+  const [promoIdx, setPromoIdx] = useState(0);
   const PAGE_SIZE = 5;
+
+  // Carrusel de promos con autoplay (solo cuando hay más de una activa)
+  const activePromos = promos.filter((p) => p.active);
+  useEffect(() => {
+    if (activePromos.length <= 1) return undefined;
+    const id = setInterval(() => setPromoIdx((i) => (i + 1) % activePromos.length), 5000);
+    return () => clearInterval(id);
+  }, [activePromos.length]);
+  const safePromoIdx = activePromos.length > 0 ? promoIdx % activePromos.length : 0;
 
   const suggestions = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -1967,10 +2153,24 @@ function CustomerView({
   const pagedOrders = filteredOrders.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   useEffect(() => { setMyOrdersPage(1); }, [orderDateFilter]);
+
+  // La barra inferior (móvil) pide expandir y scrollear a Mis Pedidos o Mi Cuenta
+  useEffect(() => {
+    if (!focusSection) return;
+    const timer = setTimeout(() => {
+      const id = focusSection === 'orders' ? 'pedidos-seccion' : 'cuenta-seccion';
+      if (focusSection === 'orders') setShowMyOrders(true);
+      if (focusSection === 'account') setShowDebtDetail(true);
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [focusSection]);
+
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
       {/* Compact Hero Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 border border-slate-700/60 p-4 sm:p-8 shadow-2xl backdrop-blur-md">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 animate-gradient-x border border-slate-700/60 p-4 sm:p-8 shadow-2xl backdrop-blur-md">
         <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-5">
           <div className="space-y-2 sm:space-y-3 max-w-xl">
             <span className="px-2.5 sm:px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
@@ -2004,34 +2204,44 @@ function CustomerView({
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
       </div>
 
-      {/* Promos Banner */}
-      {promos.filter((p) => p.active).length > 0 && (
-        <div className="space-y-2.5 sm:space-y-3">
-          {promos
-            .filter((p) => p.active)
-            .map((promo) => (
-              <div
-                key={promo.id}
-                className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-rose-500/10 border border-amber-500/30"
-              >
-                {promo.image && (
-                  <img
-                    src={promo.image}
-                    alt={promo.title}
-                    className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl object-cover border border-amber-500/30 shrink-0"
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                    <Icon name="sparkles" className="w-3 h-3" /> Promo
-                  </span>
-                  <h4 className="font-bold text-white text-sm truncate">{promo.title}</h4>
-                  {promo.subtitle && (
-                    <p className="text-xs text-slate-300 line-clamp-1 sm:line-clamp-2">{promo.subtitle}</p>
-                  )}
-                </div>
-              </div>
-            ))}
+      {/* Promos Carousel */}
+      {activePromos.length > 0 && (
+        <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl">
+          <div
+            key={activePromos[safePromoIdx].id}
+            className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-rose-500/10 border border-amber-500/30 animate-fade-in"
+          >
+            {activePromos[safePromoIdx].image && (
+              <img
+                src={activePromos[safePromoIdx].image}
+                alt={activePromos[safePromoIdx].title}
+                className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl object-cover border border-amber-500/30 shrink-0"
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                <Icon name="sparkles" className="w-3 h-3" /> Promo {activePromos.length > 1 ? `${safePromoIdx + 1}/${activePromos.length}` : ''}
+              </span>
+              <h4 className="font-bold text-white text-sm truncate">{activePromos[safePromoIdx].title}</h4>
+              {activePromos[safePromoIdx].subtitle && (
+                <p className="text-xs text-slate-300 line-clamp-1 sm:line-clamp-2">{activePromos[safePromoIdx].subtitle}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Dots del carrusel */}
+          {activePromos.length > 1 && (
+            <div className="absolute bottom-1.5 right-2 flex items-center gap-1">
+              {activePromos.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setPromoIdx(i)}
+                  aria-label={`Ver promo ${i + 1}`}
+                  className={`w-1.5 h-1.5 rounded-full transition-all ${i === safePromoIdx ? 'bg-amber-400 w-3' : 'bg-amber-400/30'}`}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -2061,7 +2271,7 @@ function CustomerView({
 
       {/* Mi Cuenta: saldo pendiente del cliente reconocido */}
       {savedCustomer?.customerName && customerProfile && (
-        <div className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
+        <div id="cuenta-seccion" className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
           <div className="p-3 sm:p-4 flex items-center gap-3">
             <span className="p-2 sm:p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 shrink-0">
               <Icon name="creditCard" className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -2096,7 +2306,7 @@ function CustomerView({
 
       {/* Mis Pedidos: historial del cliente reconocido */}
       {savedCustomer?.customerName && customerOrders.length > 0 && (
-        <div className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
+        <div id="pedidos-seccion" className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
           <button
             onClick={() => setShowMyOrders((v) => !v)}
             className="w-full p-3 sm:p-4 flex items-center gap-3 hover:bg-slate-800/80 transition-colors text-left"
@@ -2374,7 +2584,7 @@ function CustomerView({
         <div className="space-y-2.5">
           {/* Category Pills */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {['Todas', ...categories].map((cat) => (
+            {['Todas', 'Favoritos', ...categories].map((cat) => (
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
@@ -2384,7 +2594,7 @@ function CustomerView({
                     : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
                 }`}
               >
-                {cat}
+                {cat === 'Favoritos' ? `❤ Favoritos (${favorites.length})` : cat}
               </button>
             ))}
           </div>
@@ -2419,7 +2629,9 @@ function CustomerView({
               key={product.id}
               product={product}
               rate={rate}
-              onAddToCart={() => onAddToCart(product, 1)}
+              isFavorite={favorites.includes(product.id)}
+              onToggleFavorite={() => onToggleFavorite(product.id)}
+              onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
               onOpenDetail={() => onOpenProductModal(product)}
             />
           ))}
@@ -2439,9 +2651,16 @@ function CustomerView({
   );
 }
 
-function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
+function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite }) {
   const isOut = product.stock <= 0;
   const isLow = product.stock > 0 && product.stock <= 5;
+  const [justAdded, setJustAdded] = useState(false);
+
+  const handleAdd = (e) => {
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 1200);
+    onAddToCart(e);
+  };
 
   return (
     <div className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl overflow-hidden hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm">
@@ -2462,6 +2681,21 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
             {product.category}
           </span>
         </div>
+
+        {/* Favorito */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          className="absolute top-2 right-2 sm:top-3 sm:right-3 p-1.5 sm:p-2 rounded-xl bg-slate-950/70 backdrop-blur-md border border-white/10 transition-all active:scale-75 hover:scale-110"
+          aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+        >
+          <Icon
+            name={isFavorite ? 'heartFilled' : 'heart'}
+            className={`w-4 h-4 sm:w-5 sm:h-5 transition-all ${isFavorite ? 'text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.7)]' : 'text-slate-300'}`}
+          />
+        </button>
 
         {/* Stock Badge Overlay */}
         {isOut ? (
@@ -2509,17 +2743,23 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
           </div>
 
           <button
-            onClick={onAddToCart}
+            onClick={handleAdd}
             disabled={isOut}
-            className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl font-semibold text-xs flex items-center gap-1.5 transition-all duration-300 active:scale-95 ${
-              isOut
+            className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl font-semibold text-xs flex items-center gap-1.5 transition-all duration-300 active:scale-90 ${
+              justAdded
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : isOut
                 ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
                 : 'bg-teal-500 text-slate-950 hover:bg-teal-400 shadow-md shadow-teal-500/20'
             }`}
             aria-label="Agregar al carrito"
           >
-            <Icon name="plus" className="w-4 h-4" />
-            <span className="hidden sm:inline">Agregar</span>
+            {justAdded ? (
+              <Icon name="check" className="w-4 h-4 animate-added-pop" />
+            ) : (
+              <Icon name="plus" className="w-4 h-4" />
+            )}
+            <span className="hidden sm:inline">{justAdded ? '¡Listo!' : 'Agregar'}</span>
           </button>
         </div>
       </div>
@@ -2527,7 +2767,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
   );
 }
 
-function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
+function ProductDetailModal({ product, rate, onClose, onAddToCart, isFavorite, onToggleFavorite }) {
   const [quantity, setQuantity] = useState(1);
   const isOut = product.stock <= 0;
   const unitBs = usdToBs(product.price, rate?.rate);
@@ -2547,7 +2787,10 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
       {/* Backdrop Click */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+        {/* Handle visual para indicar arrastre en móvil */}
+        <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
+
         {/* Close Button */}
         <button
           onClick={onClose}
@@ -2556,14 +2799,26 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
           <Icon name="x" className="w-5 h-5" />
         </button>
 
+        {/* Botón favorito */}
+        <button
+          onClick={onToggleFavorite}
+          className="absolute top-4 left-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all active:scale-75"
+          aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+        >
+          <Icon
+            name={isFavorite ? 'heartFilled' : 'heart'}
+            className={`w-5 h-5 ${isFavorite ? 'text-rose-400' : ''}`}
+          />
+        </button>
+
         <div className="relative h-52 sm:h-64 bg-slate-950 shrink-0">
           <img
             src={product.image}
             alt={product.name}
             className="w-full h-full object-cover"
           />
-          <div className="absolute top-4 left-4">
-            <span className="px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-semibold text-teal-300 border border-teal-500/30">
+          <div className="absolute top-4 left-4 sm:left-4">
+            <span className="hidden sm:inline px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-semibold text-teal-300 border border-teal-500/30">
               {product.category}
             </span>
           </div>
@@ -2621,7 +2876,7 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
           </div>
 
           <button
-            onClick={() => onAddToCart(quantity)}
+            onClick={(e) => onAddToCart(quantity, e.currentTarget.getBoundingClientRect())}
             disabled={isOut}
             className={`w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
               isOut
@@ -2766,7 +3021,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] overflow-y-auto">
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="p-5 sm:p-7 border-b border-slate-800 text-center">
           <div className="mx-auto w-14 h-14 sm:w-16 sm:h-16 rounded-3xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 shadow-lg shadow-teal-500/25">
@@ -2943,7 +3198,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92vh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-scale-up">
+      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
         {/* Drawer Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
@@ -3078,14 +3333,15 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
 function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
   return (
     <button
+      data-cart-target
       onClick={onOpen}
       style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
-      className="fixed bottom-0 left-0 right-0 sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg z-40 px-4 sm:px-5 pt-3.5 sm:pt-4 bg-slate-950/90 sm:rounded-3xl border-t sm:border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-scale-up hover:border-teal-400/60 transition-all group"
+      className="fixed bottom-[4.6rem] sm:bottom-4 left-0 right-0 sm:left-1/2 sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg z-40 px-4 sm:px-5 pt-3.5 sm:pt-4 bg-slate-950/90 sm:rounded-3xl border-t sm:border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-screen-up hover:border-teal-400/60 transition-all group"
     >
       <div className="flex items-center gap-2.5 sm:gap-3">
         <span className="relative p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-teal-500/15 text-teal-400">
           <Icon name="shoppingBag" className="w-5 h-5" />
-          <span className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">
+          <span key={cartCount} className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-badge-pop">
             {cartCount}
           </span>
         </span>
@@ -3108,6 +3364,143 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
         <Icon name="arrowRight" className="w-4 h-4" />
       </span>
     </button>
+  );
+}
+
+// Barra de navegación inferior fija (solo móvil). Ofrece acceso a una mano a
+// Tienda, Carrito, Mis Pedidos, Mi Cuenta y al Panel. En vista admin muestra
+// los accesos principales del panel.
+function BottomTabBar({
+  activeView,
+  customerTab,
+  onCustomerTab,
+  cartCount,
+  hasCustomer,
+  isAdmin,
+  onOpenCart,
+  onGoAdmin,
+  onGoStore,
+  adminTab,
+  onAdminTab,
+  pendingOrders,
+  onLogout,
+  isAdminAuthed
+}) {
+  const base =
+    'flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 flex-1 min-w-0 rounded-2xl transition-all duration-300 active:scale-95';
+  const activeTab =
+    'bg-teal-500/20 text-teal-300 border border-teal-500/30 shadow-lg shadow-teal-500/10';
+  const idleTab = 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 border border-transparent';
+
+  const customerTabs = [
+    {
+      key: 'store',
+      label: 'Tienda',
+      icon: 'home',
+      onClick: onGoStore,
+      badge: null
+    },
+    {
+      key: 'cart',
+      label: 'Carrito',
+      icon: 'bag',
+      onClick: onOpenCart,
+      badge: cartCount > 0 ? cartCount : null
+    },
+    {
+      key: 'orders',
+      label: 'Mis Pedidos',
+      icon: 'list',
+      onClick: () => {
+        if (!hasCustomer) {
+          onOpenCart(); // el checkout/identidad obliga a identificarse
+          return;
+        }
+        onCustomerTab('orders');
+      },
+      badge: null
+    },
+    {
+      key: 'account',
+      label: 'Mi Cuenta',
+      icon: 'user',
+      onClick: () => {
+        if (!hasCustomer) {
+          onOpenCart();
+          return;
+        }
+        onCustomerTab('account');
+      },
+      badge: null
+    }
+  ];
+
+  const adminTabs = [
+    { key: 'inventory', label: 'Inventario', icon: 'package', onClick: () => onAdminTab('inventory'), badge: null },
+    { key: 'orders', label: 'Pedidos', icon: 'clock', onClick: () => onAdminTab('orders'), badge: pendingOrders > 0 ? pendingOrders : null },
+    { key: 'benefited', label: 'Beneficiados', icon: 'users', onClick: () => onAdminTab('benefited'), badge: null },
+    { key: 'blacklist', label: 'Lista Negra', icon: 'alertTriangle', onClick: () => onAdminTab('blacklist'), badge: null },
+    { key: 'analytics', label: 'Estadísticas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null }
+  ];
+
+  const tabs = activeView === 'admin' && isAdminAuthed ? adminTabs : customerTabs;
+
+  // En vista cliente: si el tab actual es orders/account y el usuario tocó esa
+  // sección, se marca activo. Carrito siempre "activo" mientras tenga items.
+  const isTabActive = (t) => {
+    if (activeView === 'admin' && isAdminAuthed) return adminTab === t.key;
+    if (t.key === 'cart') return cartCount > 0;
+    return customerTab === t.key;
+  };
+
+  return (
+    <nav
+      style={{ paddingBottom: 'max(0.4rem, env(safe-area-inset-bottom))' }}
+      className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 flex items-stretch gap-1 px-2 pt-2 pb-1 animate-screen-up"
+      aria-label="Navegación principal"
+    >
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={t.onClick}
+          className={`${base} ${isTabActive(t) ? activeTab : idleTab}`}
+          aria-label={t.label}
+        >
+          <span className="relative">
+            <Icon name={t.icon} className="w-5 h-5" />
+            {t.badge != null && (
+              <span
+                key={`${t.key}-${t.badge}`}
+                className="absolute -top-1.5 -right-2 bg-rose-500 text-white text-[9px] font-black min-w-4 h-4 px-1 rounded-full flex items-center justify-center animate-badge-pop"
+              >
+                {t.badge}
+              </span>
+            )}
+          </span>
+          <span className="text-[10px] font-bold leading-none truncate">{t.label}</span>
+        </button>
+      ))}
+      {activeView === 'customer' && isAdmin && (
+        <button
+          onClick={onGoAdmin}
+          className={`${base} text-cyan-400 hover:text-cyan-300 ${idleTab}`}
+          aria-label="Ir al panel de administración"
+        >
+          <Icon name="layers" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Panel</span>
+        </button>
+      )}
+      {activeView === 'admin' && isAdminAuthed && (
+        <button
+          onClick={onLogout}
+          className={`${base} text-rose-400 hover:text-rose-300 ${idleTab}`}
+          aria-label="Cerrar sesión"
+        >
+          <Icon name="x" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Salir</span>
+        </button>
+      )}
+    </nav>
   );
 }
 
@@ -3732,7 +4125,10 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+        {/* Handle visual para indicar arrastre en móvil */}
+        <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
+
         {/* Header */}
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
@@ -4821,7 +5217,7 @@ function AdminView({
           {/* Promo Editor Modal */}
           {isPromoModalOpen && promoDraft && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm">
-              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl animate-scale-up space-y-4 max-h-[92vh] overflow-y-auto">
+              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl animate-screen-up space-y-4 max-h-[92vh] overflow-y-auto">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-white text-lg">{promoDraft.id.startsWith('promo-') ? 'Nueva Promo' : 'Editar Promo'}</h4>
                   <button onClick={() => setIsPromoModalOpen(false)} className="text-slate-400 hover:text-white">
@@ -5395,7 +5791,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -5599,7 +5995,7 @@ function DebtDetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -5730,7 +6126,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -6201,7 +6597,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <h2 className="text-lg sm:text-xl font-bold text-white">
             {productToEdit ? 'Editar Producto' : 'Crear Nuevo Producto'}

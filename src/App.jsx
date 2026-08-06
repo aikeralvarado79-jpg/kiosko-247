@@ -597,6 +597,7 @@ export default function App() {
   // Modals state
   const [productDetailModal, setProductDetailModal] = useState(null); // Product object
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [currentOrderTracking, setCurrentOrderTracking] = useState(null); // Order id for customer view
   const [liveTrackingOrder, setLiveTrackingOrder] = useState(null); // Order for re-open live tracking from Mis Pedidos
 
@@ -871,7 +872,8 @@ export default function App() {
   }, [products, selectedCategory, searchQuery, sortOption, orders, favorites]);
 
   const handlePlaceOrder = async (formData) => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || isPlacingOrder) return;
+    setIsPlacingOrder(true);
 
     const orderPayload = {
       customerName: formData.customerName,
@@ -893,34 +895,45 @@ export default function App() {
       estimatedMinutes: formData.type === 'delivery' ? 25 : 10
     };
 
-    const res = await api.createOrder(orderPayload);
-    if (!res.ok) {
-      addToast(res.data.error || 'No se pudo realizar el pedido', 'error');
-      return;
+    try {
+      const res = await api.createOrder(orderPayload);
+      if (!res.ok) {
+        addToast(res.data.error || 'No se pudo realizar el pedido', 'error');
+        return;
+      }
+
+      // El servidor confirmó el pedido: cerrar el modal y el carrito de inmediato,
+      // antes de cualquier otra operación, para que nunca quede atascado.
+      setCart([]);
+      setIsCheckoutOpen(false);
+      setIsCartOpen(false);
+      setCurrentOrderTracking(res.data.order?.id);
+
+      // Guardar cliente reconocido para pre-llenado automático en el próximo pedido
+      const parsedPhone = parsePhone(orderPayload.phone);
+      const customerRecord = {
+        customerName: orderPayload.customerName,
+        phoneCode: parsedPhone.code || formData.phoneCode,
+        phoneNumber: parsedPhone.number || formData.phoneNumber,
+        address: orderPayload.address || '',
+        type: orderPayload.type
+      };
+      saveCustomerData(customerRecord);
+      setSavedCustomer(customerRecord);
+
+      if (res.data.state) {
+        setProducts(res.data.state.products || []);
+        setOrders(res.data.state.orders || []);
+      }
+      haptic([20, 40, 20]);
+      playChime();
+      addToast('¡Pedido realizado con éxito!', 'success');
+    } catch (err) {
+      console.error('[kiosko] Error al crear pedido:', err);
+      addToast('No se pudo enviar el pedido. Revisá tu conexión e intentá de nuevo.', 'error');
+    } finally {
+      setIsPlacingOrder(false);
     }
-
-    // Guardar cliente reconocido para pre-llenado automático en el próximo pedido
-    const parsedPhone = parsePhone(orderPayload.phone);
-    const customerRecord = {
-      customerName: orderPayload.customerName,
-      phoneCode: parsedPhone.code || formData.phoneCode,
-      phoneNumber: parsedPhone.number || formData.phoneNumber,
-      address: orderPayload.address || '',
-      type: orderPayload.type
-    };
-    saveCustomerData(customerRecord);
-    setSavedCustomer(customerRecord);
-
-    const { state, order } = res.data;
-    setProducts(state.products || []);
-    setOrders(state.orders || []);
-    setCart([]);
-    setIsCheckoutOpen(false);
-    setIsCartOpen(false);
-    setCurrentOrderTracking(order.id);
-    haptic([20, 40, 20]);
-    playChime();
-    addToast('¡Pedido realizado con éxito!', 'success');
   };
 
   // Rellena el carrito con los artículos del último pedido del cliente reconocido
@@ -1402,6 +1415,7 @@ export default function App() {
           cart={cart}
           cartTotal={cartTotal}
           rate={rate}
+          isPlacingOrder={isPlacingOrder}
           onSubmit={handlePlaceOrder}
           savedCustomer={savedCustomer}
           knownCustomers={knownCustomers}
@@ -4042,7 +4056,7 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
   const [formData, setFormData] = useState({
     customerName: savedCustomer?.customerName || '',
     phoneCode: savedCustomer?.phoneCode || '0412',
@@ -4150,6 +4164,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (isPlacingOrder) return;
     if (validate()) {
       const full = {
         ...formData,
@@ -4466,10 +4481,11 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
 
           <button
             type="submit"
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+            disabled={isPlacingOrder}
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none"
           >
             <Icon name="check" className="w-5 h-5" />
-            <span>Confirmar y Enviar Pedido</span>
+            <span>{isPlacingOrder ? 'Enviando pedido…' : 'Confirmar y Enviar Pedido'}</span>
           </button>
         </form>
 

@@ -1098,9 +1098,20 @@ export default function App() {
   // Identificación obligatoria del cliente al entrar
   const handleIdentifyCustomer = async ({ customerName, phoneCode, phoneNumber }) => {
     const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
-    // "Nuevo" = no tiene historial de pedidos previo con este teléfono. Se calcula
-    // ANTES de guardar el registro local para no contarse a sí mismo como conocido.
-    const isReturning = orders.some((o) => normalizePhoneDigits(o.phone) === phoneKey);
+    // "Nuevo" = sin historial de pedidos previo Y sin registro previo en la app
+    // (servidor). Se calcula ANTES de guardar el registro local para no
+    // contarse a sí mismo como conocido. El tutorial solo se muestra a nuevos.
+    const hasOrderHistory = orders.some((o) => normalizePhoneDigits(o.phone) === phoneKey);
+    let alreadyRegistered = false;
+    if (phoneKey.length >= 7) {
+      try {
+        const existing = await api.getCustomer(phoneKey);
+        alreadyRegistered = !!(existing.ok && existing.data?.phone);
+      } catch {
+        alreadyRegistered = false; // sin conexión: no bloquear el acceso
+      }
+    }
+    const isNew = !hasOrderHistory && !alreadyRegistered;
     const record = {
       customerName,
       phoneCode,
@@ -1114,8 +1125,8 @@ export default function App() {
     // Bienvenida a pantalla completa con el nombre del usuario (primer nombre).
     // Se monta en el mismo render en que se cierra el modal, así la app nunca
     // se ve antes de la animación.
-    setWelcome({ name: customerName.trim().split(' ')[0] || customerName.trim(), tag: 'Bienvenido', isNew: !isReturning });
-    addToast(isReturning ? `¡Hola de nuevo, ${customerName.split(' ')[0]}!` : `¡Bienvenido, ${customerName.split(' ')[0]}!`);
+    setWelcome({ name: customerName.trim().split(' ')[0] || customerName.trim(), tag: 'Bienvenido', isNew });
+    addToast(isNew ? `¡Bienvenido, ${customerName.split(' ')[0]}!` : `¡Hola de nuevo, ${customerName.split(' ')[0]}!`);
     // Registrar/actualizar el cliente en el servidor para que aparezca en el historial
     if (phoneKey.length >= 7) {
       const res = await api.upsertCustomer(phoneKey, { customerName });

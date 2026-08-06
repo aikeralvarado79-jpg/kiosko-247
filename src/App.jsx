@@ -5721,7 +5721,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
                         <>
                           <Icon name="upload" className="w-6 h-6 text-slate-500" />
                           <span className="text-xs text-slate-400">
-                            Toca para tomar o subir la foto de la transferencia / pago móvil
+                            Toca para tomar una foto, elegir de la galería o subir un archivo del comprobante
                           </span>
                           <span className="text-[10px] text-slate-500">Máx 1.5 MB</span>
                         </>
@@ -5729,7 +5729,6 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
                       <input
                         type="file"
                         accept="image/*"
-                        capture="environment"
                         className="hidden"
                         onChange={(e) => {
                           const file = e.target.files && e.target.files[0];

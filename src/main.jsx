@@ -8,3 +8,11 @@ createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>
 );
+
+// PWA: registra el service worker solo en producción para habilitar la
+// instalación en el móvil y el funcionamiento offline básico.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}

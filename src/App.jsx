@@ -23,6 +23,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     users: <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
     creditCard: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM2 10h20M6 15h4" />,
     chevronRight: <path d="m9 18 6-6-6-6" />,
+    chevronLeft: <path d="m15 18-6-6 6-6" />,
+    maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
     clock: <path d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
@@ -38,10 +40,32 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     whatsapp: <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.297-.497.1-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />,
      arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
     image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
-    xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
+     xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
+     checkCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9 12l2 2 4-4" />,
+     info: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-6M12 8h.01" />,
      key: <path d="M12 2a9.92 9.92 0 0 0-7 2.82L2.82 7.01a1 1 0 0 0 0 1.42l2.59 2.59a1 1 0 0 0 1.42 0L12 5.34l6.17 6.17a1 1 0 0 0 1.42 0l2.59-2.59a1 1 0 0 0 0-1.42L13 4.83c-.35-.35-.5-.83-.5-1.31A5.5 5.5 0 0 0 12 2z" />,
      fingerprint: <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88M17.29 21.02c.12-.6.43-2.3.5-3.02M2 12a10 10 0 0 1 18-6M2 16h.01M21.8 16c.2-2 .131-5.354 0-6M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2M8.65 22c.21-.66.45-1.32.57-2M9 6.8a6 6 0 0 1 9 5.2v2" />,
-   };
+     heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z" />,
+     heartFilled: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z" fill="currentColor" stroke="none" />,
+      home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h5v-6h4v6h5V9.5" />,
+      logOut: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
+     list: <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
+     settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+     zap: <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />,
+     bag: <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0" />,
+     apple: <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.58,7.86 7.09,6.91 8.65,6.88C9.94,6.86 11.17,7.68 12.06,7.68C12.96,7.68 14.42,6.74 15.95,6.88C16.57,6.91 18.23,7.09 19.3,8.68C19.2,8.74 16.79,10.05 16.83,12.9C16.88,16.24 19.88,17.37 19.92,17.39C19.88,17.47 19.25,19.11 18.71,19.5ZM13.3,5.41C13.98,4.57 14.46,3.4 14.32,2.21C13.28,2.26 12.05,2.88 11.34,3.72C10.7,4.48 10.13,5.65 10.28,6.83C11.44,6.94 12.62,6.26 13.3,5.41Z" fill="currentColor" stroke="none" />,
+     faceId: (
+       <>
+         <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+         <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+         <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+         <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+         <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+         <path d="M9 9h.01" />
+         <path d="M15 9h.01" />
+       </>
+     ),
+    };
 
   return (
     <svg
@@ -60,6 +84,12 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
   );
 };
 
+// Detección de plataforma para elegir el logo de biometría correcto:
+// iOS → manzana de Apple + Face ID; Android/otros → huella dactilar.
+const IS_IOS =
+  /iPad|iPhone|iPod/.test(typeof navigator !== 'undefined' ? navigator.userAgent : '') ||
+  (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 const formatTimestamp = (date = new Date()) =>
   date.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
@@ -72,6 +102,24 @@ const formatSize = (product) => {
 
 const formatUsd = (n) => `$${Number(n || 0).toLocaleString('es-AR')}`;
 
+// Formatea un número como monto con separador de miles (.) y decimales (,),
+// ej: 1100 → "1.100,00". Se usa en la calculadora del header.
+const formatAmount = (n, decimals = 2) =>
+  Number.isFinite(n) ? n.toLocaleString('es-AR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) : '';
+
+// Convierte un texto de monto (con formato es-VE "1.100,00" o simple "1000.00")
+// a número, tolerando ambos estilos de separadores.
+const parseAmount = (value) => {
+  const s = String(value || '').replace(/[^\d.,]/g, '').trim();
+  if (!s) return NaN;
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  if (hasComma && hasDot) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+  if (hasComma && !hasDot) return parseFloat(s.replace(',', '.'));
+  if (!hasComma && hasDot && (s.match(/\./g) || []).length > 1) return parseFloat(s.replace(/\./g, ''));
+  return parseFloat(s);
+};
+
 const formatBs = (n) => `Bs ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
@@ -82,6 +130,28 @@ const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
 const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'];
 
 const CUSTOMER_KEY = 'kiosko_customer';
+
+// Memoria de login ("Recordarme"): conserva los campos de identificación para
+// que el siguiente login los pre-cargue sin vaciarlos.
+const LOGIN_MEMORY_KEY = 'kiosko_login_memory';
+const loadLoginMemory = () => {
+  try {
+    const raw = localStorage.getItem(LOGIN_MEMORY_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+const saveLoginMemory = (data) => {
+  try {
+    localStorage.setItem(LOGIN_MEMORY_KEY, JSON.stringify(data));
+  } catch {}
+};
+const clearLoginMemory = () => {
+  try {
+    localStorage.removeItem(LOGIN_MEMORY_KEY);
+  } catch {}
+};
 
 // Parse fecha de pedido: prioriza createdAt (ISO), fallback timestamp "DD/MM, HH:MM" asumiendo año actual.
 const parseOrderDate = (o) => {
@@ -94,6 +164,29 @@ const parseOrderDate = (o) => {
 
 const toYMD = (d) => isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+// Productos "nuevos": creados en las últimas 4 horas. Se considera la fecha del
+// dispositivo del cliente como referencia razonable para la app.
+const NEW_PRODUCT_HOURS = 4;
+const isNewProduct = (product) => {
+  if (!product || !product.createdAt) return false;
+  const created = new Date(product.createdAt);
+  if (isNaN(created)) return false;
+  return Date.now() - created.getTime() <= NEW_PRODUCT_HOURS * 3600 * 1000;
+};
+
+// Marca productos vistos (la etiqueta NUEVO desaparece al hacer click).
+const NEW_VIEWED_KEY = 'kiosko_new_product_views';
+const loadNewProductViews = () => {
+  try { return JSON.parse(localStorage.getItem(NEW_VIEWED_KEY)) || []; } catch { return []; }
+};
+const markNewProductViewed = (id) => {
+  try {
+    const list = loadNewProductViews();
+    if (!list.includes(id)) localStorage.setItem(NEW_VIEWED_KEY, JSON.stringify([...list, id]));
+  } catch {}
+};
+const wasNewProductViewed = (id) => loadNewProductViews().includes(id);
 
 // Mini calendario compacto (popover) para filtro de fecha
 function MiniCalendar({ value, onChange, onClose }) {
@@ -238,6 +331,25 @@ const playChime = (() => {
   };
 })();
 
+// Vibración sutil en dispositivos móviles (no soportada en iOS Safari: no-op).
+const haptic = (ms = 12) => {
+  try {
+    if (navigator.vibrate) navigator.vibrate(ms);
+  } catch {}
+};
+
+// Persistencia de favoritos del cliente (ids de productos, localStorage)
+const FAVORITES_KEY = 'kiosko_favorites';
+const loadFavorites = () => {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'en_camino', 'entregado'];
 
 const STATUS_LABELS = {
@@ -257,15 +369,15 @@ function RateBanner({ rate }) {
   const handleUsd = (value) => {
     const v = value.replace(/[^\d.,]/g, '');
     setUsdInput(v);
-    const num = parseFloat(v.replace(',', '.'));
-    setBsInput(Number.isFinite(num) ? (num * r).toFixed(2) : '');
+    const num = parseAmount(v);
+    setBsInput(Number.isFinite(num) ? formatAmount(num * r) : '');
   };
 
   const handleBs = (value) => {
     const v = value.replace(/[^\d.,]/g, '');
     setBsInput(v);
-    const num = parseFloat(v.replace(',', '.'));
-    setUsdInput(Number.isFinite(num) && r > 0 ? (num / r).toFixed(2) : '');
+    const num = parseAmount(v);
+    setUsdInput(Number.isFinite(num) && r > 0 ? formatAmount(num / r) : '');
   };
 
   return (
@@ -363,7 +475,7 @@ export default function App() {
     const res = await api.getState();
     if (!res.ok) {
       if (!silent) {
-        setLoadError('No se pudo conectar con el servidor. Verificá tu conexión a internet e intentá de nuevo.');
+        setLoadError('No se pudo conectar con el servidor. Verifica tu conexión a internet e intenta de nuevo.');
       }
       setIsLoading(false);
       return;
@@ -408,14 +520,61 @@ export default function App() {
     }
   });
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isOrdersDrawerOpen, setIsOrdersDrawerOpen] = useState(false);
+  const [isDebtDrawerOpen, setIsDebtDrawerOpen] = useState(false);
+
+  // Pestaña activa del cliente en la barra inferior (móvil)
+  const [customerTab, setCustomerTab] = useState('store'); // 'store' | 'orders' | 'account'
+  const [focusCustomerSection, setFocusCustomerSection] = useState(null); // pedido de scroll/expansión
+
+  // Favoritos: ids de productos marcados con corazón (persistidos localmente)
+  const [favorites, setFavorites] = useState(loadFavorites);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+    } catch {}
+  }, [favorites]);
+
+  const toggleFavorite = (id) => {
+    setFavorites((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
+    haptic(8);
+  };
+
+  // Vuelo del ítem agregado al carrito: imagen clonada animada hacia la barra
+  const [flyItem, setFlyItem] = useState(null);
+  const flyTimerRef = useRef(null);
+
+  const flyToCart = (product, sourceRect) => {
+    const target = document.querySelector('[data-cart-target]');
+    const toRect = target ? target.getBoundingClientRect() : null;
+    if (!sourceRect || !toRect) return;
+    const fromX = sourceRect.left + sourceRect.width / 2;
+    const fromY = sourceRect.top + sourceRect.height / 2;
+    const toX = toRect.left + toRect.width / 2;
+    const toY = toRect.top + toRect.height / 2;
+    setFlyItem({
+      id: `${product.id}-${Date.now()}`,
+      image: product.image,
+      fx: fromX,
+      fy: fromY,
+      tx: toX,
+      ty: toY
+    });
+    if (flyTimerRef.current) clearTimeout(flyTimerRef.current);
+    flyTimerRef.current = setTimeout(() => setFlyItem(null), 750);
+  };
 
   // Cliente reconocido (pre-llenado automático del checkout)
   const [savedCustomer, setSavedCustomer] = useState(() => loadSavedCustomer());
 
   // Bienvenida a pantalla completa tras iniciar sesión (cliente o admin).
-  // { name, tag }: name = primer nombre a mostrar, tag = texto superior.
+  // { name, tag, isNew }: name = primer nombre a mostrar, tag = texto superior.
   // Se muestra justo tras identificarse y se cierra al instante con un toque.
   const [welcome, setWelcome] = useState(null);
+
+  // Tour tutorial para usuarios nuevos (se muestra tras la bienvenida).
+  const [showTour, setShowTour] = useState(false);
 
   // True si el cliente identificado figura en la lista de administradores por teléfono
   const isCurrentAdmin = useMemo(() => {
@@ -424,12 +583,31 @@ export default function App() {
     return ADMIN_PHONES.includes(key);
   }, [savedCustomer]);
 
-  // Identificación obligatoria: se abre al entrar como cliente sin datos guardados
+  // Identificación obligatoria: se abre al entrar como cliente sin datos guardados.
+  // identityMode: 'login' (formulario) | 'confirm' (solo biometría para volver/salir).
+  // identityConfirmKind: 'switchback' | 'logout'.
   const [isIdentityOpen, setIsIdentityOpen] = useState(() => !loadSavedCustomer());
+  const [identityMode, setIdentityMode] = useState('login');
+  const [identityConfirmKind, setIdentityConfirmKind] = useState('switchback');
+
+  // Abre el login normal (cambiar de usuario / identificarse).
+  const openIdentityLogin = () => {
+    setIdentityMode('login');
+    setIdentityConfirmKind('switchback');
+    setIsIdentityOpen(true);
+  };
+
+  // Abre la confirmación por biometría para cerrar sesión.
+  const openIdentityLogout = () => {
+    setIdentityMode('confirm');
+    setIdentityConfirmKind('logout');
+    setIsIdentityOpen(true);
+  };
 
   // Reabrir la identificación si el usuario entra a la tienda sin estar identificado
   useEffect(() => {
     if (activeView === 'customer' && !savedCustomer) {
+      setIdentityMode('login');
       setIsIdentityOpen(true);
     }
   }, [activeView, savedCustomer]);
@@ -511,6 +689,7 @@ export default function App() {
   // Modals state
   const [productDetailModal, setProductDetailModal] = useState(null); // Product object
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [currentOrderTracking, setCurrentOrderTracking] = useState(null); // Order id for customer view
   const [liveTrackingOrder, setLiveTrackingOrder] = useState(null); // Order for re-open live tracking from Mis Pedidos
 
@@ -563,62 +742,84 @@ export default function App() {
   // Toast notifications
   const [toasts, setToasts] = useState([]);
 
+  const TOAST_META = {
+    success: { icon: 'checkCircle', color: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', text: 'text-emerald-300', bar: 'bg-emerald-400' },
+    error: { icon: 'xCircle', color: 'from-rose-500/20 to-rose-500/5', border: 'border-rose-500/40', text: 'text-rose-300', bar: 'bg-rose-400' },
+    warning: { icon: 'alertTriangle', color: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', text: 'text-amber-300', bar: 'bg-amber-400' },
+    info: { icon: 'info', color: 'from-sky-500/20 to-sky-500/5', border: 'border-sky-500/40', text: 'text-sky-300', bar: 'bg-sky-400' }
+  };
+
   const addToast = (message, type = 'success') => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
+    }, 3800);
   };
 
   const handleAdminLogin = async (phone, password) => {
-    const res = await api.login(phone, password);
-    if (!res.ok) {
-      addToast(res.data.error || 'Contraseña incorrecta', 'error');
+    try {
+      const res = await api.login(phone, password);
+      if (!res.ok) {
+        addToast(res.data.error || 'Contraseña incorrecta', 'error');
+        return false;
+      }
+      setToken(res.data.token);
+      setIsAdminAuthed(true);
+      // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
+      // desde el cliente reconocido, la lista de clientes o el perfil en el server.
+      const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      const adminName = await resolveAdminName(phoneKey);
+      setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+      addToast('Sesión iniciada en el panel admin');
+      return true;
+    } catch {
+      addToast('No se pudo conectar con el servidor. Intenta de nuevo.', 'error');
       return false;
     }
-    setToken(res.data.token);
-    setIsAdminAuthed(true);
-    // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
-    // desde el cliente reconocido, la lista de clientes o el perfil en el server.
-    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
-    const adminName = await resolveAdminName(phoneKey);
-    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
-    addToast('Sesión iniciada en el panel admin');
-    return true;
   };
 
   // Login admin por biometría (huella/Face ID): el teléfono identifica al admin
   // y la biometría lo autentica sin contraseña. Solo para el panel admin.
   const handleAdminBiometricLogin = async (phone, response) => {
-    const res = await api.adminBiometricLogin(phone, response);
-    if (!res.ok) {
-      addToast(res.data.error || 'La biometría no coincidió', 'error');
+    try {
+      const res = await api.adminBiometricLogin(phone, response);
+      if (!res.ok) {
+        addToast(res.data.error || 'La biometría no coincidió', 'error');
+        return false;
+      }
+      setToken(res.data.token);
+      setIsAdminAuthed(true);
+      const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      const adminName = await resolveAdminName(phoneKey);
+      setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+      addToast('Sesión iniciada en el panel admin');
+      return true;
+    } catch {
+      addToast('No se pudo conectar con el servidor. Intenta de nuevo.', 'error');
       return false;
     }
-    setToken(res.data.token);
-    setIsAdminAuthed(true);
-    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
-    const adminName = await resolveAdminName(phoneKey);
-    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
-    addToast('Sesión iniciada en el panel admin');
-    return true;
   };
 
   // Primer registro de biometría del admin: guarda huella/Face ID y emite token.
   const handleAdminBiometricRegister = async (phone, response) => {
-    const res = await api.adminBiometricRegister(phone, response);
-    if (!res.ok) {
-      addToast(res.data.error || 'No se pudo guardar tu biometría', 'error');
+    try {
+      const res = await api.adminBiometricRegister(phone, response);
+      if (!res.ok) {
+        addToast(res.data.error || 'No se pudo guardar tu biometría', 'error');
+        return false;
+      }
+      setToken(res.data.token);
+      setIsAdminAuthed(true);
+      const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      const adminName = await resolveAdminName(phoneKey);
+      setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+      addToast('Sesión iniciada en el panel admin');
+      return true;
+    } catch {
+      addToast('No se pudo conectar con el servidor. Intenta de nuevo.', 'error');
       return false;
     }
-    setToken(res.data.token);
-    setIsAdminAuthed(true);
-    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
-    const adminName = await resolveAdminName(phoneKey);
-    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
-    addToast('Sesión iniciada en el panel admin');
-    return true;
   };
 
   // Resuelve el nombre del admin desde el cliente guardado, los clientes conocidos
@@ -646,7 +847,17 @@ export default function App() {
     setIsAdminAuthed(false);
     setActiveView('customer');
     setAdminTab('inventory');
+    setCustomerTab('store');
     addToast('Sesión cerrada', 'info');
+  };
+
+  // Cambio de tab del admin desde la barra inferior: carga clientes/cobros
+  // cuando hace falta (mismo comportamiento que las pestañas del panel).
+  const handleAdminTabChange = (key) => {
+    setActiveView('admin');
+    if (key === 'benefited' || key === 'blacklist') loadCustomers();
+    if (key === 'blacklist') loadCollections();
+    setAdminTab(key);
   };
 
   const handleToggleBenefited = async (phone, benefited) => {
@@ -682,7 +893,7 @@ export default function App() {
     return true;
   };
 
-  const addToCart = (product, quantityToAdd = 1) => {
+  const addToCart = (product, quantityToAdd = 1, sourceRect = null) => {
     if (product.stock <= 0) {
       addToast('Este producto no tiene stock disponible', 'error');
       return;
@@ -705,6 +916,8 @@ export default function App() {
       setCart([...cart, { product, quantity: quantityToAdd }]);
     }
 
+    haptic(12);
+    if (sourceRect) flyToCart(product, sourceRect);
     addToast(`Agregado: ${product.name} (x${quantityToAdd})`);
   };
 
@@ -743,7 +956,9 @@ export default function App() {
 
   const filteredProducts = useMemo(() => {
     let list = products.filter((p) => {
-      const matchesCategory = selectedCategory === 'Todas' || p.category === selectedCategory;
+      const matchesCategory =
+        selectedCategory === 'Todas' ||
+        (selectedCategory === 'Favoritos' ? favorites.includes(p.id) : p.category === selectedCategory);
       const matchesSearch =
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -768,10 +983,11 @@ export default function App() {
     }
 
     return list;
-  }, [products, selectedCategory, searchQuery, sortOption, orders]);
+  }, [products, selectedCategory, searchQuery, sortOption, orders, favorites]);
 
   const handlePlaceOrder = async (formData) => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || isPlacingOrder) return;
+    setIsPlacingOrder(true);
 
     const orderPayload = {
       customerName: formData.customerName,
@@ -793,32 +1009,45 @@ export default function App() {
       estimatedMinutes: formData.type === 'delivery' ? 25 : 10
     };
 
-    const res = await api.createOrder(orderPayload);
-    if (!res.ok) {
-      addToast(res.data.error || 'No se pudo realizar el pedido', 'error');
-      return;
+    try {
+      const res = await api.createOrder(orderPayload);
+      if (!res.ok) {
+        addToast(res.data.error || 'No se pudo realizar el pedido', 'error');
+        return;
+      }
+
+      // El servidor confirmó el pedido: cerrar el modal y el carrito de inmediato,
+      // antes de cualquier otra operación, para que nunca quede atascado.
+      setCart([]);
+      setIsCheckoutOpen(false);
+      setIsCartOpen(false);
+      setCurrentOrderTracking(res.data.order?.id);
+
+      // Guardar cliente reconocido para pre-llenado automático en el próximo pedido
+      const parsedPhone = parsePhone(orderPayload.phone);
+      const customerRecord = {
+        customerName: orderPayload.customerName,
+        phoneCode: parsedPhone.code || formData.phoneCode,
+        phoneNumber: parsedPhone.number || formData.phoneNumber,
+        address: orderPayload.address || '',
+        type: orderPayload.type
+      };
+      saveCustomerData(customerRecord);
+      setSavedCustomer(customerRecord);
+
+      if (res.data.state) {
+        setProducts(res.data.state.products || []);
+        setOrders(res.data.state.orders || []);
+      }
+      haptic([20, 40, 20]);
+      playChime();
+      addToast('¡Pedido realizado con éxito!', 'success');
+    } catch (err) {
+      console.error('[kiosko] Error al crear pedido:', err);
+      addToast('No se pudo enviar el pedido. Revisa tu conexión e intenta de nuevo.', 'error');
+    } finally {
+      setIsPlacingOrder(false);
     }
-
-    // Guardar cliente reconocido para pre-llenado automático en el próximo pedido
-    const parsedPhone = parsePhone(orderPayload.phone);
-    const customerRecord = {
-      customerName: orderPayload.customerName,
-      phoneCode: parsedPhone.code || formData.phoneCode,
-      phoneNumber: parsedPhone.number || formData.phoneNumber,
-      address: orderPayload.address || '',
-      type: orderPayload.type
-    };
-    saveCustomerData(customerRecord);
-    setSavedCustomer(customerRecord);
-
-    const { state, order } = res.data;
-    setProducts(state.products || []);
-    setOrders(state.orders || []);
-    setCart([]);
-    setIsCheckoutOpen(false);
-    setIsCartOpen(false);
-    setCurrentOrderTracking(order.id);
-    addToast('¡Pedido realizado con éxito!', 'success');
   };
 
   // Rellena el carrito con los artículos del último pedido del cliente reconocido
@@ -868,6 +1097,21 @@ export default function App() {
 
   // Identificación obligatoria del cliente al entrar
   const handleIdentifyCustomer = async ({ customerName, phoneCode, phoneNumber }) => {
+    const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
+    // "Nuevo" = sin historial de pedidos previo Y sin registro previo en la app
+    // (servidor). Se calcula ANTES de guardar el registro local para no
+    // contarse a sí mismo como conocido. El tutorial solo se muestra a nuevos.
+    const hasOrderHistory = orders.some((o) => normalizePhoneDigits(o.phone) === phoneKey);
+    let alreadyRegistered = false;
+    if (phoneKey.length >= 7) {
+      try {
+        const existing = await api.getCustomer(phoneKey);
+        alreadyRegistered = !!(existing.ok && existing.data?.phone);
+      } catch {
+        alreadyRegistered = false; // sin conexión: no bloquear el acceso
+      }
+    }
+    const isNew = !hasOrderHistory && !alreadyRegistered;
     const record = {
       customerName,
       phoneCode,
@@ -881,25 +1125,31 @@ export default function App() {
     // Bienvenida a pantalla completa con el nombre del usuario (primer nombre).
     // Se monta en el mismo render en que se cierra el modal, así la app nunca
     // se ve antes de la animación.
-    setWelcome({ name: customerName.trim().split(' ')[0] || customerName.trim(), tag: 'Bienvenido' });
-    const known = buildKnownCustomers(orders, record);
-    const isReturning = known.some((c) => c.number === phoneNumber && c.code === phoneCode);
-    addToast(isReturning ? `¡Hola de nuevo, ${customerName.split(' ')[0]}!` : `¡Bienvenido, ${customerName.split(' ')[0]}!`);
+    setWelcome({ name: customerName.trim().split(' ')[0] || customerName.trim(), tag: 'Bienvenido', isNew });
+    addToast(isNew ? `¡Bienvenido, ${customerName.split(' ')[0]}!` : `¡Hola de nuevo, ${customerName.split(' ')[0]}!`);
     // Registrar/actualizar el cliente en el servidor para que aparezca en el historial
-    const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
     if (phoneKey.length >= 7) {
       const res = await api.upsertCustomer(phoneKey, { customerName });
       if (res.ok && res.data?.phone) setCustomerProfile(res.data);
     }
   };
 
-  // Cambiar de cliente: limpia la identidad y reabre el modal
-  const handleSwitchCustomer = () => {
+  // Confirmación por biometría del modal de identidad. "switchback" = volver al
+  // cliente actual sin pedir datos; "logout" = cerrar sesión.
+  const handleIdentityConfirmBiometric = (kind) => {
+    setIsIdentityOpen(false);
+    if (kind === 'logout') handleCustomerLogout();
+  };
+
+  // Cerrar sesión del cliente: limpia identidad y carrito, y reabre el login.
+  const handleCustomerLogout = () => {
     localStorage.removeItem(CUSTOMER_KEY);
     setSavedCustomer(null);
     setCustomerProfile(null);
     setCart([]);
-    setIsIdentityOpen(true);
+    setIdentityMode('login');
+    setIsIdentityOpen(false);
+    addToast('Sesión cerrada', 'info');
   };
 
   const handleSaveProduct = async (productData) => {
@@ -1022,7 +1272,7 @@ export default function App() {
     ? orders.find((o) => o.id === currentOrderTracking) || null
     : null;
 
-  // Sound notification when a tracked order advances to preparación or listo
+  // Sound notification when a tracked order advances status
   const lastTrackedStatus = useRef(null);
   useEffect(() => {
     if (!trackedOrder) {
@@ -1031,47 +1281,64 @@ export default function App() {
     }
     const status = trackedOrder.status;
     if (lastTrackedStatus.current && status !== lastTrackedStatus.current) {
-      if (status === 'en_preparacion' || status === 'listo') {
-        playChime();
-        addToast(
-          status === 'en_preparacion'
-            ? `¡Tu pedido ${trackedOrder.id} está en preparación!`
-            : `¡Tu pedido ${trackedOrder.id} está listo para retirar!`,
-          'info'
-        );
+      playChime();
+      if (status === 'en_preparacion') {
+        addToast(`¡Tu pedido ${trackedOrder.id} está en preparación!`, 'info');
+      } else if (status === 'listo') {
+        addToast(`¡Tu pedido ${trackedOrder.id} está listo para retirar!`, 'info');
+      } else if (status === 'en_camino') {
+        addToast(`¡Tu pedido ${trackedOrder.id} está en camino!`, 'warning');
+      } else if (status === 'entregado') {
+        addToast(`¡Tu pedido ${trackedOrder.id} fue entregado! 🎉`, 'success');
+      } else if (status === 'cancelado') {
+        addToast(`Tu pedido ${trackedOrder.id} fue cancelado.`, 'error');
       }
     }
     lastTrackedStatus.current = status;
   }, [trackedOrder?.status, trackedOrder?.id]);
 
+  // Notificaciones de cambio de estatus para TODOS los pedidos del cliente
+  // (envío en camino, entregado, cancelado) aunque no estén en el rastreo activo.
+  const lastStatusesRef = useRef({});
+  useEffect(() => {
+    const seen = lastStatusesRef.current;
+    customerOrders.forEach((o) => {
+      if (currentOrderTracking && o.id === currentOrderTracking) return;
+      const prev = seen[o.id];
+      if (prev && prev !== o.status && o.status !== 'pendiente' && o.status !== 'en_preparacion') {
+        playChime();
+        if (o.status === 'en_camino') {
+          addToast(`¡Tu pedido ${o.id} está en camino!`, 'warning');
+        } else if (o.status === 'entregado') {
+          addToast(`¡Tu pedido ${o.id} fue entregado! 🎉`, 'success');
+        } else if (o.status === 'cancelado') {
+          addToast(`Tu pedido ${o.id} fue cancelado.`, 'error');
+        }
+      }
+      seen[o.id] = o.status;
+    });
+  }, [customerOrders, currentOrderTracking]);
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
       {/* Toast Notification Container */}
-      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`pointer-events-auto p-4 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3 border text-sm font-medium transition-all duration-300 transform translate-y-0 animate-bounce-short ${
-              toast.type === 'error'
-                ? 'bg-rose-900/80 border-rose-500/50 text-rose-100'
-                : toast.type === 'warning'
-                ? 'bg-amber-900/80 border-amber-500/50 text-amber-100'
-                : toast.type === 'info'
-                ? 'bg-sky-900/80 border-sky-500/50 text-sky-100'
-                : 'bg-emerald-900/80 border-emerald-500/50 text-emerald-100'
-            }`}
-          >
-            <Icon
-              name={
-                toast.type === 'error' || toast.type === 'warning'
-                  ? 'alertTriangle'
-                  : 'sparkles'
-              }
-              className="w-5 h-5 flex-shrink-0"
-            />
-            <p className="flex-1">{toast.message}</p>
-          </div>
-        ))}
+      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2.5 pointer-events-none">
+        {toasts.map((toast) => {
+          const meta = TOAST_META[toast.type] || TOAST_META.success;
+          return (
+            <div
+              key={toast.id}
+              role="status"
+              className={`pointer-events-auto relative overflow-hidden p-3.5 pr-4 rounded-2xl shadow-2xl backdrop-blur-xl bg-gradient-to-r ${meta.color} border ${meta.border} flex items-center gap-3 text-sm font-medium transition-all duration-300 animate-toast-in`}
+            >
+              <span className={`shrink-0 p-2 rounded-xl bg-slate-950/40 border border-white/10 ${meta.text}`}>
+                <Icon name={meta.icon} className="w-5 h-5" />
+              </span>
+              <p className="flex-1 text-slate-100 leading-snug">{toast.message}</p>
+              <span className={`absolute bottom-0 left-0 h-0.5 ${meta.bar} animate-toast-progress`} />
+            </div>
+          );
+        })}
       </div>
 
       {/* Modern Glassmorphic Top Navbar */}
@@ -1079,7 +1346,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 ring-2 ring-white/10 shrink-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 ring-2 ring-white/10 shrink-0 animate-glow-pulse">
               <Icon name="store" className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div className="min-w-0">
@@ -1139,7 +1406,7 @@ export default function App() {
           {/* Customer identity chip */}
           {activeView === 'customer' && savedCustomer?.customerName && (
             <button
-              onClick={() => setIsIdentityOpen(true)}
+              onClick={openIdentityLogin}
               className="flex items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all shrink-0"
               title="Cambiar de usuario"
               aria-label="Cambiar de usuario"
@@ -1156,13 +1423,17 @@ export default function App() {
           {/* Customer Cart Quick Button */}
           {activeView === 'customer' && (
             <button
+              data-cart-target
               onClick={() => setIsCartOpen(true)}
               className="relative p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 group shrink-0"
               aria-label="Abrir carrito"
             >
               <Icon name="shoppingBag" className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110" />
               {cartCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-teal-400 text-slate-950 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg animate-scale-up ring-2 ring-slate-900">
+                <span
+                  key={cartCount}
+                  className="absolute -top-1.5 -right-1.5 bg-teal-400 text-slate-950 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg animate-badge-pop ring-2 ring-slate-900"
+                >
                   {cartCount}
                 </span>
               )}
@@ -1175,7 +1446,7 @@ export default function App() {
       <RateBanner rate={rate} />
 
       {/* Main Container */}
-      <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-28 sm:pb-8' : ''}`}>
+      <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
         {isLoading ? (
           <LoadingScreen />
         ) : loadError ? (
@@ -1208,6 +1479,10 @@ export default function App() {
             onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
             onTrackLiveOrder={(order) => setLiveTrackingOrder(order)}
             storeLocation={storeLocation}
+            favorites={favorites}
+            onToggleFavorite={toggleFavorite}
+            focusSection={focusCustomerSection}
+            onOpenDebt={() => setIsDebtDrawerOpen(true)}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -1271,15 +1546,52 @@ export default function App() {
         }}
       />
 
+      {/* 1b. Orders Drawer (Mis Pedidos) */}
+      <OrdersDrawer
+        isOpen={isOrdersDrawerOpen}
+        onClose={() => setIsOrdersDrawerOpen(false)}
+        orders={customerOrders}
+        rate={rate}
+        onViewOrderDetail={(order) => {
+          setIsOrdersDrawerOpen(false);
+          setOrderDetailOrder(order);
+        }}
+        onTrackLiveOrder={(order) => {
+          setIsOrdersDrawerOpen(false);
+          setLiveTrackingOrder(order);
+        }}
+        onRequestCancelOrder={(order) => {
+          setIsOrdersDrawerOpen(false);
+          setCancelConfirmOrder(order);
+        }}
+      />
+
+      {/* 1c. Debt Drawer (Mi Deuda) */}
+      {isDebtDrawerOpen && customerProfile && (
+        <ErrorBoundary>
+          <CustomerDebtModal
+            customer={customerProfile}
+            orders={orders}
+            rate={rate}
+            onClose={() => setIsDebtDrawerOpen(false)}
+          />
+        </ErrorBoundary>
+      )}
+
       {/* 2. Product Detail Modal */}
       {productDetailModal && (
         <ProductDetailModal
           product={productDetailModal}
+          sameBrandProducts={productDetailModal.brand
+            ? products.filter((p) => p.brand === productDetailModal.brand)
+            : [productDetailModal]}
           rate={rate}
+          isFavorite={favorites.includes(productDetailModal.id)}
+          onToggleFavorite={() => toggleFavorite(productDetailModal.id)}
+          onNavigate={(p) => setProductDetailModal(p)}
           onClose={() => setProductDetailModal(null)}
-          onAddToCart={(qty) => {
-            addToCart(productDetailModal, qty);
-            setProductDetailModal(null);
+          onAddToCart={(qty, rect) => {
+            addToCart(productDetailModal, qty, rect);
           }}
         />
       )}
@@ -1291,6 +1603,7 @@ export default function App() {
           cart={cart}
           cartTotal={cartTotal}
           rate={rate}
+          isPlacingOrder={isPlacingOrder}
           onSubmit={handlePlaceOrder}
           savedCustomer={savedCustomer}
           knownCustomers={knownCustomers}
@@ -1382,8 +1695,11 @@ export default function App() {
         <IdentityModal
           knownCustomers={knownCustomers}
           savedCustomer={savedCustomer}
+          mode={identityMode}
+          confirmKind={identityConfirmKind}
           onConfirm={handleIdentifyCustomer}
-          onSwitchCustomer={handleSwitchCustomer}
+          onConfirmBiometric={handleIdentityConfirmBiometric}
+          onClose={() => setIsIdentityOpen(false)}
           isCurrentAdmin={isCurrentAdmin}
           onGoToAdmin={() => {
             setIsIdentityOpen(false);
@@ -1392,8 +1708,64 @@ export default function App() {
         />
       )}
 
+      {/* Item volando al carrito (overlay animado) */}
+      {flyItem && (
+        <img
+          key={flyItem.id}
+          src={flyItem.image}
+          alt=""
+          className="fly-to-cart-img"
+          style={{
+            '--fx': `${flyItem.fx}px`,
+            '--fy': `${flyItem.fy}px`,
+            '--tx': `${flyItem.tx}px`,
+            '--ty': `${flyItem.ty}px`
+          }}
+          onAnimationEnd={() => setFlyItem(null)}
+        />
+      )}
+
+      {/* Barra de navegación inferior (móvil) */}
+      <BottomTabBar
+        activeView={activeView}
+        customerTab={customerTab}
+        onCustomerTab={(tab) => {
+          setActiveView('customer');
+          setCustomerTab(tab);
+          setFocusCustomerSection(null);
+          if (tab === 'orders') setIsOrdersDrawerOpen(true);
+          if (tab === 'account') setIsDebtDrawerOpen(true);
+        }}
+        cartCount={cartCount}
+        hasCustomer={Boolean(savedCustomer)}
+        isAdmin={isCurrentAdmin || isAdminAuthed}
+        onOpenCart={() => {
+          setActiveView('customer');
+          setIsCartOpen(true);
+        }}
+        onGoAdmin={() => {
+          setIsIdentityOpen(false);
+          setActiveView('admin');
+          setAdminTab('inventory');
+        }}
+        onGoStore={() => {
+          setActiveView('customer');
+          setCustomerTab('store');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onCustomerLogout={openIdentityLogout}
+        adminTab={adminTab}
+        onAdminTab={handleAdminTabChange}
+        pendingOrders={orders.filter((o) => o.status === 'pendiente').length}
+        onLogout={handleAdminLogout}
+        isAdminAuthed={isAdminAuthed}
+      />
+
       {/* Footer */}
-      <footer className="mt-auto border-t border-slate-800/80 bg-slate-950/60 py-5 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500">
+      <footer
+        style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
+        className="mt-auto border-t border-slate-800/80 bg-slate-950/60 pt-5 pb-20 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500"
+      >
         <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
       </footer>
 
@@ -1402,9 +1774,15 @@ export default function App() {
         <WelcomeOverlay
           name={welcome.name}
           tag={welcome.tag}
-          onDone={() => setWelcome(null)}
+          onDone={() => {
+            setWelcome(null);
+            if (welcome.isNew) setShowTour(true);
+          }}
         />
       )}
+
+      {/* Tour tutorial para usuarios nuevos */}
+      {showTour && <NewUserTour onClose={() => setShowTour(false)} />}
     </div>
   );
 }
@@ -1445,15 +1823,126 @@ function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
   );
 }
 
+// Tour tutorial para clientes nuevos: se muestra tras la bienvenida para que
+// descubran cómo pedir, seguir sus pedidos y revisar su saldo.
+function NewUserTour({ onClose }) {
+  const steps = [
+    {
+      icon: 'store',
+      title: 'Explora el catálogo',
+      desc: 'Busca productos por nombre o navega por categorías y marcas para descubrir todo lo que tenemos para ti.'
+    },
+    {
+      icon: 'shoppingBag',
+      title: 'Agrega al carrito',
+      desc: 'Toca cualquier producto para ver sus fotos y precio en $ y Bs. Presiona "Agregar al Carrito" cuando lo decidas.'
+    },
+    {
+      icon: 'list',
+      title: 'Sigue tus pedidos',
+      desc: 'En "Mis Pedidos" puedes ver tu historial y rastrear en vivo la entrega a domicilio desde la barra inferior.'
+    },
+    {
+      icon: 'creditCard',
+      title: 'Pago a la entrega',
+      desc: 'Elige retiro en tienda o delivery. Los beneficiados pueden pedir a crédito y revisar su saldo en "Mi Cuenta".'
+    }
+  ];
+  const [stepIdx, setStepIdx] = useState(0);
+
+  // Avanza automáticamente al siguiente paso; al terminar, cierra el tour.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (stepIdx < steps.length - 1) setStepIdx((i) => i + 1);
+      else onClose();
+    }, 7000);
+    return () => clearTimeout(t);
+  }, [stepIdx, steps.length, onClose]);
+
+  const s = steps[stepIdx];
+
+  return (
+    <div className="fixed inset-0 z-[75] flex flex-col justify-end bg-slate-950/70 backdrop-blur-sm animate-fade-in" role="dialog" aria-label="Tour de bienvenida">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative m-4 sm:m-6 bg-slate-900 border border-teal-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl animate-screen-up space-y-4">
+        <div className="flex items-start gap-3.5">
+          <span className="p-2.5 rounded-2xl bg-teal-500/20 text-teal-400 shrink-0">
+            <Icon name={s.icon} className="w-6 h-6" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-teal-400 mb-1">
+              Conoce la app · {stepIdx + 1}/{steps.length}
+            </p>
+            <h3 className="text-base font-black text-white">{s.title}</h3>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">{s.desc}</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between pt-1">
+          <button
+            onClick={onClose}
+            className="px-2 py-1 text-xs text-slate-500 hover:text-white transition-colors"
+          >
+            Omitir
+          </button>
+          <div className="flex gap-1.5">
+            {steps.map((_, i) => (
+              <span
+                key={i}
+                className={`h-1.5 rounded-full transition-all ${i === stepIdx ? 'w-6 bg-teal-400' : 'w-1.5 bg-slate-700'}`}
+              />
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              if (stepIdx < steps.length - 1) setStepIdx((i) => i + 1);
+              else onClose();
+            }}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all active:scale-95"
+          >
+            {stepIdx < steps.length - 1 ? 'Siguiente' : '¡Listo!'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoadingScreen() {
   return (
-    <div className="py-24 flex flex-col items-center justify-center text-center space-y-4">
-      <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 animate-pulse">
-        <Icon name="store" className="w-7 h-7" />
+    <div className="space-y-6 sm:space-y-8 animate-fade-in" aria-busy="true" aria-label="Cargando la tienda">
+      {/* Hero skeleton */}
+      <div className="rounded-2xl sm:rounded-3xl p-4 sm:p-8 bg-slate-800/40 border border-slate-700/40">
+        <div className="skeleton-block w-32 h-5 mb-3" />
+        <div className="skeleton-block w-56 h-8 mb-2" />
+        <div className="skeleton-block w-40 h-4" />
       </div>
-      <div>
-        <h2 className="text-lg font-bold text-white">Cargando Empresas Alvarados...</h2>
-        <p className="text-xs text-slate-400 mt-1">Sincronizando productos y pedidos desde el servidor.</p>
+
+      {/* Buscador + pills skeleton */}
+      <div className="space-y-3">
+        <div className="skeleton-block h-12 rounded-2xl w-full" />
+        <div className="flex gap-2 overflow-hidden">
+          <div className="skeleton-block h-9 w-20 shrink-0" />
+          <div className="skeleton-block h-9 w-24 shrink-0" />
+          <div className="skeleton-block h-9 w-28 shrink-0" />
+          <div className="skeleton-block h-9 w-20 shrink-0" />
+        </div>
+      </div>
+
+      {/* Grid de tarjetas skeleton */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="rounded-2xl sm:rounded-3xl bg-slate-800/40 border border-slate-700/40 overflow-hidden">
+            <div className="skeleton-block aspect-square w-full rounded-none" />
+            <div className="p-3 sm:p-4 space-y-2">
+              <div className="skeleton-block h-4 w-3/4" />
+              <div className="skeleton-block h-3 w-1/2" />
+              <div className="flex justify-between items-center pt-2">
+                <div className="skeleton-block h-5 w-14" />
+                <div className="skeleton-block h-9 w-9 rounded-xl" />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1492,6 +1981,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const [bioStatus, setBioStatus] = useState('idle'); // 'idle' | 'working' | 'register'
   const [bioError, setBioError] = useState('');
   const [bioOptions, setBioOptions] = useState(null);
+  const [bioNeedsRegister, setBioNeedsRegister] = useState(false);
   const bioFetchKeyRef = useRef('');
 
   // Recovery state
@@ -1543,9 +2033,15 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       .webauthnLoginOptions({ phone: phoneKey })
       .then((res) => {
         if (cancelled) return;
+        bioFetchKeyRef.current = phoneKey;
         if (res.ok) {
-          bioFetchKeyRef.current = phoneKey;
+          setBioNeedsRegister(false);
           setBioOptions(res.data.options);
+        } else if (res.status === 404) {
+          // No hay biometría registrada en este dominio: el tap debe REGISTRAR
+          // (primera vez en este ambiente) en vez de mostrar "no está lista".
+          setBioNeedsRegister(true);
+          setBioOptions(null);
         }
       })
       .catch(() => {});
@@ -1557,41 +2053,75 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!/^\d{7}$/.test(loginPhone.number)) {
-      setError('Ingresá tu teléfono de administrador.');
+      setError('Ingresa tu teléfono de administrador.');
       return;
     }
     if (!password) {
-      setError('Ingresá la contraseña de administrador.');
+      setError('Ingresa la contraseña de administrador.');
       return;
     }
     setIsSubmitting(true);
     setError('');
-    const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
-    const ok = await onLogin(phoneKey, password);
-    setIsSubmitting(false);
-    if (!ok) setError('Contraseña incorrecta. Verificá tu teléfono y contraseña.');
+    try {
+      const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
+      const ok = await onLogin(phoneKey, password);
+      if (!ok) setError('Contraseña incorrecta. Verifica tu teléfono y contraseña.');
+    } catch {
+      setError('No se pudo conectar con el servidor. Intenta de nuevo.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Login admin con biometría (huella/Face ID). El teléfono es obligatorio y
   // la biometría reemplaza la contraseña. Si no hay biometría registrada para
-  // ese teléfono, se registra en el momento (primera vez).
+  // ese teléfono en este dominio, se registra en el momento (primera vez).
   const handleBiometricLogin = async () => {
     if (!/^\d{7}$/.test(loginPhone.number)) {
-      setError('Ingresá tu teléfono de administrador.');
+      setError('Ingresa tu teléfono de administrador.');
       return;
     }
     const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
     setError('');
     setBioError('');
-    if (bioFetchKeyRef.current !== phoneKey || !bioOptions) {
-      setBioError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
-      return;
+    // Si el prefetch aún no cargó las options, las pedimos ahora en lugar de
+    // fallar con "no está lista". Así el tap siempre funciona.
+    if (bioFetchKeyRef.current !== phoneKey) {
+      try {
+        const res = await api.webauthnLoginOptions({ phone: phoneKey });
+        if (res.ok) {
+          bioFetchKeyRef.current = phoneKey;
+          setBioNeedsRegister(false);
+          setBioOptions(res.data.options);
+        } else if (res.status === 404) {
+          bioFetchKeyRef.current = phoneKey;
+          setBioNeedsRegister(true);
+          setBioOptions(null);
+        } else {
+          setBioError('No se pudo iniciar la verificación con biometría. Intenta de nuevo.');
+          return;
+        }
+      } catch {
+        setBioError('No se pudo conectar con el servidor. Intenta de nuevo.');
+        return;
+      }
     }
     setBioStatus('working');
     try {
+      // Primera vez en este dominio (staging/producción): registra la biometría.
+      if (bioNeedsRegister || !bioOptions) {
+        setBioStatus('register');
+        const rres = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: 'Administrador' });
+        if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el registro');
+        const regResponse = await startRegistration({ optionsJSON: rres.data.options });
+        const ok = await onBiometricRegister(phoneKey, regResponse);
+        if (!ok) setBioError('No se pudo guardar tu biometría. Intenta de nuevo.');
+        setBioNeedsRegister(false);
+        return;
+      }
       const authResponse = await startAuthentication({ optionsJSON: bioOptions });
       const ok = await onBiometricLogin(phoneKey, authResponse);
-      if (!ok) setBioError('La biometría no coincidió. Verificá que tu número sea de administrador.');
+      if (!ok) setBioError('La biometría no coincidió. Verifica que tu número sea de administrador.');
     } catch (err) {
       // Si la credencial se registró bajo un rpID anterior (dominio distinto),
       // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
@@ -1608,7 +2138,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
         if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
         const regResponse = await startRegistration({ optionsJSON: rres.data.options });
         const ok = await onBiometricRegister(phoneKey, regResponse);
-        if (!ok) setBioError('No se pudo guardar tu biometría. Intentá de nuevo.');
+        if (!ok) setBioError('No se pudo guardar tu biometría. Intenta de nuevo.');
       } catch (regErr) {
         setBioError(friendlyAuthError(regErr));
       }
@@ -1619,14 +2149,25 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
 
   const startRecovery = async () => {
     if (!/^\d{7}$/.test(recoverPhone.number)) {
-      setRecoverError('Ingresá el número de teléfono de administrador.');
+      setRecoverError('Ingresa el número de teléfono de administrador.');
       return;
     }
     const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
+    // Si el prefetch no terminó, pedimos las options ahora en vez de fallar.
     if (recoveryFetchKeyRef.current !== phoneKey || !recoverOptions) {
-      setRecoverError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
-      return;
+      try {
+        const res = await api.webauthnLoginOptions({ phone: phoneKey });
+        if (!res.ok) {
+          setRecoverError('Este número no tiene biometría registrada para verificar.');
+          return;
+        }
+        recoveryFetchKeyRef.current = phoneKey;
+        setRecoverOptions(res.data.options);
+      } catch {
+        setRecoverError('No se pudo conectar con el servidor. Intenta de nuevo.');
+        return;
+      }
     }
     setRecoverStep('biometric');
     try {
@@ -1635,7 +2176,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       setRecoverStep('newpass');
       setRecoverError('');
     } catch {
-      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intentá de nuevo.');
+      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intenta de nuevo.');
       setRecoverStep('phone');
     }
   };
@@ -1663,7 +2204,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     setRecoverOptions(null);
     setBiometricResponse(null);
     setRecoverPhone({ code: '0412', number: '' });
-    setError('Contraseña restablecida. Ahora podés iniciar sesión.');
+    setError('Contraseña restablecida. Ahora puedes iniciar sesión.');
   };
 
   if (recoverMode) {
@@ -1675,7 +2216,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               <Icon name="key" className="w-7 h-7" />
             </span>
             <h2 className="text-xl font-black text-white">Recuperar Contraseña</h2>
-            <p className="text-xs text-slate-400">Verificá con biometría y creá una nueva contraseña.</p>
+            <p className="text-xs text-slate-400">Verifica con biometría y crea una nueva contraseña.</p>
           </div>
 
           {recoverStep === 'phone' && (
@@ -1735,7 +2276,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                   type="password"
                   value={newPassword.b}
                   onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
-                  placeholder="Repetí la contraseña"
+                  placeholder="Repite la contraseña"
                   className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
                 />
               </div>
@@ -1769,7 +2310,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             <Icon name="layers" className="w-7 h-7" />
           </span>
           <h2 className="text-xl font-black text-white">Acceso al Panel Admin</h2>
-          <p className="text-xs text-slate-400">Ingresá la contraseña para gestionar inventario y pedidos.</p>
+          <p className="text-xs text-slate-400">Inicia sesión con tu contraseña o biometría para gestionar inventario y pedidos.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -1797,26 +2338,6 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             {bioError && <p className="text-xs text-rose-400 mt-2">{bioError}</p>}
           </div>
 
-          <button
-            type="button"
-            onClick={handleBiometricLogin}
-            disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
-            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-sm hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
-          >
-            <Icon name="fingerprint" className="w-4 h-4" />
-            {bioStatus === 'working'
-              ? 'Esperando huella o Face ID...'
-              : bioStatus === 'register'
-                ? 'Registrando tu biometría...'
-                : 'Ingresar con huella o Face ID'}
-          </button>
-
-          <div className="flex items-center gap-3 py-1">
-            <span className="flex-1 h-px bg-slate-800" />
-            <span className="text-[10px] uppercase tracking-widest text-slate-500">o con contraseña</span>
-            <span className="flex-1 h-px bg-slate-800" />
-          </div>
-
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Contraseña</label>
             <input
@@ -1824,7 +2345,6 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              autoFocus
               className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
             />
           </div>
@@ -1835,7 +2355,33 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold text-sm hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
           >
             <Icon name="check" className="w-4 h-4" />
-            {isSubmitting ? 'Verificando...' : 'Ingresar con contraseña'}
+            {isSubmitting ? 'Verificando...' : 'Iniciar sesión'}
+          </button>
+
+          {/* Biometría: debajo de Iniciar sesión, sin separador */}
+          <button
+            type="button"
+            onClick={handleBiometricLogin}
+            disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
+            className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl bg-slate-800/70 border border-cyan-500/30 hover:border-cyan-400/60 hover:bg-slate-700/60 text-slate-200 transition-all disabled:opacity-60"
+          >
+            {bioStatus === 'working' || bioStatus === 'register' ? (
+              <>
+                {IS_IOS ? <Icon name="apple" className="w-5 h-5" /> : <Icon name="fingerprint" className="w-5 h-5" />}
+                <span>{bioStatus === 'working' ? 'Esperando...' : 'Registrando...'}</span>
+              </>
+            ) : IS_IOS ? (
+              <>
+                <Icon name="apple" className="w-5 h-5" />
+                <Icon name="faceId" className="w-5 h-5" />
+                <span className="font-semibold">Entrar con Face ID</span>
+              </>
+            ) : (
+              <>
+                <Icon name="fingerprint" className="w-6 h-6" />
+                <span className="font-semibold">Entrar con huella</span>
+              </>
+            )}
           </button>
         </form>
 
@@ -1880,7 +2426,7 @@ class ErrorBoundary extends Component {
             </div>
             <h3 className="text-base font-black text-white mb-1">Algo salió mal</h3>
             <p className="text-xs text-slate-400 leading-relaxed mb-4">
-              Ocurrió un problema inesperado al cargar esta sección. Tocá Reintentar para intentarlo de nuevo.
+              Ocurrió un problema inesperado al cargar esta sección. Toca Reintentar para intentarlo de nuevo.
             </p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
@@ -1922,15 +2468,28 @@ function CustomerView({
   onViewOrderDetail,
   onRequestCancelOrder,
   onTrackLiveOrder,
-  storeLocation
+  storeLocation,
+  favorites,
+  onToggleFavorite,
+  focusSection,
+  onOpenDebt
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
   const [myOrdersPage, setMyOrdersPage] = useState(1);
   const [orderDateFilter, setOrderDateFilter] = useState({ preset: 'all', date: null });
   const [showCalendar, setShowCalendar] = useState(false);
-  const [showDebtDetail, setShowDebtDetail] = useState(false);
+  const [promoIdx, setPromoIdx] = useState(0);
   const PAGE_SIZE = 5;
+
+  // Carrusel de promos con autoplay (solo cuando hay más de una activa)
+  const activePromos = promos.filter((p) => p.active);
+  useEffect(() => {
+    if (activePromos.length <= 1) return undefined;
+    const id = setInterval(() => setPromoIdx((i) => (i + 1) % activePromos.length), 5000);
+    return () => clearInterval(id);
+  }, [activePromos.length]);
+  const safePromoIdx = activePromos.length > 0 ? promoIdx % activePromos.length : 0;
 
   const suggestions = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -1967,10 +2526,24 @@ function CustomerView({
   const pagedOrders = filteredOrders.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   useEffect(() => { setMyOrdersPage(1); }, [orderDateFilter]);
+
+  // La barra inferior (móvil) pide expandir y scrollear a Mis Pedidos o Mi Cuenta
+  useEffect(() => {
+    if (!focusSection) return;
+    const timer = setTimeout(() => {
+      const id = focusSection === 'orders' ? 'pedidos-seccion' : 'cuenta-seccion';
+      if (focusSection === 'orders') setShowMyOrders(true);
+      if (focusSection === 'account') onOpenDebt?.();
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [focusSection]);
+
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
       {/* Compact Hero Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 border border-slate-700/60 p-4 sm:p-8 shadow-2xl backdrop-blur-md">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 animate-gradient-x border border-slate-700/60 p-4 sm:p-8 shadow-2xl backdrop-blur-md">
         <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-5">
           <div className="space-y-2 sm:space-y-3 max-w-xl">
             <span className="px-2.5 sm:px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
@@ -2004,34 +2577,44 @@ function CustomerView({
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
       </div>
 
-      {/* Promos Banner */}
-      {promos.filter((p) => p.active).length > 0 && (
-        <div className="space-y-2.5 sm:space-y-3">
-          {promos
-            .filter((p) => p.active)
-            .map((promo) => (
-              <div
-                key={promo.id}
-                className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-rose-500/10 border border-amber-500/30"
-              >
-                {promo.image && (
-                  <img
-                    src={promo.image}
-                    alt={promo.title}
-                    className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl object-cover border border-amber-500/30 shrink-0"
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                    <Icon name="sparkles" className="w-3 h-3" /> Promo
-                  </span>
-                  <h4 className="font-bold text-white text-sm truncate">{promo.title}</h4>
-                  {promo.subtitle && (
-                    <p className="text-xs text-slate-300 line-clamp-1 sm:line-clamp-2">{promo.subtitle}</p>
-                  )}
-                </div>
-              </div>
-            ))}
+      {/* Promos Carousel */}
+      {activePromos.length > 0 && (
+        <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl">
+          <div
+            key={activePromos[safePromoIdx].id}
+            className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-rose-500/10 border border-amber-500/30 animate-fade-in"
+          >
+            {activePromos[safePromoIdx].image && (
+              <img
+                src={activePromos[safePromoIdx].image}
+                alt={activePromos[safePromoIdx].title}
+                className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl object-cover border border-amber-500/30 shrink-0"
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                <Icon name="sparkles" className="w-3 h-3" /> Promo {activePromos.length > 1 ? `${safePromoIdx + 1}/${activePromos.length}` : ''}
+              </span>
+              <h4 className="font-bold text-white text-sm truncate">{activePromos[safePromoIdx].title}</h4>
+              {activePromos[safePromoIdx].subtitle && (
+                <p className="text-xs text-slate-300 line-clamp-1 sm:line-clamp-2">{activePromos[safePromoIdx].subtitle}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Dots del carrusel */}
+          {activePromos.length > 1 && (
+            <div className="absolute bottom-1.5 right-2 flex items-center gap-1">
+              {activePromos.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setPromoIdx(i)}
+                  aria-label={`Ver promo ${i + 1}`}
+                  className={`w-1.5 h-1.5 rounded-full transition-all ${i === safePromoIdx ? 'bg-amber-400 w-3' : 'bg-amber-400/30'}`}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -2061,7 +2644,7 @@ function CustomerView({
 
       {/* Mi Cuenta: saldo pendiente del cliente reconocido */}
       {savedCustomer?.customerName && customerProfile && (
-        <div className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
+        <div id="cuenta-seccion" className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
           <div className="p-3 sm:p-4 flex items-center gap-3">
             <span className="p-2 sm:p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 shrink-0">
               <Icon name="creditCard" className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -2079,7 +2662,7 @@ function CustomerView({
               )}
             </div>
             <button
-              onClick={() => setShowDebtDetail(true)}
+              onClick={onOpenDebt}
               className="text-right shrink-0 flex flex-col items-end gap-1 hover:opacity-90 transition-opacity"
               aria-label="Ver detalle de mi deuda"
             >
@@ -2096,7 +2679,7 @@ function CustomerView({
 
       {/* Mis Pedidos: historial del cliente reconocido */}
       {savedCustomer?.customerName && customerOrders.length > 0 && (
-        <div className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
+        <div id="pedidos-seccion" className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
           <button
             onClick={() => setShowMyOrders((v) => !v)}
             className="w-full p-3 sm:p-4 flex items-center gap-3 hover:bg-slate-800/80 transition-colors text-left"
@@ -2374,7 +2957,7 @@ function CustomerView({
         <div className="space-y-2.5">
           {/* Category Pills */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {['Todas', ...categories].map((cat) => (
+            {['Todas', 'Favoritos', ...categories].map((cat) => (
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
@@ -2384,7 +2967,7 @@ function CustomerView({
                     : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
                 }`}
               >
-                {cat}
+                {cat === 'Favoritos' ? `❤ Favoritos (${favorites.length})` : cat}
               </button>
             ))}
           </div>
@@ -2419,29 +3002,28 @@ function CustomerView({
               key={product.id}
               product={product}
               rate={rate}
-              onAddToCart={() => onAddToCart(product, 1)}
+              isFavorite={favorites.includes(product.id)}
+              onToggleFavorite={() => onToggleFavorite(product.id)}
+              onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
               onOpenDetail={() => onOpenProductModal(product)}
             />
           ))}
         </div>
       )}
-      {showDebtDetail && customerProfile && (
-        <ErrorBoundary>
-          <CustomerDebtModal
-            customer={customerProfile}
-            orders={orders}
-            rate={rate}
-            onClose={() => setShowDebtDetail(false)}
-          />
-        </ErrorBoundary>
-      )}
     </div>
   );
 }
 
-function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
+function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite }) {
   const isOut = product.stock <= 0;
   const isLow = product.stock > 0 && product.stock <= 5;
+  const [justAdded, setJustAdded] = useState(false);
+
+  const handleAdd = (e) => {
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 1200);
+    onAddToCart(e);
+  };
 
   return (
     <div className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl overflow-hidden hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm">
@@ -2453,6 +3035,14 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
           loading="lazy"
         />
         <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1">
+          {isNewProduct(product) && !wasNewProductViewed(product.id) && (
+            <span
+              onClick={(e) => { e.stopPropagation(); markNewProductViewed(product.id); }}
+              className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-gradient-to-r from-fuchsia-500 to-teal-400 text-slate-950 text-[10px] sm:text-xs font-black uppercase tracking-wider shadow-lg shadow-fuchsia-500/30 animate-bounce-short cursor-pointer"
+            >
+              NUEVO
+            </span>
+          )}
           {product.brand && (
             <span className="hidden sm:inline px-2.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-medium text-teal-300 border border-teal-500/30">
               {product.brand}
@@ -2462,6 +3052,21 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
             {product.category}
           </span>
         </div>
+
+        {/* Favorito */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          className="absolute top-2 right-2 sm:top-3 sm:right-3 p-1.5 sm:p-2 rounded-xl bg-slate-950/70 backdrop-blur-md border border-white/10 transition-all active:scale-75 hover:scale-110"
+          aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+        >
+          <Icon
+            name={isFavorite ? 'heartFilled' : 'heart'}
+            className={`w-4 h-4 sm:w-5 sm:h-5 transition-all ${isFavorite ? 'text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.7)]' : 'text-slate-300'}`}
+          />
+        </button>
 
         {/* Stock Badge Overlay */}
         {isOut ? (
@@ -2509,17 +3114,23 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
           </div>
 
           <button
-            onClick={onAddToCart}
+            onClick={handleAdd}
             disabled={isOut}
-            className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl font-semibold text-xs flex items-center gap-1.5 transition-all duration-300 active:scale-95 ${
-              isOut
+            className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl font-semibold text-xs flex items-center gap-1.5 transition-all duration-300 active:scale-90 ${
+              justAdded
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : isOut
                 ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
                 : 'bg-teal-500 text-slate-950 hover:bg-teal-400 shadow-md shadow-teal-500/20'
             }`}
             aria-label="Agregar al carrito"
           >
-            <Icon name="plus" className="w-4 h-4" />
-            <span className="hidden sm:inline">Agregar</span>
+            {justAdded ? (
+              <Icon name="check" className="w-4 h-4 animate-added-pop" />
+            ) : (
+              <Icon name="plus" className="w-4 h-4" />
+            )}
+            <span className="hidden sm:inline">{justAdded ? '¡Listo!' : 'Agregar'}</span>
           </button>
         </div>
       </div>
@@ -2527,49 +3138,169 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail }) {
   );
 }
 
-function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
+function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, onAddToCart, isFavorite, onToggleFavorite, onNavigate }) {
   const [quantity, setQuantity] = useState(1);
+  const [showFullscreen, setShowFullscreen] = useState(false);
+  const [touchX, setTouchX] = useState(null);
+  const [slideDir, setSlideDir] = useState('right');
   const isOut = product.stock <= 0;
   const unitBs = usdToBs(product.price, rate?.rate);
   const lineTotal = product.price * quantity;
 
+  const currentIndex = useMemo(() => {
+    const idx = (sameBrandProducts || []).findIndex((p) => p.id === product.id);
+    return idx >= 0 ? idx : 0;
+  }, [product.id, sameBrandProducts]);
+
+  const totalInBrand = (sameBrandProducts || []).length;
+  const hasSameBrand = totalInBrand > 1;
+
+  const goTo = useCallback(
+    (dir) => {
+      if (!hasSameBrand) return;
+      const next = currentIndex + dir;
+      if (next < 0 || next >= totalInBrand) return;
+      setSlideDir(dir > 0 ? 'right' : 'left');
+      onNavigate?.(sameBrandProducts[next]);
+      setQuantity(1);
+    },
+    [currentIndex, hasSameBrand, totalInBrand, onNavigate, sameBrandProducts]
+  );
+
+  // Navegación por swipe (deslizar) entre productos de la misma marca.
+  const handleTouchStart = (e) => setTouchX(e.touches?.[0]?.clientX ?? null);
+  const handleTouchEnd = (e) => {
+    if (touchX == null) return;
+    const delta = (e.changedTouches?.[0]?.clientX ?? 0) - touchX;
+    if (Math.abs(delta) > 40) goTo(delta > 0 ? -1 : 1);
+    setTouchX(null);
+  };
+
   // Handle ESC key press
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (showFullscreen) setShowFullscreen(false);
+        else onClose();
+      }
+      if (e.key === 'ArrowLeft') goTo(-1);
+      if (e.key === 'ArrowRight') goTo(1);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onClose, showFullscreen, goTo]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       {/* Backdrop Click */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all"
-        >
-          <Icon name="x" className="w-5 h-5" />
-        </button>
+      <div className="relative w-full max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+      {/* Handle visual para indicar arrastre en móvil */}
+      <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
-        <div className="relative h-52 sm:h-64 bg-slate-950 shrink-0">
+      {/* Close Button */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all"
+      >
+        <Icon name="x" className="w-5 h-5" />
+      </button>
+
+      {/* Botón favorito */}
+      <button
+        onClick={onToggleFavorite}
+        className="absolute top-4 left-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all active:scale-75"
+        aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+      >
+        <Icon
+          name={isFavorite ? 'heartFilled' : 'heart'}
+          className={`w-5 h-5 ${isFavorite ? 'text-rose-400' : ''}`}
+        />
+      </button>
+
+      {/* Imagen + full screen + paginación de la marca */}
+      <div
+        key={`img-${product.id}`}
+        className={`relative h-40 sm:h-56 bg-slate-950 shrink-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
           <img
             src={product.image}
             alt={product.name}
             className="w-full h-full object-cover"
           />
-          <div className="absolute top-4 left-4">
-            <span className="px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-semibold text-teal-300 border border-teal-500/30">
+          <div className="absolute top-4 left-4 sm:left-4">
+            <span className="hidden sm:inline px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-semibold text-teal-300 border border-teal-500/30">
               {product.category}
             </span>
           </div>
+
+          {/* Botón full screen: agranda la imagen */}
+          <button
+            onClick={() => setShowFullscreen(true)}
+            className="absolute bottom-3 right-3 z-20 p-2 rounded-xl bg-slate-950/70 backdrop-blur-md border border-white/15 text-slate-200 hover:text-white hover:border-teal-400/50 transition-all active:scale-90"
+            aria-label="Ver imagen en pantalla completa"
+          >
+            <Icon name="maximize" className="w-5 h-5" />
+          </button>
+
+          {/* Paginación de la misma marca */}
+          {hasSameBrand && (
+            <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5">
+              <button
+                onClick={() => goTo(-1)}
+                className="p-1.5 rounded-lg bg-slate-950/70 backdrop-blur-md border border-white/15 text-slate-200 hover:text-white hover:border-teal-400/50 transition-all active:scale-90"
+                aria-label="Producto anterior de la marca"
+              >
+                <Icon name="chevronLeft" className="w-4 h-4" />
+              </button>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-950/80 backdrop-blur-md border border-teal-500/30 text-[10px] font-bold text-teal-300">
+                {currentIndex + 1}/{totalInBrand} · {product.brand}
+              </span>
+              <button
+                onClick={() => goTo(1)}
+                className="p-1.5 rounded-lg bg-slate-950/70 backdrop-blur-md border border-white/15 text-slate-200 hover:text-white hover:border-teal-400/50 transition-all active:scale-90"
+                aria-label="Siguiente producto de la marca"
+              >
+                <Icon name="chevronRight" className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1">
+        {/* Miniaturas de la misma marca (paginación) */}
+        {hasSameBrand && (
+          <div className="flex gap-2 px-4 sm:px-6 pt-3 pb-1 shrink-0">
+            {sameBrandProducts.map((p, i) => (
+              <button
+                key={p.id}
+                onClick={() => {
+                  setSlideDir(i > currentIndex ? 'right' : 'left');
+                  onNavigate?.(p);
+                  setQuantity(1);
+                }}
+                className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border-2 transition-all shrink-0 ${
+                  i === currentIndex
+                    ? 'border-teal-400 ring-2 ring-teal-500/30'
+                    : 'border-slate-700 hover:border-teal-500/50'
+                }`}
+                aria-label={`Ver ${p.name}`}
+              >
+                <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                {i === currentIndex && (
+                  <span className="absolute inset-0 bg-teal-500/20" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div
+          key={`body-${product.id}`}
+          className={`p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+        >
           <div>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-3">
@@ -2621,7 +3352,10 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
           </div>
 
           <button
-            onClick={() => onAddToCart(quantity)}
+            onClick={(e) => {
+              onAddToCart(quantity, e.currentTarget.getBoundingClientRect());
+              setQuantity(1);
+            }}
             disabled={isOut}
             className={`w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
               isOut
@@ -2638,22 +3372,85 @@ function ProductDetailModal({ product, rate, onClose, onAddToCart }) {
           </button>
         </div>
       </div>
+
+      {/* Visor full screen de la imagen (desliza para ver la misma marca) */}
+      {showFullscreen && (
+        <div
+          className="fixed inset-0 z-[70] bg-slate-950/98 bg-black flex flex-col"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="flex items-center justify-between px-4 py-3 shrink-0">
+            <div className="flex items-center gap-2">
+              {hasSameBrand && (
+                <>
+                  <button
+                    onClick={() => goTo(-1)}
+                    className="p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:text-white transition-all active:scale-90"
+                    aria-label="Producto anterior de la marca"
+                  >
+                    <Icon name="chevronLeft" className="w-5 h-5" />
+                  </button>
+                  <span className="text-xs font-bold text-teal-300 px-2">
+                    {currentIndex + 1}/{totalInBrand} · {product.brand}
+                  </span>
+                  <button
+                    onClick={() => goTo(1)}
+                    className="p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:text-white transition-all active:scale-90"
+                    aria-label="Siguiente producto de la marca"
+                  >
+                    <Icon name="chevronRight" className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+            </div>
+            <button
+              onClick={() => setShowFullscreen(false)}
+              className="p-2 rounded-full bg-slate-800 text-slate-200 hover:text-white transition-all active:scale-90"
+              aria-label="Cerrar imagen en pantalla completa"
+            >
+              <Icon name="x" className="w-6 h-6" />
+            </button>
+          </div>
+
+          <div className="flex-1 flex items-center justify-center px-2 pb-6 min-h-0">
+            <img
+              src={product.image}
+              alt={product.name}
+              className="max-w-full max-h-full object-contain select-none"
+              draggable={false}
+            />
+          </div>
+
+          <div className="px-4 pb-6 text-center shrink-0">
+            <p className="text-sm font-bold text-white line-clamp-1">{product.name}</p>
+            {product.brand && <p className="text-xs text-teal-400 mt-0.5">{product.brand}</p>}
+            {hasSameBrand && (
+              <p className="text-[10px] text-slate-500 mt-1">Desliza para ver más productos de {product.brand}</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCustomer, onGoToAdmin, isCurrentAdmin }) {
+function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, mode = 'login', confirmKind = 'switchback', onClose }) {
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [errors, setErrors] = useState({});
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [step, setStep] = useState('form'); // 'form' | 'webauthn'
   const [webAuthnStep, setWebAuthnStep] = useState(''); // '' | 'login' | 'register'
   const [webauthnError, setWebauthnError] = useState('');
   const [webauthnSupported, setWebauthnSupported] = useState(true);
+  const [registerMode, setRegisterMode] = useState(false);
+  const [remember, setRemember] = useState(false);
+  const [panel, setPanel] = useState(mode === 'confirm' ? 'confirm' : 'login'); // 'login' | 'confirm'
+  const [confirmKindState, setConfirmKindState] = useState(confirmKind);
 
+  // Soporte WebAuthn (huella / Face ID)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -2667,24 +3464,50 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     return () => { cancelled = true; };
   }, []);
 
-  const suggestions = useMemo(() => {
-    if (phoneNumber.length < 3) return [];
-    return knownCustomers
-      .filter((c) => (c.number || '').startsWith(phoneNumber))
-      .slice(0, 3);
-  }, [knownCustomers, phoneNumber]);
+  // "Recordarme": precarga los campos del último login recordado (no los vacía).
+  useEffect(() => {
+    const mem = loadLoginMemory();
+    if (mem) {
+      setCustomerName(mem.customerName || '');
+      setPhoneCode(mem.phoneCode || '0412');
+      setPhoneNumber(mem.phoneNumber || '');
+      setRemember(true);
+    }
+  }, []);
+
+  // Autocompleta el nombre cuando el teléfono ya está registrado (historial),
+  // sin interferir con el nombre que el usuario escriba manualmente.
+  const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
+  useEffect(() => {
+    if (phoneNumber.length < 7) return;
+    const match = (knownCustomers || []).find((c) => normalizePhoneDigits(c.phone) === phoneKey);
+    if (match && match.name && !customerName.trim()) {
+      setCustomerName(match.name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phoneCode, phoneNumber, knownCustomers]);
 
   const handlePhoneNumber = (value) => {
-    const digits = value.replace(/\D/g, '').slice(0, 7);
-    setPhoneNumber(digits);
-    setShowSuggestions(digits.length >= 3);
+    setPhoneNumber(value.replace(/\D/g, '').slice(0, 7));
   };
 
-  const applyCustomer = (customer) => {
-    setCustomerName(customer.name || customerName);
-    setPhoneCode(customer.code || phoneCode);
-    setPhoneNumber(customer.number || phoneNumber);
-    setShowSuggestions(false);
+  // Interruptor "Recordarme": al activarlo guarda los campos; al desactivarlo los limpia.
+  const toggleRemember = (on) => {
+    setRemember(on);
+    if (on) {
+      saveLoginMemory({ customerName: customerName.trim(), phoneCode, phoneNumber });
+    } else {
+      clearLoginMemory();
+    }
+  };
+
+  // Persiste (o limpia) los campos según el estado de "Recordarme" al iniciar sesión.
+  const persistRemember = () => {
+    if (remember) {
+      saveLoginMemory({ customerName: customerName.trim(), phoneCode, phoneNumber });
+    } else {
+      clearLoginMemory();
+    }
   };
 
   // Determina si el teléfono ya tiene biometría registrada
@@ -2695,6 +3518,69 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     throw new Error(res.data.error || 'No se pudo consultar tu registro biométrico');
   };
 
+  const registerBiometry = async (phoneKey, customerName) => {
+    setWebAuthnStep('register');
+    const res = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: customerName.trim() });
+    if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar el registro');
+    const regResponse = await startRegistration({ optionsJSON: res.data.options });
+    const verifyRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
+    if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'No se pudo guardar tu biometría');
+  };
+
+  // Login o registro con biometría. Si no hay credencial previa, la registra en
+  // el momento (primera vez en este dispositivo/dominio).
+  const authenticateWithBiometry = async ({ phoneKey, customerName }) => {
+    const hasBio = await hasRegisteredBiometry(phoneKey);
+    if (hasBio) {
+      setWebAuthnStep('login');
+      const res = await api.webauthnLoginOptions({ phone: phoneKey });
+      if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar la verificación');
+      try {
+        const authResponse = await startAuthentication({ optionsJSON: res.data.options });
+        const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
+        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
+      } catch (authErr) {
+        // rpID distinto (dominio anterior): re-registra en el dominio actual.
+        const isRpidMismatch = authErr?.name === 'NotAllowedError';
+        if (!isRpidMismatch) throw authErr;
+        await registerBiometry(phoneKey, customerName);
+      }
+    } else {
+      await registerBiometry(phoneKey, customerName);
+    }
+  };
+
+  // Flujo del formulario (login o registro nuevo).
+  const runWebAuthn = async () => {
+    if (!webauthnSupported) {
+      setStep('form');
+      setWebauthnError('Tu dispositivo no soporta biometría. Usa un celular actualizado con huella o Face ID.');
+      return;
+    }
+    setWebauthnError('');
+    setStep('webauthn');
+    setIsWorking(true);
+    try {
+      await authenticateWithBiometry({ phoneKey, customerName });
+      setIsWorking(false);
+      persistRemember();
+      onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
+    } catch (err) {
+      setIsWorking(false);
+      setWebauthnError(friendlyAuthError(err));
+      setStep('form');
+    }
+  };
+
+  // Botón de biometría del formulario: exige el número antes de continuar.
+  const handleBiometricAction = () => {
+    if (!/^\d{7}$/.test(phoneNumber)) {
+      setErrors((prev) => ({ ...prev, phone: 'Ingresa los 7 dígitos del número para verificar con biometría' }));
+      return;
+    }
+    runWebAuthn();
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const newErrors = {};
@@ -2702,55 +3588,31 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
     if (!/^\d{7}$/.test(phoneNumber)) newErrors.phone = 'Ingresa los 7 dígitos del número';
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
+    await runWebAuthn();
+  };
 
-    if (!webauthnSupported) {
-      setStep('form');
-      setWebauthnError('Tu dispositivo no soporta biometría. Usá un celular actualizado con huella o Face ID.');
+  // Confirmación solo-biometría (volver al cliente actual / cerrar sesión):
+  // NO vuelve a pedir nombre ni teléfono, solo huella o Face ID.
+  const handleConfirmBiometric = async () => {
+    const phone = savedCustomer?.phoneNumber || phoneNumber;
+    const code = savedCustomer?.phoneCode || phoneCode;
+    const name = savedCustomer?.customerName || customerName.trim();
+    if (!/^\d{7}$/.test(phone)) {
+      setWebauthnError('No hay un usuario activo para confirmar.');
       return;
     }
-
+    if (!webauthnSupported) {
+      setWebauthnError('Tu dispositivo no soporta biometría. Usa un celular actualizado con huella o Face ID.');
+      return;
+    }
     setWebauthnError('');
     setStep('webauthn');
     setIsWorking(true);
-
+    const confirmKey = `${code}${phone}`.replace(/\D/g, '').slice(-11);
     try {
-      const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
-      const hasBio = await hasRegisteredBiometry(phoneKey);
-
-      if (hasBio) {
-        // Login: pedir huella / Face ID
-        setWebAuthnStep('login');
-        const res = await api.webauthnLoginOptions({ phone: phoneKey });
-        if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar la verificación');
-        try {
-          const authResponse = await startAuthentication({ optionsJSON: res.data.options });
-          const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
-          if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
-        } catch (authErr) {
-          // Si la credencial se registró bajo un rpID anterior (dominio distinto),
-          // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
-          // actual para que quede válida (el server permite el replace por rpID).
-          const isRpidMismatch = authErr?.name === 'NotAllowedError';
-          if (!isRpidMismatch) throw authErr;
-          setWebAuthnStep('register');
-          const rres = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: customerName.trim() });
-          if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
-          const regResponse = await startRegistration({ optionsJSON: rres.data.options });
-          const vRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
-          if (!vRes.ok) throw new Error(vRes.data.error || 'No se pudo guardar tu biometría');
-        }
-      } else {
-        // Registro: crear biometría
-        setWebAuthnStep('register');
-        const res = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: customerName.trim() });
-        if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar el registro');
-        const regResponse = await startRegistration({ optionsJSON: res.data.options });
-        const verifyRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
-        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'No se pudo guardar tu biometría');
-      }
-
+      await authenticateWithBiometry({ phoneKey: confirmKey, customerName: name });
       setIsWorking(false);
-      onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
+      onConfirmBiometric(confirmKindState);
     } catch (err) {
       setIsWorking(false);
       setWebauthnError(friendlyAuthError(err));
@@ -2766,37 +3628,118 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] overflow-y-auto">
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] overflow-y-auto">
         {/* Header */}
-        <div className="p-5 sm:p-7 border-b border-slate-800 text-center">
+        <div className="relative p-5 sm:p-7 border-b border-slate-800 text-center">
+          {(savedCustomer?.customerName || panel === 'confirm') && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Cerrar"
+              className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+            >
+              <Icon name="x" className="w-5 h-5" />
+            </button>
+          )}
           <div className="mx-auto w-14 h-14 sm:w-16 sm:h-16 rounded-3xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 shadow-lg shadow-teal-500/25">
-            <Icon name="user" className="w-7 h-7 sm:w-8 sm:h-8" />
+            <Icon name={panel === 'confirm' && confirmKindState === 'logout' ? 'logOut' : 'user'} className="w-7 h-7 sm:w-8 sm:h-8" />
           </div>
           <h2 className="text-lg sm:text-xl font-black text-white mt-3">
-            {savedCustomer?.customerName ? 'Cambiar de usuario' : 'Bienvenido a Empresas Alvarados'}
+            {panel === 'confirm'
+              ? confirmKindState === 'logout'
+                ? 'Cerrar sesión'
+                : `Volver a ${savedCustomer?.customerName?.split(' ')[0] || 'tu cuenta'}`
+              : registerMode
+              ? 'Crea tu cuenta'
+              : savedCustomer?.customerName
+              ? 'Cambiar de usuario'
+              : 'Bienvenido a Empresas Alvarados'}
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Identifícate para pedir. Tu teléfono + biometría es tu tarjeta de cliente.
+            {panel === 'confirm'
+              ? 'Confirma tu identidad con biometría para continuar.'
+              : registerMode
+              ? 'Regístrate en segundos con tu teléfono y biometría. El nombre se autocompleta en tus próximos accesos.'
+              : 'Identifícate para pedir. Tu teléfono + biometría es tu tarjeta de cliente.'}
           </p>
         </div>
 
-        {step === 'form' ? (
-          <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-4">
-            {/* Nombre */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Tu Nombre *</label>
-              <input
-                type="text"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="Ej: Juan Pérez"
-                autoFocus
-                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
-              />
-              {errors.customerName && <p className="text-xs text-rose-400 mt-1">{errors.customerName}</p>}
-            </div>
+        {panel === 'confirm' ? (
+          step === 'form' ? (
+            <div className="p-5 sm:p-7 space-y-4">
+              <button
+                type="button"
+                onClick={handleConfirmBiometric}
+                disabled={isWorking}
+                className="w-full flex items-center gap-3 p-4 rounded-2xl bg-slate-800/70 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+                  {IS_IOS ? (
+                    <span className="flex items-center gap-1">
+                      <Icon name="apple" className="w-4 h-4" />
+                      <Icon name="faceId" className="w-4 h-4" />
+                    </span>
+                  ) : (
+                    <Icon name="fingerprint" className="w-5 h-5" />
+                  )}
+                </span>
+                <span className="flex-1 text-left">
+                  <span className="block text-[11px] font-bold text-teal-300">Confirmar con biometría</span>
+                  <span className="block text-[11px] text-slate-400 leading-snug">
+                    {IS_IOS ? 'Usa tu Face ID' : 'Usa tu huella'}
+                    {!webauthnSupported && <span className="text-rose-400"> · Tu dispositivo no lo soporta</span>}
+                  </span>
+                </span>
+                <Icon name="arrowRight" className="w-4 h-4 text-teal-400 shrink-0" />
+              </button>
 
-            {/* Teléfono */}
+              {webauthnError && (
+                <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5">{webauthnError}</p>
+              )}
+
+              {confirmKindState === 'logout' && (
+                <button
+                  type="button"
+                  onClick={() => onConfirmBiometric('logout')}
+                  className="w-full py-2 text-[11px] text-slate-500 hover:text-rose-300 transition-colors"
+                >
+                  Prefiero salir sin biometría
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="p-8 sm:p-10 flex flex-col items-center text-center space-y-4">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 shadow-xl shadow-teal-500/30 animate-pulse">
+                  <Icon name={webAuthnStep === 'login' ? 'user' : 'check'} className="w-10 h-10" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-4 border-slate-900 flex items-center justify-center">
+                  <Icon name="check" className="w-3 h-3 text-slate-950" />
+                </span>
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-bold text-white">
+                  {webAuthnStep === 'login' ? 'Confirma tu identidad' : 'Registra tu biometría'}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  {webAuthnStep === 'login'
+                    ? 'Usa tu huella o Face ID para confirmar que eres tú.'
+                    : 'Usa tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={resetForm}
+                disabled={isWorking}
+                className="text-xs text-slate-500 hover:text-teal-300 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          )
+        ) : step === 'form' ? (
+          <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-4">
+            {/* Teléfono primero (el nombre se autocompleta si ya está registrado) */}
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono / WhatsApp *</label>
               <div className="flex gap-2">
@@ -2814,53 +3757,74 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
                   inputMode="numeric"
                   value={phoneNumber}
                   onChange={(e) => handlePhoneNumber(e.target.value)}
-                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                   placeholder="1234567"
                   maxLength={7}
+                  autoFocus={!savedCustomer?.customerName}
                   className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
                 />
               </div>
-
-              {showSuggestions && suggestions.length > 0 && (
-                <div className="mt-2 space-y-1.5 animate-fade-in">
-                  <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-                    Clientes conocidos — toca para autocompletar
-                  </p>
-                  {suggestions.map((c) => (
-                    <button
-                      key={c.phone}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        applyCustomer(c);
-                      }}
-                      className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-slate-800 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all text-left"
-                    >
-                      <span className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 shrink-0">
-                        <Icon name="user" className="w-3.5 h-3.5" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-xs font-bold text-white truncate">{c.name}</span>
-                        <span className="block text-[10px] text-slate-400 truncate">{c.code} {c.number}</span>
-                      </span>
-                      <Icon name="arrowRight" className="w-3.5 h-3.5 text-teal-400 shrink-0 ml-auto" />
-                    </button>
-                  ))}
-                </div>
-              )}
               {errors.phone && <p className="text-xs text-rose-400 mt-1">{errors.phone}</p>}
             </div>
 
-            {/* Indicador de biometría */}
-            <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-800/70 border border-teal-500/25">
-              <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
-                <Icon name="check" className="w-4 h-4" />
-              </span>
-              <p className="text-[11px] text-slate-300 leading-snug">
-                Verificación por <span className="font-bold text-teal-300">biometría del celular</span> (huella o Face ID).
-                {!webauthnSupported && <span className="block text-rose-400 mt-1">Tu dispositivo no lo soporta.</span>}
-              </p>
+            {/* Nombre */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Tu Nombre *</label>
+              <input
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+              />
+              {errors.customerName && <p className="text-xs text-rose-400 mt-1">{errors.customerName}</p>}
             </div>
+
+            {/* Recordarme: conserva los campos para el próximo login */}
+            <button
+              type="button"
+              onClick={() => toggleRemember(!remember)}
+              className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-800/50 border border-slate-700/70 hover:border-teal-500/40 transition-all"
+            >
+              <span className="flex items-center gap-2.5">
+                <span className={`p-1.5 rounded-lg transition-all ${remember ? 'bg-teal-500/25 text-teal-400' : 'bg-slate-700/50 text-slate-500'}`}>
+                  <Icon name="check" className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-left">
+                  <span className="block text-xs font-semibold text-slate-200">Recordarme</span>
+                  <span className="block text-[10px] text-slate-500">Conservo estos datos para tu próxima visita</span>
+                </span>
+              </span>
+              <span className={`relative w-11 h-6 rounded-full transition-all shrink-0 ${remember ? 'bg-teal-500' : 'bg-slate-700'}`}>
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${remember ? 'left-5' : 'left-0.5'}`} />
+              </span>
+            </button>
+
+            {/* Botón de biometría accionable (huella / Face ID) */}
+            <button
+              type="button"
+              onClick={handleBiometricAction}
+              disabled={isWorking}
+              className="w-full flex items-center gap-3 p-3.5 rounded-2xl bg-slate-800/70 border border-teal-500/30 hover:border-teal-400/60 hover:bg-slate-700/60 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+                {IS_IOS ? (
+                  <span className="flex items-center gap-1">
+                    <Icon name="apple" className="w-4 h-4" />
+                    <Icon name="faceId" className="w-4 h-4" />
+                  </span>
+                ) : (
+                  <Icon name="fingerprint" className="w-5 h-5" />
+                )}
+              </span>
+              <span className="flex-1 text-left">
+                <span className="block text-[11px] font-bold text-teal-300">Verificar con biometría</span>
+                <span className="block text-[11px] text-slate-400 leading-snug">
+                  {IS_IOS ? 'Usa tu Face ID' : 'Usa tu huella'}
+                  {!webauthnSupported && <span className="text-rose-400"> · Tu dispositivo no lo soporta</span>}
+                </span>
+              </span>
+              <Icon name="arrowRight" className="w-4 h-4 text-teal-400 shrink-0" />
+            </button>
 
             {webauthnError && (
               <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5">{webauthnError}</p>
@@ -2874,12 +3838,29 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Icon name="check" className="w-4 h-4" />
-                Entrar a Empresas Alvarados
+                {registerMode ? 'Crear mi cuenta' : 'Entrar a Empresas Alvarados'}
               </button>
+              {registerMode ? (
+                <button
+                  type="button"
+                  onClick={() => setRegisterMode(false)}
+                  className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
+                >
+                  ¿Ya tienes cuenta? Iniciar sesión
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setRegisterMode(true)}
+                  className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-teal-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
+                >
+                  ¿Primera vez? Regístrate
+                </button>
+              )}
               {savedCustomer?.customerName && (
                 <button
                   type="button"
-                  onClick={onSwitchCustomer}
+                  onClick={() => { setConfirmKindState('switchback'); setPanel('confirm'); }}
                   className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
                 >
                   Volver a {savedCustomer.customerName.split(' ')[0]}
@@ -2913,12 +3894,12 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onSwitchCusto
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white">
-                {webAuthnStep === 'login' ? 'Confirmá tu identidad' : 'Registrá tu biometría'}
+                {webAuthnStep === 'login' ? 'Confirma tu identidad' : 'Registra tu biometría'}
               </h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 {webAuthnStep === 'login'
-                  ? 'Usá tu huella o Face ID para confirmar que sos vos.'
-                  : 'Usá tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
+                  ? 'Usa tu huella o Face ID para confirmar que eres tú.'
+                  : 'Usa tu huella o Face ID una vez. La próxima vez te reconoceremos al instante.'}
               </p>
             </div>
             <button
@@ -2943,7 +3924,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92vh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-scale-up">
+      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
         {/* Drawer Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
@@ -3075,17 +4056,218 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
   );
 }
 
+// Drawer de Mis Pedidos (mismo patrón que el carrito: ante menú inferior, X para cerrar)
+function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrackLiveOrder, onRequestCancelOrder }) {
+  const [page, setPage] = useState(1);
+  const [dateFilter, setDateFilter] = useState({ preset: 'all', date: null });
+  const [showCalendar, setShowCalendar] = useState(false);
+  const PAGE_SIZE = 6;
+
+  const filtered = useMemo(() => {
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const dow = (todayStart.getDay() + 6) % 7; // 0 = Monday
+    const thisMon = new Date(todayStart); thisMon.setDate(thisMon.getDate() - dow);
+    const thisSun = new Date(thisMon); thisSun.setDate(thisSun.getDate() + 6);
+    const lastMon = new Date(thisMon); lastMon.setDate(lastMon.getDate() - 7);
+    const lastSun = new Date(thisMon); lastSun.setDate(lastSun.getDate() - 1);
+    return (orders || []).filter((o) => {
+      const d = parseOrderDate(o);
+      if (isNaN(d)) return true;
+      switch (dateFilter.preset) {
+        case 'today': return startOfDay(d).getTime() === todayStart.getTime();
+        case 'thisWeek': return d >= thisMon && d <= thisSun;
+        case 'lastWeek': return d >= lastMon && d <= lastSun;
+        case 'day': return dateFilter.date && toYMD(d) === dateFilter.date;
+        default: return true;
+      }
+    });
+  }, [orders, dateFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  useEffect(() => { setPage(1); }, [dateFilter]);
+  useEffect(() => { if (isOpen) { setPage(1); setDateFilter({ preset: 'all', date: null }); } }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+
+      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+        {/* Drawer Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400">
+              <Icon name="package" className="w-5 h-5" />
+            </span>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white">Mis Pedidos</h2>
+              <span className="block text-[11px] text-slate-400">{orders?.length || 0} pedido{(orders?.length || 0) !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+          >
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Drawer Body */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+          {(!orders || orders.length === 0) ? (
+            <div className="h-full flex flex-col items-center justify-center text-center space-y-3 text-slate-500">
+              <Icon name="package" className="w-16 h-16 stroke-1 text-slate-700" />
+              <p className="font-semibold text-slate-400">Todavía no tienes pedidos</p>
+              <p className="text-xs">Haz tu primer pedido y aparecerá aquí.</p>
+            </div>
+          ) : (
+            <>
+              {/* Filtros de fecha */}
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { key: 'all', label: 'Todos' },
+                    { key: 'today', label: 'Hoy' },
+                    { key: 'thisWeek', label: 'Esta semana' },
+                    { key: 'lastWeek', label: 'Semana anterior' }
+                  ].map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setDateFilter({ preset: f.key, date: null })}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                        dateFilter.preset === f.key
+                          ? 'bg-teal-500 text-slate-950 shadow-sm'
+                          : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-700/60'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowCalendar(!showCalendar)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-300 text-[11px] font-medium hover:bg-slate-700/60 flex items-center gap-1.5"
+                    >
+                      <Icon name="filter" className="w-3.5 h-3.5" />
+                      {dateFilter.preset === 'day' && dateFilter.date ? dateFilter.date : 'Calendario'}
+                    </button>
+                    {showCalendar && (
+                      <MiniCalendar
+                        value={dateFilter.date}
+                        onChange={(d) => { setDateFilter({ preset: 'day', date: d }); setShowCalendar(false); }}
+                        onClose={() => setShowCalendar(false)}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Paginación */}
+                <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                  <span>
+                    Mostrando {paged.length > 0 ? ((safePage - 1) * PAGE_SIZE + 1) : 0}–{Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      disabled={safePage === 1}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
+                    >
+                      <Icon name="minus" className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="px-2 font-semibold text-white">{safePage} / {totalPages}</span>
+                    <button
+                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                      disabled={safePage === totalPages}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista de pedidos */}
+              {paged.length === 0 ? (
+                <div className="text-center py-8 space-y-2 text-slate-500">
+                  <Icon name="search" className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-xs font-semibold text-slate-400">No hay pedidos en este filtro</p>
+                </div>
+              ) : (
+                paged.map((o) => {
+                  const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
+                  const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
+                  return (
+                    <div key={o.id} className="p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border border-slate-700/50">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs sm:text-sm font-bold text-white">
+                          Pedido <span className="text-teal-400">#{o.id}</span>
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${style.badge}`}>
+                          {STATUS_LABELS[o.status] || 'Pendiente'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
+                        {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
+                      </p>
+                      <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
+                        {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
+                      </p>
+                      <div className="flex items-center gap-2 mt-2.5">
+                        <button
+                          onClick={() => onViewOrderDetail(o)}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-1"
+                        >
+                          <Icon name="eye" className="w-3 h-3" />
+                          Ver detalle
+                        </button>
+                        {o.type === 'delivery' && o.status !== 'cancelado' && o.status !== 'entregado' && (
+                          <button
+                            onClick={() => onTrackLiveOrder(o)}
+                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1"
+                          >
+                            <Icon name="mapPin" className="w-3 h-3" />
+                            Rastrear
+                          </button>
+                        )}
+                        {cancellable && (
+                          <button
+                            onClick={() => onRequestCancelOrder(o)}
+                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1"
+                          >
+                            <Icon name="x" className="w-3 h-3" />
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
   return (
     <button
+      data-cart-target
       onClick={onOpen}
       style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
-      className="fixed bottom-0 left-0 right-0 sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg z-40 px-4 sm:px-5 pt-3.5 sm:pt-4 bg-slate-950/90 sm:rounded-3xl border-t sm:border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-scale-up hover:border-teal-400/60 transition-all group"
+      className="fixed bottom-[4.6rem] sm:bottom-4 left-0 right-0 sm:left-1/2 sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg z-40 px-4 sm:px-5 pt-3.5 sm:pt-4 bg-slate-950/90 sm:rounded-3xl border-t sm:border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-screen-up hover:border-teal-400/60 transition-all group"
     >
       <div className="flex items-center gap-2.5 sm:gap-3">
         <span className="relative p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-teal-500/15 text-teal-400">
           <Icon name="shoppingBag" className="w-5 h-5" />
-          <span className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">
+          <span key={cartCount} className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-badge-pop">
             {cartCount}
           </span>
         </span>
@@ -3108,6 +4290,157 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
         <Icon name="arrowRight" className="w-4 h-4" />
       </span>
     </button>
+  );
+}
+
+// Barra de navegación inferior fija (solo móvil). Ofrece acceso a una mano a
+// Tienda, Carrito, Mis Pedidos, Mi Cuenta y al Panel. En vista admin muestra
+// los accesos principales del panel.
+function BottomTabBar({
+  activeView,
+  customerTab,
+  onCustomerTab,
+  cartCount,
+  hasCustomer,
+  isAdmin,
+  onOpenCart,
+  onGoAdmin,
+  onGoStore,
+  onCustomerLogout,
+  adminTab,
+  onAdminTab,
+  pendingOrders,
+  onLogout,
+  isAdminAuthed
+}) {
+  const base =
+    'flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 flex-1 min-w-0 rounded-2xl transition-all duration-300 active:scale-95';
+  const activeTab =
+    'bg-teal-500/20 text-teal-300 border border-teal-500/30 shadow-lg shadow-teal-500/10';
+  const idleTab = 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 border border-transparent';
+
+  const customerTabs = [
+    {
+      key: 'store',
+      label: 'Tienda',
+      icon: 'home',
+      onClick: onGoStore,
+      badge: null
+    },
+    {
+      key: 'cart',
+      label: 'Carrito',
+      icon: 'bag',
+      onClick: onOpenCart,
+      badge: cartCount > 0 ? cartCount : null
+    },
+    {
+      key: 'orders',
+      label: 'Mis Pedidos',
+      icon: 'list',
+      onClick: () => {
+        if (!hasCustomer) {
+          onOpenCart(); // el checkout/identidad obliga a identificarse
+          return;
+        }
+        onCustomerTab('orders');
+      },
+      badge: null
+    },
+    {
+      key: 'account',
+      label: 'Mi Cuenta',
+      icon: 'user',
+      onClick: () => {
+        if (!hasCustomer) {
+          onOpenCart();
+          return;
+        }
+        onCustomerTab('account');
+      },
+      badge: null
+    }
+  ];
+
+  const adminTabs = [
+    { key: 'inventory', label: 'Inventario', icon: 'package', onClick: () => onAdminTab('inventory'), badge: null },
+    { key: 'orders', label: 'Pedidos', icon: 'clock', onClick: () => onAdminTab('orders'), badge: pendingOrders > 0 ? pendingOrders : null },
+    { key: 'benefited', label: 'Beneficiados', icon: 'users', onClick: () => onAdminTab('benefited'), badge: null },
+    { key: 'blacklist', label: 'Lista Negra', icon: 'alertTriangle', onClick: () => onAdminTab('blacklist'), badge: null },
+    { key: 'analytics', label: 'Estadísticas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null }
+  ];
+
+  const tabs = activeView === 'admin' && isAdminAuthed ? adminTabs : customerTabs;
+
+  // En vista cliente: si el tab actual es orders/account y el usuario tocó esa
+  // sección, se marca activo. Carrito siempre "activo" mientras tenga items.
+  const isTabActive = (t) => {
+    if (activeView === 'admin' && isAdminAuthed) return adminTab === t.key;
+    if (t.key === 'cart') return cartCount > 0;
+    return customerTab === t.key;
+  };
+
+  // En el login admin (admin sin autenticar) no se muestran opciones de navegación.
+  if (activeView === 'admin' && !isAdminAuthed) return null;
+
+  return (
+    <nav
+      style={{ paddingBottom: 'max(0.4rem, env(safe-area-inset-bottom))' }}
+      className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 flex items-stretch gap-1 px-2 pt-2 pb-1 animate-screen-up"
+      aria-label="Navegación principal"
+    >
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={t.onClick}
+          className={`${base} ${isTabActive(t) ? activeTab : idleTab}`}
+          aria-label={t.label}
+        >
+          <span className="relative">
+            <Icon name={t.icon} className="w-5 h-5" />
+            {t.badge != null && (
+              <span
+                key={`${t.key}-${t.badge}`}
+                className="absolute -top-1.5 -right-2 bg-rose-500 text-white text-[9px] font-black min-w-4 h-4 px-1 rounded-full flex items-center justify-center animate-badge-pop"
+              >
+                {t.badge}
+              </span>
+            )}
+          </span>
+          <span className="text-[10px] font-bold leading-none truncate">{t.label}</span>
+        </button>
+      ))}
+      {activeView === 'customer' && isAdmin && (
+        <button
+          onClick={onGoAdmin}
+          className={`${base} text-cyan-400 hover:text-cyan-300 ${idleTab}`}
+          aria-label="Ir al panel de administración"
+        >
+          <Icon name="layers" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Panel</span>
+        </button>
+      )}
+      {activeView === 'customer' && hasCustomer && (
+        <button
+          onClick={onCustomerLogout}
+          className={`${base} text-rose-400 hover:text-rose-300 ${idleTab}`}
+          aria-label="Cerrar sesión"
+        >
+          <Icon name="logOut" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Salir</span>
+        </button>
+      )}
+      {activeView === 'admin' && isAdminAuthed && (
+        <button
+          onClick={onLogout}
+          className={`${base} text-rose-400 hover:text-rose-300 ${idleTab}`}
+          aria-label="Cerrar sesión"
+        >
+          <Icon name="x" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Salir</span>
+        </button>
+      )}
+    </nav>
   );
 }
 
@@ -3134,20 +4467,15 @@ const makePinIcon = (color, label) =>
 function DeliveryMap({ order, storeLocation }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
-  const layersRef = useRef(null);
+  const layerGroupRef = useRef(null);
+  const fittedRef = useRef(false);
+  const courierMarkerRef = useRef(null);
+  const routeRef = useRef(null);
 
   const dest = order && order.lat != null && order.lng != null;
   const courier = order && order.courier_lat != null && order.courier_lng != null;
   const store = storeLocation && storeLocation.lat != null && storeLocation.lng != null;
   const showMap = order && order.type === 'delivery' && (dest || courier || store);
-
-  const markers = useMemo(() => {
-    const list = [];
-    if (store) list.push({ lat: Number(storeLocation.lat), lng: Number(storeLocation.lng), kind: 'store' });
-    if (dest) list.push({ lat: Number(order.lat), lng: Number(order.lng), kind: 'dest' });
-    if (courier) list.push({ lat: Number(order.courier_lat), lng: Number(order.courier_lng), kind: 'courier' });
-    return list;
-  }, [store, dest, courier, storeLocation?.lat, storeLocation?.lng, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
 
   // Crea el mapa una sola vez.
   useEffect(() => {
@@ -3157,67 +4485,101 @@ function DeliveryMap({ order, storeLocation }) {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
     mapRef.current = map;
-    layersRef.current = L.layerGroup().addTo(map);
+    layerGroupRef.current = L.layerGroup().addTo(map);
     return () => {
       map.remove();
       mapRef.current = null;
-      layersRef.current = null;
+      layerGroupRef.current = null;
+      fittedRef.current = false;
+      courierMarkerRef.current = null;
+      routeRef.current = null;
     };
   }, [showMap]);
 
-  // Dibuja marcadores y la ruta OSRM cuando cambian los datos.
+  // Dibuja/actualiza marcadores y ruta cuando cambian los datos. El viewport
+  // solo se ajusta la primera vez (o si aún no hay repartidor); después el mapa
+  // conserva el zoom y el desplazamiento que el usuario estableció, y cuando el
+  // repartidor sale de la vista se centra suavemente en él sin cambiar el zoom.
   useEffect(() => {
     const map = mapRef.current;
-    const layerGroup = layersRef.current;
+    const layerGroup = layerGroupRef.current;
     if (!map || !layerGroup) return;
-    layerGroup.clearLayers();
 
-    if (markers.length === 0) return;
-    markers.forEach((m) => {
+    const pts = [];
+    if (store) pts.push({ lat: Number(storeLocation.lat), lng: Number(storeLocation.lng), kind: 'store' });
+    if (dest) pts.push({ lat: Number(order.lat), lng: Number(order.lng), kind: 'dest' });
+    if (courier) pts.push({ lat: Number(order.courier_lat), lng: Number(order.courier_lng), kind: 'courier' });
+
+    // Marcadores estáticos (comercio y destino) se recrean; el del repartidor se
+    // reutiliza para no parpadear ni resetear el mapa en cada update.
+    layerGroup.clearLayers();
+    let courierMarker = courierMarkerRef.current;
+    pts.forEach((m) => {
       const icon =
         m.kind === 'courier'
           ? makePinIcon('#10b981', 'REPARTIDOR')
           : m.kind === 'store'
           ? makePinIcon('#22d3ee', 'COMERCIO')
           : makePinIcon('#f43f5e', 'DESTINO');
-      L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+      if (m.kind === 'courier') {
+        if (!courierMarker) {
+          courierMarker = L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+          courierMarkerRef.current = courierMarker;
+        } else {
+          courierMarker.setLatLng([m.lat, m.lng]);
+          courierMarker.setIcon(icon);
+          courierMarker.addTo(layerGroup);
+        }
+      } else {
+        L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+      }
     });
 
-    // Línea recta provisional entre repartidor y destino.
-    let straight = null;
+    // Ruta (línea recta provisional → OSRM cuando responde).
+    if (routeRef.current) {
+      layerGroup.removeLayer(routeRef.current);
+      routeRef.current = null;
+    }
     if (courier && dest) {
-      straight = L.polyline(
+      routeRef.current = L.polyline(
         [
           [Number(order.courier_lat), Number(order.courier_lng)],
           [Number(order.lat), Number(order.lng)]
         ],
         { color: '#10b981', weight: 3, dashArray: '6 6', opacity: 0.7 }
       ).addTo(layerGroup);
-    }
-
-    // Pedido de ruta real a OSRM (gratuito, sin key). Si responde, reemplaza la línea.
-    if (courier && dest) {
       const url = `https://router.project-osrm.org/route/v1/driving/${Number(order.courier_lng)},${Number(order.courier_lat)};${Number(order.lng)},${Number(order.lat)}?overview=full&geometries=geojson`;
       fetch(url)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((data) => {
           const coords = data?.routes?.[0]?.geometry?.coordinates;
           if (!Array.isArray(coords) || coords.length < 2) return;
-          if (straight) layerGroup.removeLayer(straight);
-          L.polyline(
+          if (routeRef.current) layerGroup.removeLayer(routeRef.current);
+          const poly = L.polyline(
             coords.map((c) => [c[1], c[0]]),
             { color: '#10b981', weight: 5, opacity: 0.9 }
           ).addTo(layerGroup);
+          routeRef.current = poly;
         })
         .catch(() => {});
     }
 
-    // Ajusta el viewport para abarcar todos los puntos.
-    const latLngs = markers.map((m) => [m.lat, m.lng]);
-    if (latLngs.length) {
+    // Ajuste de viewport: solo en el primer render (o cuando aún no hay
+    // repartidor en vivo). No se vuelve a llamar en cada update del rastreo.
+    const shouldFit = !fittedRef.current || !courier;
+    if (pts.length && shouldFit) {
+      const latLngs = pts.map((p) => [p.lat, p.lng]);
       map.fitBounds(L.latLngBounds(latLngs).pad(0.25), { animate: false });
+      fittedRef.current = true;
+    } else if (courier) {
+      // Sigue al repartidor: si salió del viewport actual, lo centra con pan
+      // suave SIN cambiar el zoom que el usuario dejó.
+      const courierLatLng = L.latLng(Number(order.courier_lat), Number(order.courier_lng));
+      if (!map.getBounds().contains(courierLatLng)) {
+        map.panTo(courierLatLng, { animate: true, duration: 0.5 });
+      }
     }
-  }, [markers, courier, dest, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
+  }, [courier, dest, store, storeLocation?.lat, storeLocation?.lng, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
 
   const destUrl = dest ? `https://www.google.com/maps?q=${Number(order.lat)},${Number(order.lng)}` : null;
   const courierUrl = courier ? `https://www.google.com/maps?q=${Number(order.courier_lat)},${Number(order.courier_lng)}` : null;
@@ -3385,7 +4747,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
 
   const confirm = () => {
     if (!point) {
-      setLocError('Tocá el mapa o buscá una dirección para elegir el punto.');
+      setLocError('Toca el mapa o busca una dirección para elegir el punto.');
       return;
     }
     onPick({ lat: Number(point.lat), lng: Number(point.lng), address: search.trim() || null });
@@ -3402,7 +4764,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
               {title || 'Elegir punto en el mapa'}
             </h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Buscá una dirección, tocá el mapa o arrastrá el marcador.
+              Busca una dirección, toca el mapa o arrastra el marcador.
             </p>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
@@ -3596,7 +4958,7 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
   const [formData, setFormData] = useState({
     customerName: savedCustomer?.customerName || '',
     phoneCode: savedCustomer?.phoneCode || '0412',
@@ -3627,7 +4989,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
   const handleUseMyLocation = async () => {
     setLocError('');
     if (!navigator.geolocation) {
-      setLocError('Tu navegador no soporta geolocalización. Ingresá la dirección manualmente.');
+      setLocError('Tu navegador no soporta geolocalización. Ingresa la dirección manualmente.');
       addToast('Tu navegador no soporta geolocalización', 'error');
       return;
     }
@@ -3639,7 +5001,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
         const state = await perm;
         if (state && state.state === 'denied') {
           setLocError(
-            'El navegador tiene la ubicación bloqueada. Para que pregunte de nuevo, activá el permiso de ubicación para este sitio en los ajustes del navegador (icono del candado junto a la URL) y recargá la página.'
+            'El navegador tiene la ubicación bloqueada. Para que pregunte de nuevo, activa el permiso de ubicación para este sitio en los ajustes del navegador (icono del candado junto a la URL) y recarga la página.'
           );
           addToast('Permiso de ubicación bloqueado en el navegador', 'error');
           return;
@@ -3661,8 +5023,8 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
         setLocating(false);
         const denied = err && err.code === 1;
         const msg = denied
-          ? 'Permiso de ubicación denegado. Activalo en los ajustes del navegador (candado junto a la URL) y recargá, o ingresá la dirección manualmente.'
-          : 'No se pudo obtener la ubicación. Ingresá la dirección manualmente.';
+          ? 'Permiso de ubicación denegado. Actívalo en los ajustes del navegador (candado junto a la URL) y recarga, o ingresa la dirección manualmente.'
+          : 'No se pudo obtener la ubicación. Ingresa la dirección manualmente.';
         setLocError(msg);
         addToast(msg, 'error');
       },
@@ -3704,6 +5066,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (isPlacingOrder) return;
     if (validate()) {
       const full = {
         ...formData,
@@ -3732,7 +5095,10 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+        {/* Handle visual para indicar arrastre en móvil */}
+        <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
+
         {/* Header */}
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
@@ -4017,10 +5383,11 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, onSubmit, savedCustomer
 
           <button
             type="submit"
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+            disabled={isPlacingOrder}
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none"
           >
             <Icon name="check" className="w-5 h-5" />
-            <span>Confirmar y Enviar Pedido</span>
+            <span>{isPlacingOrder ? 'Enviando pedido…' : 'Confirmar y Enviar Pedido'}</span>
           </button>
         </form>
 
@@ -4821,7 +6188,7 @@ function AdminView({
           {/* Promo Editor Modal */}
           {isPromoModalOpen && promoDraft && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm">
-              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl animate-scale-up space-y-4 max-h-[92vh] overflow-y-auto">
+              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl animate-screen-up space-y-4 max-h-[92vh] overflow-y-auto">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-white text-lg">{promoDraft.id.startsWith('promo-') ? 'Nueva Promo' : 'Editar Promo'}</h4>
                   <button onClick={() => setIsPromoModalOpen(false)} className="text-slate-400 hover:text-white">
@@ -5005,7 +6372,7 @@ function AdminView({
             </div>
           ) : (
             <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
-              Aún no configuraste la ubicación del comercio. Usá el botón para elegirla en el mapa.
+              Aún no configuraste la ubicación del comercio. Usa el botón para elegirla en el mapa.
             </div>
           )}
 
@@ -5379,11 +6746,11 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
   const handleConfirm = async () => {
     const key = customerPhone.replace(/\D/g, '').slice(-11);
     if (key.length < 7) {
-      setError('Ingresá el número de teléfono del deudor');
+      setError('Ingresa el número de teléfono del deudor');
       return;
     }
     if (selectedItems.length === 0) {
-      setError('Seleccioná al menos un producto');
+      setError('Selecciona al menos un producto');
       return;
     }
     setError('');
@@ -5395,7 +6762,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -5403,7 +6770,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
               Añadir productos a la deuda
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Seleccioná el cliente y los productos que debe (ventas presenciales o deudas viejas).
+              Selecciona el cliente y los productos que debe (ventas presenciales o deudas viejas).
             </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
@@ -5599,7 +6966,7 @@ function DebtDetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -5730,7 +7097,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -5957,21 +7324,21 @@ const friendlyAuthError = (err) => {
   // del servidor o un fallback amigable, así que se muestran tal cual.
   if (name === 'Error' && err?.message) return err.message;
   if (name === 'NotAllowedError') {
-    return 'Verificación cancelada. Para continuar, aceptá la huella o Face ID cuando tu teléfono lo pida.';
+    return 'Verificación cancelada. Para continuar, acepta la huella o Face ID cuando tu teléfono lo pida.';
   }
   if (name === 'NotFoundError' || name === 'NotSupportedError') {
-    return 'Tu dispositivo no tiene biometría configurada. Activá la huella o Face ID en los ajustes y probá de nuevo.';
+    return 'Tu dispositivo no tiene biometría configurada. Activa la huella o Face ID en los ajustes y prueba de nuevo.';
   }
   if (name === 'AbortError') {
-    return 'La verificación tardó demasiado y se canceló. Intentá de nuevo.';
+    return 'La verificación tardó demasiado y se canceló. Intenta de nuevo.';
   }
   if (name === 'TimeoutError') {
-    return 'El tiempo de espera se agotó. Intentá de nuevo.';
+    return 'El tiempo de espera se agotó. Intenta de nuevo.';
   }
   if (name === 'SecurityError' || name === 'InvalidStateError') {
-    return 'Tu dispositivo no pudo completar la verificación. Intentá de nuevo o usá un teléfono más reciente.';
+    return 'Tu dispositivo no pudo completar la verificación. Intenta de nuevo o usa un teléfono más reciente.';
   }
-  return 'No se pudo completar la verificación. Intentá de nuevo.';
+  return 'No se pudo completar la verificación. Intenta de nuevo.';
 };
 
 // Recordatorio corto para un cobro programado que ya venció.
@@ -6180,7 +7547,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     }
 
     setImageSearchError(
-      'No se pudieron cargar las sugerencias de imágenes. Verificá tu conexión a internet e intentá de nuevo.'
+      'No se pudieron cargar las sugerencias de imágenes. Verifica tu conexión a internet e intenta de nuevo.'
     );
   };
 
@@ -6201,7 +7568,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <h2 className="text-lg sm:text-xl font-bold text-white">
             {productToEdit ? 'Editar Producto' : 'Crear Nuevo Producto'}
@@ -6454,7 +7821,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                       >
                         {imageSource}
                       </a>{' '}
-                      (CC BY-SA). Hacé clic en una miniatura para usarla.
+                      (CC BY-SA). Haz clic en una miniatura para usarla.
                     </>
                   ) : (
                     <>
@@ -6467,7 +7834,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                       >
                         Pexels
                       </a>
-                      . Hacé clic en una miniatura para usarla.
+                      . Haz clic en una miniatura para usarla.
                     </>
                   )}
                 </p>

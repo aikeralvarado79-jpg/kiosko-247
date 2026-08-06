@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // Probar refreshMirror() sin tocar una base real: mockeamos pg.Pool con un client fake.
 // vi.mock se hoistea; por eso las variables compartidas se crean con vi.hoisted.
 
-const fakeTables = ['products', 'categories', 'orders', 'settings', 'customers', 'webauthn_credentials'];
+const fakeTables = ['products', 'categories', 'orders', 'settings', 'customers'];
 
 const h = vi.hoisted(() => ({
   currentClient: null,
@@ -82,6 +82,18 @@ describe('refreshMirror', () => {
     const sqls = client.query.mock.calls.map((c) => String(c[0]));
     expect(sqls.some((s) => s.includes('CREATE SCHEMA IF NOT EXISTS staging'))).toBe(true);
     expect(sqls.filter((s) => s.includes('INSERT INTO')).length).toBe(fakeTables.length);
+  });
+
+  it('permite refrescar hacia el schema de la app en staging (KIOSKO_DB_SCHEMA=staging)', async () => {
+    process.env.DATABASE_URL = 'postgres://fake';
+    process.env.KIOSKO_DB_SCHEMA = 'staging';
+    delete process.env.MIRROR_SOURCE_SCHEMA;
+    delete process.env.MIRROR_TARGET_SCHEMA;
+    const store = await import('./store.js');
+    const res = await store.refreshMirror();
+    expect(res.ok).toBe(true);
+    expect(res.source).toBe('public');
+    expect(res.target).toBe('staging');
   });
 
   it('re-agrega columnas propias de staging tras copiar desde produccion', async () => {

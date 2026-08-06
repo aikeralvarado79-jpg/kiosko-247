@@ -101,7 +101,7 @@ describe('mutaciones atómicas en Postgres', () => {
     expect(sqls.some((s) => /DELETE FROM products\b/.test(s))).toBe(false);
   });
 
-  it('refreshMirror rechaza si el destino es el schema de la app', async () => {
+  it('refreshMirror rechaza si el destino es public (producción)', async () => {
     process.env.DATABASE_URL = 'postgres://fake';
     process.env.MIRROR_SOURCE_SCHEMA = 'staging';
     process.env.MIRROR_TARGET_SCHEMA = 'public';

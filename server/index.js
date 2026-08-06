@@ -89,15 +89,19 @@ async function verifyAdminPassword(phone, input) {
 
 // Auth
 app.post('/api/auth/login', async (req, res) => {
-  const { phone, password } = req.body || {};
-  const key = String(phone || '').replace(/\D/g, '').slice(-11);
-  if (key && !ADMIN_PHONES.includes(key)) {
-    return res.status(401).json({ error: 'Ese número no tiene acceso al panel' });
+  try {
+    const { phone, password } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (key && !ADMIN_PHONES.includes(key)) {
+      return res.status(401).json({ error: 'Ese número no tiene acceso al panel' });
+    }
+    const ok = await verifyAdminPassword(key || phone, password);
+    if (!ok) return res.status(401).json({ error: 'Contraseña incorrecta' });
+    const token = signToken({ role: 'admin', phone: key || '', iat: Date.now() });
+    res.json({ token });
+  } catch (err) {
+    fail(res, err, 'No se pudo iniciar sesión. Intenta de nuevo.');
   }
-  const ok = await verifyAdminPassword(key || phone, password);
-  if (!ok) return res.status(401).json({ error: 'Contraseña incorrecta' });
-  const token = signToken({ role: 'admin', phone: key || '', iat: Date.now() });
-  res.json({ token });
 });
 
 // Recuperación de contraseña admin: verifica biometría del teléfono admin y guarda nueva contraseña
@@ -120,7 +124,7 @@ app.post('/api/auth/recover', async (req, res) => {
     await store.setAdminCredential(key, { salt, hash });
     res.json({ ok: true });
   } catch (err) {
-    fail(res, err, 'No se pudo recuperar la contraseña. Intentá de nuevo.');
+    fail(res, err, 'No se pudo recuperar la contraseña. Intenta de nuevo.');
   }
 });
 
@@ -138,7 +142,7 @@ app.post('/api/auth/admin/biometric-login', async (req, res) => {
     const token = signToken({ role: 'admin', phone: key, iat: Date.now() });
     res.json({ token });
   } catch (err) {
-    fail(res, err, 'No se pudo verificar la biometría. Intentá de nuevo.');
+    fail(res, err, 'No se pudo verificar la biometría. Intenta de nuevo.');
   }
 });
 
@@ -155,7 +159,7 @@ app.post('/api/auth/admin/biometric-register', async (req, res) => {
     const token = signToken({ role: 'admin', phone: key, iat: Date.now() });
     res.json({ token });
   } catch (err) {
-    fail(res, err, 'No se pudo guardar la biometría. Intentá de nuevo.');
+    fail(res, err, 'No se pudo guardar la biometría. Intenta de nuevo.');
   }
 });
 
@@ -165,7 +169,7 @@ app.get('/api/state', async (req, res) => {
     const [state, rate] = await Promise.all([store.getState(), getBcvRate()]);
     res.json({ ...state, rate });
   } catch (err) {
-    fail(res, err, 'No se pudo cargar la tienda. Intentá de nuevo en unos segundos.');
+    fail(res, err, 'No se pudo cargar la tienda. Intenta de nuevo en unos segundos.');
   }
 });
 
@@ -183,7 +187,7 @@ app.post('/api/orders', async (req, res) => {
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
   } catch (err) {
-    fail(res, err, 'No se pudo realizar el pedido. Intentá de nuevo.');
+    fail(res, err, 'No se pudo realizar el pedido. Intenta de nuevo.');
   }
 });
 
@@ -212,7 +216,7 @@ app.post('/api/customers/blacklist', requireAdmin, async (req, res) => {
     if (name) await store.upsertCustomer({ phone: key, customerName: name });
     res.json(await store.getCustomerByPhone(key));
   } catch (err) {
-    fail(res, err, 'No se pudo guardar el deudor. Intentá de nuevo.');
+    fail(res, err, 'No se pudo guardar el deudor. Intenta de nuevo.');
   }
 });
 
@@ -224,14 +228,14 @@ app.post('/api/customers/blacklist/debt', requireAdmin, async (req, res) => {
     const key = String(phone || '').replace(/\D/g, '').slice(-11);
     if (!key || key.length < 7) return res.status(400).json({ error: 'Número de teléfono inválido' });
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Seleccioná al menos un producto' });
+      return res.status(400).json({ error: 'Selecciona al menos un producto' });
     }
     const order = await store.addDebtToCustomer({ phone: key, customerName: name, items });
     if (!order) return res.status(400).json({ error: 'No se pudo registrar la deuda' });
     if (name) await store.upsertCustomer({ phone: key, customerName: name });
     res.json({ order, customer: await store.getCustomerByPhone(key), state: await store.getState() });
   } catch (err) {
-    fail(res, err, 'No se pudo registrar la deuda. Intentá de nuevo.');
+    fail(res, err, 'No se pudo registrar la deuda. Intenta de nuevo.');
   }
 });
 
@@ -266,7 +270,7 @@ app.post('/api/products', requireAdmin, async (req, res) => {
   try {
     res.json(await store.createProduct(req.body || {}));
   } catch (err) {
-    fail(res, err, 'No se pudo crear el producto. Intentá de nuevo.');
+    fail(res, err, 'No se pudo crear el producto. Intenta de nuevo.');
   }
 });
 
@@ -313,7 +317,7 @@ app.post('/api/orders/:id/cancel', async (req, res) => {
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
   } catch (err) {
-    fail(res, err, 'No se pudo cancelar el pedido. Intentá de nuevo.');
+    fail(res, err, 'No se pudo cancelar el pedido. Intenta de nuevo.');
   }
 });
 

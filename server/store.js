@@ -269,9 +269,14 @@ const pgPool = process.env.DATABASE_URL
 
 // Tablas que se copian en el espejo. Fuente = producción (public), destino = schema
 // aislado de calidad (staging). Reemplazo total por tabla (no hace merge).
+// NOTA: webauthn_credentials NO se copia: WebAuthn ata la llave del dispositivo al
+// rpID (= dominio completo). Una biometría registrada en kiosko-247.onrender.com es
+// inválida en kiosko-247-staging.onrender.com y el navegador la rechaza con
+// NotAllowedError. Además, cada refresh pisaría la biometría que los admins registren
+// en staging. Cada ambiente mantiene sus propias credenciales biométricas.
 const MIRROR_SOURCE_SCHEMA = process.env.MIRROR_SOURCE_SCHEMA || 'public';
 const MIRROR_TARGET_SCHEMA = process.env.MIRROR_TARGET_SCHEMA || 'staging';
-const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers', 'webauthn_credentials'];
+const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers'];
 
 // Refresca el espejo: copia el estado completo desde un schema fuente (producción)
 // hasta un schema destino (calidad), reemplazando su contenido por completo.
@@ -282,9 +287,11 @@ export async function refreshMirror() {
   if (MIRROR_SOURCE_SCHEMA === MIRROR_TARGET_SCHEMA) {
     return { ok: false, error: 'El schema fuente y destino deben ser distintos' };
   }
-  // Seguridad: nunca permitir reemplazar el schema donde vive la app (producción).
-  if (MIRROR_TARGET_SCHEMA === DB_SCHEMA || MIRROR_TARGET_SCHEMA === 'public') {
-    return { ok: false, error: 'El schema destino del espejo no puede ser public ni el de la app' };
+  // Seguridad: nunca permitir reemplazar el schema de producción (public). El
+  // destino legítimo es el schema aislado de calidad (por ejemplo "staging"), que
+  // es donde la app de staging lee sus datos, así que NO se compara contra DB_SCHEMA.
+  if (MIRROR_TARGET_SCHEMA === 'public') {
+    return { ok: false, error: 'El schema destino del espejo no puede ser public (producción)' };
   }
   const client = await pgPool.connect();
   const tables = {};
@@ -322,7 +329,7 @@ export async function refreshMirror() {
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[kiosko] Error refrescando el espejo:', err);
-    return { ok: false, error: 'No se pudo actualizar la base de datos de calidad. Intentá de nuevo.' };
+    return { ok: false, error: 'No se pudo actualizar la base de datos de calidad. Intenta de nuevo.' };
   } finally {
     client.release();
   }
@@ -344,8 +351,10 @@ const pgStore = {
         stock INTEGER,
         "sizeValue" TEXT,
         "sizeUnit" TEXT,
-        image TEXT
+        image TEXT,
+        "createdAt" TEXT
       );
+      ALTER TABLE ${q('products')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
       CREATE TABLE IF NOT EXISTS ${q('categories')} (
         name TEXT PRIMARY KEY
       );
@@ -449,7 +458,8 @@ const pgStore = {
       stock: r.stock,
       sizeValue: r.sizeValue === '' || r.sizeValue === null ? '' : Number(r.sizeValue),
       sizeUnit: r.sizeUnit,
-      image: r.image
+      image: r.image,
+      createdAt: r.createdAt || null
     }));
     const categories = categoriesRes.rows.map((r) => r.name);
     const orders = ordersRes.rows.map((r) => ({ ...r, items: r.items || [], total: Number(r.total) }));
@@ -469,9 +479,9 @@ const pgStore = {
     await this.pool.query(`DELETE FROM ${q('products')}`);
     for (const p of products) {
       await this.pool.query(
-        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
+        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || null]
       );
     }
   },
@@ -901,12 +911,13 @@ const pgStore = {
     const product = {
       ...data,
       id: generateProductId(),
-      code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`
+      code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`,
+      createdAt: data.createdAt || new Date().toISOString()
     };
     await this.pool.query(
-      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [product.id, product.code, product.name, product.brand, product.description, product.price, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '']
+      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [product.id, product.code, product.name, product.brand, product.description, product.price, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '', product.createdAt]
     );
     if (product.category) {
       await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [product.category]);
@@ -920,8 +931,8 @@ const pgStore = {
     if (!rows[0]) return { error: 'Producto no encontrado' };
     const p = { ...rows[0], ...data, id };
     await this.pool.query(
-      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11 WHERE id=$1`,
-      [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
+      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11, "createdAt"=$12 WHERE id=$1`,
+      [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || rows[0].createdAt || null]
     );
     if (p.category) {
       await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [p.category]);
@@ -1008,6 +1019,8 @@ export const deleteWebAuthn = (phone) => store.deleteWebAuthn(phone);
 export const getAdminCredential = (phone) => store.getAdminCredential(phone);
 
 export const setAdminCredential = (phone, entry) => store.setAdminCredential(phone, entry);
+
+export const getAdminPassword = () => store.getAdminPassword();
 
 export const listCollections = () => store.listCollections();
 
@@ -1108,7 +1121,8 @@ export const createProduct = async (data) => {
   const product = {
     ...data,
     id: generateProductId(),
-    code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`
+    code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`,
+    createdAt: data.createdAt || new Date().toISOString()
   };
   const products = [product, ...state.products];
   const categories = maybeAddCategory(state.categories, product.category);

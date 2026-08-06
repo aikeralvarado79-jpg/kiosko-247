@@ -269,9 +269,14 @@ const pgPool = process.env.DATABASE_URL
 
 // Tablas que se copian en el espejo. Fuente = producción (public), destino = schema
 // aislado de calidad (staging). Reemplazo total por tabla (no hace merge).
+// NOTA: webauthn_credentials NO se copia: WebAuthn ata la llave del dispositivo al
+// rpID (= dominio completo). Una biometría registrada en kiosko-247.onrender.com es
+// inválida en kiosko-247-staging.onrender.com y el navegador la rechaza con
+// NotAllowedError. Además, cada refresh pisaría la biometría que los admins registren
+// en staging. Cada ambiente mantiene sus propias credenciales biométricas.
 const MIRROR_SOURCE_SCHEMA = process.env.MIRROR_SOURCE_SCHEMA || 'public';
 const MIRROR_TARGET_SCHEMA = process.env.MIRROR_TARGET_SCHEMA || 'staging';
-const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers', 'webauthn_credentials'];
+const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers'];
 
 // Refresca el espejo: copia el estado completo desde un schema fuente (producción)
 // hasta un schema destino (calidad), reemplazando su contenido por completo.

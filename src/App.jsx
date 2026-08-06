@@ -1665,6 +1665,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const [bioStatus, setBioStatus] = useState('idle'); // 'idle' | 'working' | 'register'
   const [bioError, setBioError] = useState('');
   const [bioOptions, setBioOptions] = useState(null);
+  const [bioNeedsRegister, setBioNeedsRegister] = useState(false);
   const bioFetchKeyRef = useRef('');
 
   // Recovery state
@@ -1716,9 +1717,15 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       .webauthnLoginOptions({ phone: phoneKey })
       .then((res) => {
         if (cancelled) return;
+        bioFetchKeyRef.current = phoneKey;
         if (res.ok) {
-          bioFetchKeyRef.current = phoneKey;
+          setBioNeedsRegister(false);
           setBioOptions(res.data.options);
+        } else if (res.status === 404) {
+          // No hay biometría registrada en este dominio: el tap debe REGISTRAR
+          // (primera vez en este ambiente) en vez de mostrar "no está lista".
+          setBioNeedsRegister(true);
+          setBioOptions(null);
         }
       })
       .catch(() => {});
@@ -1747,7 +1754,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
 
   // Login admin con biometría (huella/Face ID). El teléfono es obligatorio y
   // la biometría reemplaza la contraseña. Si no hay biometría registrada para
-  // ese teléfono, se registra en el momento (primera vez).
+  // ese teléfono en este dominio, se registra en el momento (primera vez).
   const handleBiometricLogin = async () => {
     if (!/^\d{7}$/.test(loginPhone.number)) {
       setError('Ingresá tu teléfono de administrador.');
@@ -1756,12 +1763,23 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
     setError('');
     setBioError('');
-    if (bioFetchKeyRef.current !== phoneKey || !bioOptions) {
+    if (bioFetchKeyRef.current !== phoneKey) {
       setBioError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
       return;
     }
     setBioStatus('working');
     try {
+      // Primera vez en este dominio (staging/producción): registra la biometría.
+      if (bioNeedsRegister || !bioOptions) {
+        setBioStatus('register');
+        const rres = await api.webauthnRegisterOptions({ phone: phoneKey, customerName: 'Administrador' });
+        if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el registro');
+        const regResponse = await startRegistration({ optionsJSON: rres.data.options });
+        const ok = await onBiometricRegister(phoneKey, regResponse);
+        if (!ok) setBioError('No se pudo guardar tu biometría. Intentá de nuevo.');
+        setBioNeedsRegister(false);
+        return;
+      }
       const authResponse = await startAuthentication({ optionsJSON: bioOptions });
       const ok = await onBiometricLogin(phoneKey, authResponse);
       if (!ok) setBioError('La biometría no coincidió. Verificá que tu número sea de administrador.');

@@ -147,6 +147,30 @@ html.light .skeleton-block {
 }
 .animate-glow-pulse { animation: glow-pulse 2.4s ease-in-out infinite; }
 
+/* Transición al cambiar de producto dentro de la misma marca */
+@keyframes brand-slide-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes brand-slide-left {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-brand-slide-right { animation: brand-slide-right 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-brand-slide-left { animation: brand-slide-left 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Toasts modernos */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-toast-in { animation: toast-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes toast-progress {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+.animate-toast-progress { animation: toast-progress 3.8s linear both; }
+
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 

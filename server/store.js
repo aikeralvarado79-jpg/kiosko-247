@@ -351,8 +351,10 @@ const pgStore = {
         stock INTEGER,
         "sizeValue" TEXT,
         "sizeUnit" TEXT,
-        image TEXT
+        image TEXT,
+        "createdAt" TEXT
       );
+      ALTER TABLE ${q('products')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
       CREATE TABLE IF NOT EXISTS ${q('categories')} (
         name TEXT PRIMARY KEY
       );
@@ -456,7 +458,8 @@ const pgStore = {
       stock: r.stock,
       sizeValue: r.sizeValue === '' || r.sizeValue === null ? '' : Number(r.sizeValue),
       sizeUnit: r.sizeUnit,
-      image: r.image
+      image: r.image,
+      createdAt: r.createdAt || null
     }));
     const categories = categoriesRes.rows.map((r) => r.name);
     const orders = ordersRes.rows.map((r) => ({ ...r, items: r.items || [], total: Number(r.total) }));
@@ -476,9 +479,9 @@ const pgStore = {
     await this.pool.query(`DELETE FROM ${q('products')}`);
     for (const p of products) {
       await this.pool.query(
-        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
+        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || null]
       );
     }
   },
@@ -908,12 +911,13 @@ const pgStore = {
     const product = {
       ...data,
       id: generateProductId(),
-      code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`
+      code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`,
+      createdAt: data.createdAt || new Date().toISOString()
     };
     await this.pool.query(
-      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [product.id, product.code, product.name, product.brand, product.description, product.price, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '']
+      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [product.id, product.code, product.name, product.brand, product.description, product.price, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '', product.createdAt]
     );
     if (product.category) {
       await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [product.category]);
@@ -927,8 +931,8 @@ const pgStore = {
     if (!rows[0]) return { error: 'Producto no encontrado' };
     const p = { ...rows[0], ...data, id };
     await this.pool.query(
-      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11 WHERE id=$1`,
-      [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
+      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11, "createdAt"=$12 WHERE id=$1`,
+      [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || rows[0].createdAt || null]
     );
     if (p.category) {
       await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [p.category]);
@@ -1115,7 +1119,8 @@ export const createProduct = async (data) => {
   const product = {
     ...data,
     id: generateProductId(),
-    code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`
+    code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`,
+    createdAt: data.createdAt || new Date().toISOString()
   };
   const products = [product, ...state.products];
   const categories = maybeAddCategory(state.categories, product.category);

@@ -89,15 +89,19 @@ async function verifyAdminPassword(phone, input) {
 
 // Auth
 app.post('/api/auth/login', async (req, res) => {
-  const { phone, password } = req.body || {};
-  const key = String(phone || '').replace(/\D/g, '').slice(-11);
-  if (key && !ADMIN_PHONES.includes(key)) {
-    return res.status(401).json({ error: 'Ese número no tiene acceso al panel' });
+  try {
+    const { phone, password } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (key && !ADMIN_PHONES.includes(key)) {
+      return res.status(401).json({ error: 'Ese número no tiene acceso al panel' });
+    }
+    const ok = await verifyAdminPassword(key || phone, password);
+    if (!ok) return res.status(401).json({ error: 'Contraseña incorrecta' });
+    const token = signToken({ role: 'admin', phone: key || '', iat: Date.now() });
+    res.json({ token });
+  } catch (err) {
+    fail(res, err, 'No se pudo iniciar sesión. Intentá de nuevo.');
   }
-  const ok = await verifyAdminPassword(key || phone, password);
-  if (!ok) return res.status(401).json({ error: 'Contraseña incorrecta' });
-  const token = signToken({ role: 'admin', phone: key || '', iat: Date.now() });
-  res.json({ token });
 });
 
 // Recuperación de contraseña admin: verifica biometría del teléfono admin y guarda nueva contraseña

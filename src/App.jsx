@@ -40,7 +40,9 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     whatsapp: <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.297-.497.1-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />,
      arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
     image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
-    xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
+     xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
+     checkCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9 12l2 2 4-4" />,
+     info: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-6M12 8h.01" />,
      key: <path d="M12 2a9.92 9.92 0 0 0-7 2.82L2.82 7.01a1 1 0 0 0 0 1.42l2.59 2.59a1 1 0 0 0 1.42 0L12 5.34l6.17 6.17a1 1 0 0 0 1.42 0l2.59-2.59a1 1 0 0 0 0-1.42L13 4.83c-.35-.35-.5-.83-.5-1.31A5.5 5.5 0 0 0 12 2z" />,
      fingerprint: <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88M17.29 21.02c.12-.6.43-2.3.5-3.02M2 12a10 10 0 0 1 18-6M2 16h.01M21.8 16c.2-2 .131-5.354 0-6M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2M8.65 22c.21-.66.45-1.32.57-2M9 6.8a6 6 0 0 1 9 5.2v2" />,
      heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z" />,
@@ -121,6 +123,29 @@ const parseOrderDate = (o) => {
 
 const toYMD = (d) => isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+// Productos "nuevos": creados en las últimas 4 horas. Se considera la fecha del
+// dispositivo del cliente como referencia razonable para la app.
+const NEW_PRODUCT_HOURS = 4;
+const isNewProduct = (product) => {
+  if (!product || !product.createdAt) return false;
+  const created = new Date(product.createdAt);
+  if (isNaN(created)) return false;
+  return Date.now() - created.getTime() <= NEW_PRODUCT_HOURS * 3600 * 1000;
+};
+
+// Marca productos vistos (la etiqueta NUEVO desaparece al hacer click).
+const NEW_VIEWED_KEY = 'kiosko_new_product_views';
+const loadNewProductViews = () => {
+  try { return JSON.parse(localStorage.getItem(NEW_VIEWED_KEY)) || []; } catch { return []; }
+};
+const markNewProductViewed = (id) => {
+  try {
+    const list = loadNewProductViews();
+    if (!list.includes(id)) localStorage.setItem(NEW_VIEWED_KEY, JSON.stringify([...list, id]));
+  } catch {}
+};
+const wasNewProductViewed = (id) => loadNewProductViews().includes(id);
 
 // Mini calendario compacto (popover) para filtro de fecha
 function MiniCalendar({ value, onChange, onClose }) {
@@ -454,6 +479,8 @@ export default function App() {
     }
   });
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isOrdersDrawerOpen, setIsOrdersDrawerOpen] = useState(false);
+  const [isDebtDrawerOpen, setIsDebtDrawerOpen] = useState(false);
 
   // Pestaña activa del cliente en la barra inferior (móvil)
   const [customerTab, setCustomerTab] = useState('store'); // 'store' | 'orders' | 'account'
@@ -652,62 +679,84 @@ export default function App() {
   // Toast notifications
   const [toasts, setToasts] = useState([]);
 
+  const TOAST_META = {
+    success: { icon: 'checkCircle', color: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', text: 'text-emerald-300', bar: 'bg-emerald-400' },
+    error: { icon: 'xCircle', color: 'from-rose-500/20 to-rose-500/5', border: 'border-rose-500/40', text: 'text-rose-300', bar: 'bg-rose-400' },
+    warning: { icon: 'alertTriangle', color: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', text: 'text-amber-300', bar: 'bg-amber-400' },
+    info: { icon: 'info', color: 'from-sky-500/20 to-sky-500/5', border: 'border-sky-500/40', text: 'text-sky-300', bar: 'bg-sky-400' }
+  };
+
   const addToast = (message, type = 'success') => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
+    }, 3800);
   };
 
   const handleAdminLogin = async (phone, password) => {
-    const res = await api.login(phone, password);
-    if (!res.ok) {
-      addToast(res.data.error || 'Contraseña incorrecta', 'error');
+    try {
+      const res = await api.login(phone, password);
+      if (!res.ok) {
+        addToast(res.data.error || 'Contraseña incorrecta', 'error');
+        return false;
+      }
+      setToken(res.data.token);
+      setIsAdminAuthed(true);
+      // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
+      // desde el cliente reconocido, la lista de clientes o el perfil en el server.
+      const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      const adminName = await resolveAdminName(phoneKey);
+      setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+      addToast('Sesión iniciada en el panel admin');
+      return true;
+    } catch {
+      addToast('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
       return false;
     }
-    setToken(res.data.token);
-    setIsAdminAuthed(true);
-    // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
-    // desde el cliente reconocido, la lista de clientes o el perfil en el server.
-    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
-    const adminName = await resolveAdminName(phoneKey);
-    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
-    addToast('Sesión iniciada en el panel admin');
-    return true;
   };
 
   // Login admin por biometría (huella/Face ID): el teléfono identifica al admin
   // y la biometría lo autentica sin contraseña. Solo para el panel admin.
   const handleAdminBiometricLogin = async (phone, response) => {
-    const res = await api.adminBiometricLogin(phone, response);
-    if (!res.ok) {
-      addToast(res.data.error || 'La biometría no coincidió', 'error');
+    try {
+      const res = await api.adminBiometricLogin(phone, response);
+      if (!res.ok) {
+        addToast(res.data.error || 'La biometría no coincidió', 'error');
+        return false;
+      }
+      setToken(res.data.token);
+      setIsAdminAuthed(true);
+      const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      const adminName = await resolveAdminName(phoneKey);
+      setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+      addToast('Sesión iniciada en el panel admin');
+      return true;
+    } catch {
+      addToast('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
       return false;
     }
-    setToken(res.data.token);
-    setIsAdminAuthed(true);
-    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
-    const adminName = await resolveAdminName(phoneKey);
-    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
-    addToast('Sesión iniciada en el panel admin');
-    return true;
   };
 
   // Primer registro de biometría del admin: guarda huella/Face ID y emite token.
   const handleAdminBiometricRegister = async (phone, response) => {
-    const res = await api.adminBiometricRegister(phone, response);
-    if (!res.ok) {
-      addToast(res.data.error || 'No se pudo guardar tu biometría', 'error');
+    try {
+      const res = await api.adminBiometricRegister(phone, response);
+      if (!res.ok) {
+        addToast(res.data.error || 'No se pudo guardar tu biometría', 'error');
+        return false;
+      }
+      setToken(res.data.token);
+      setIsAdminAuthed(true);
+      const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      const adminName = await resolveAdminName(phoneKey);
+      setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
+      addToast('Sesión iniciada en el panel admin');
+      return true;
+    } catch {
+      addToast('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
       return false;
     }
-    setToken(res.data.token);
-    setIsAdminAuthed(true);
-    const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
-    const adminName = await resolveAdminName(phoneKey);
-    setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
-    addToast('Sesión iniciada en el panel admin');
-    return true;
   };
 
   // Resuelve el nombre del admin desde el cliente guardado, los clientes conocidos
@@ -1139,7 +1188,7 @@ export default function App() {
     ? orders.find((o) => o.id === currentOrderTracking) || null
     : null;
 
-  // Sound notification when a tracked order advances to preparación or listo
+  // Sound notification when a tracked order advances status
   const lastTrackedStatus = useRef(null);
   useEffect(() => {
     if (!trackedOrder) {
@@ -1148,47 +1197,64 @@ export default function App() {
     }
     const status = trackedOrder.status;
     if (lastTrackedStatus.current && status !== lastTrackedStatus.current) {
-      if (status === 'en_preparacion' || status === 'listo') {
-        playChime();
-        addToast(
-          status === 'en_preparacion'
-            ? `¡Tu pedido ${trackedOrder.id} está en preparación!`
-            : `¡Tu pedido ${trackedOrder.id} está listo para retirar!`,
-          'info'
-        );
+      playChime();
+      if (status === 'en_preparacion') {
+        addToast(`¡Tu pedido ${trackedOrder.id} está en preparación!`, 'info');
+      } else if (status === 'listo') {
+        addToast(`¡Tu pedido ${trackedOrder.id} está listo para retirar!`, 'info');
+      } else if (status === 'en_camino') {
+        addToast(`¡Tu pedido ${trackedOrder.id} está en camino!`, 'warning');
+      } else if (status === 'entregado') {
+        addToast(`¡Tu pedido ${trackedOrder.id} fue entregado! 🎉`, 'success');
+      } else if (status === 'cancelado') {
+        addToast(`Tu pedido ${trackedOrder.id} fue cancelado.`, 'error');
       }
     }
     lastTrackedStatus.current = status;
   }, [trackedOrder?.status, trackedOrder?.id]);
 
+  // Notificaciones de cambio de estatus para TODOS los pedidos del cliente
+  // (envío en camino, entregado, cancelado) aunque no estén en el rastreo activo.
+  const lastStatusesRef = useRef({});
+  useEffect(() => {
+    const seen = lastStatusesRef.current;
+    customerOrders.forEach((o) => {
+      if (currentOrderTracking && o.id === currentOrderTracking) return;
+      const prev = seen[o.id];
+      if (prev && prev !== o.status && o.status !== 'pendiente' && o.status !== 'en_preparacion') {
+        playChime();
+        if (o.status === 'en_camino') {
+          addToast(`¡Tu pedido ${o.id} está en camino!`, 'warning');
+        } else if (o.status === 'entregado') {
+          addToast(`¡Tu pedido ${o.id} fue entregado! 🎉`, 'success');
+        } else if (o.status === 'cancelado') {
+          addToast(`Tu pedido ${o.id} fue cancelado.`, 'error');
+        }
+      }
+      seen[o.id] = o.status;
+    });
+  }, [customerOrders, currentOrderTracking]);
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
       {/* Toast Notification Container */}
-      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`pointer-events-auto p-4 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3 border text-sm font-medium transition-all duration-300 transform translate-y-0 animate-bounce-short ${
-              toast.type === 'error'
-                ? 'bg-rose-900/80 border-rose-500/50 text-rose-100'
-                : toast.type === 'warning'
-                ? 'bg-amber-900/80 border-amber-500/50 text-amber-100'
-                : toast.type === 'info'
-                ? 'bg-sky-900/80 border-sky-500/50 text-sky-100'
-                : 'bg-emerald-900/80 border-emerald-500/50 text-emerald-100'
-            }`}
-          >
-            <Icon
-              name={
-                toast.type === 'error' || toast.type === 'warning'
-                  ? 'alertTriangle'
-                  : 'sparkles'
-              }
-              className="w-5 h-5 flex-shrink-0"
-            />
-            <p className="flex-1">{toast.message}</p>
-          </div>
-        ))}
+      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2.5 pointer-events-none">
+        {toasts.map((toast) => {
+          const meta = TOAST_META[toast.type] || TOAST_META.success;
+          return (
+            <div
+              key={toast.id}
+              role="status"
+              className={`pointer-events-auto relative overflow-hidden p-3.5 pr-4 rounded-2xl shadow-2xl backdrop-blur-xl bg-gradient-to-r ${meta.color} border ${meta.border} flex items-center gap-3 text-sm font-medium transition-all duration-300 animate-toast-in`}
+            >
+              <span className={`shrink-0 p-2 rounded-xl bg-slate-950/40 border border-white/10 ${meta.text}`}>
+                <Icon name={meta.icon} className="w-5 h-5" />
+              </span>
+              <p className="flex-1 text-slate-100 leading-snug">{toast.message}</p>
+              <span className={`absolute bottom-0 left-0 h-0.5 ${meta.bar} animate-toast-progress`} />
+            </div>
+          );
+        })}
       </div>
 
       {/* Modern Glassmorphic Top Navbar */}
@@ -1332,6 +1398,7 @@ export default function App() {
             favorites={favorites}
             onToggleFavorite={toggleFavorite}
             focusSection={focusCustomerSection}
+            onOpenDebt={() => setIsDebtDrawerOpen(true)}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -1394,6 +1461,38 @@ export default function App() {
           setIsCheckoutOpen(true);
         }}
       />
+
+      {/* 1b. Orders Drawer (Mis Pedidos) */}
+      <OrdersDrawer
+        isOpen={isOrdersDrawerOpen}
+        onClose={() => setIsOrdersDrawerOpen(false)}
+        orders={customerOrders}
+        rate={rate}
+        onViewOrderDetail={(order) => {
+          setIsOrdersDrawerOpen(false);
+          setOrderDetailOrder(order);
+        }}
+        onTrackLiveOrder={(order) => {
+          setIsOrdersDrawerOpen(false);
+          setLiveTrackingOrder(order);
+        }}
+        onRequestCancelOrder={(order) => {
+          setIsOrdersDrawerOpen(false);
+          setCancelConfirmOrder(order);
+        }}
+      />
+
+      {/* 1c. Debt Drawer (Mi Deuda) */}
+      {isDebtDrawerOpen && customerProfile && (
+        <ErrorBoundary>
+          <CustomerDebtModal
+            customer={customerProfile}
+            orders={orders}
+            rate={rate}
+            onClose={() => setIsDebtDrawerOpen(false)}
+          />
+        </ErrorBoundary>
+      )}
 
       {/* 2. Product Detail Modal */}
       {productDetailModal && (
@@ -1547,7 +1646,9 @@ export default function App() {
         onCustomerTab={(tab) => {
           setActiveView('customer');
           setCustomerTab(tab);
-          setFocusCustomerSection(tab);
+          setFocusCustomerSection(null);
+          if (tab === 'orders') setIsOrdersDrawerOpen(true);
+          if (tab === 'account') setIsDebtDrawerOpen(true);
         }}
         cartCount={cartCount}
         hasCustomer={Boolean(savedCustomer)}
@@ -1784,10 +1885,15 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     }
     setIsSubmitting(true);
     setError('');
-    const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
-    const ok = await onLogin(phoneKey, password);
-    setIsSubmitting(false);
-    if (!ok) setError('Contraseña incorrecta. Verificá tu teléfono y contraseña.');
+    try {
+      const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
+      const ok = await onLogin(phoneKey, password);
+      if (!ok) setError('Contraseña incorrecta. Verificá tu teléfono y contraseña.');
+    } catch {
+      setError('No se pudo conectar con el servidor. Intentá de nuevo.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Login admin con biometría (huella/Face ID). El teléfono es obligatorio y
@@ -1801,9 +1907,27 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     const phoneKey = `${loginPhone.code}${loginPhone.number}`.replace(/\D/g, '').slice(-11);
     setError('');
     setBioError('');
+    // Si el prefetch aún no cargó las options, las pedimos ahora en lugar de
+    // fallar con "no está lista". Así el tap siempre funciona.
     if (bioFetchKeyRef.current !== phoneKey) {
-      setBioError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
-      return;
+      try {
+        const res = await api.webauthnLoginOptions({ phone: phoneKey });
+        if (res.ok) {
+          bioFetchKeyRef.current = phoneKey;
+          setBioNeedsRegister(false);
+          setBioOptions(res.data.options);
+        } else if (res.status === 404) {
+          bioFetchKeyRef.current = phoneKey;
+          setBioNeedsRegister(true);
+          setBioOptions(null);
+        } else {
+          setBioError('No se pudo iniciar la verificación con biometría. Intentá de nuevo.');
+          return;
+        }
+      } catch {
+        setBioError('No se pudo conectar con el servidor. Intentá de nuevo.');
+        return;
+      }
     }
     setBioStatus('working');
     try {
@@ -1853,9 +1977,20 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     }
     const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
+    // Si el prefetch no terminó, pedimos las options ahora en vez de fallar.
     if (recoveryFetchKeyRef.current !== phoneKey || !recoverOptions) {
-      setRecoverError('Aún no está lista la verificación. Esperá un segundo e intentá de nuevo.');
-      return;
+      try {
+        const res = await api.webauthnLoginOptions({ phone: phoneKey });
+        if (!res.ok) {
+          setRecoverError('Este número no tiene biometría registrada para verificar.');
+          return;
+        }
+        recoveryFetchKeyRef.current = phoneKey;
+        setRecoverOptions(res.data.options);
+      } catch {
+        setRecoverError('No se pudo conectar con el servidor. Intentá de nuevo.');
+        return;
+      }
     }
     setRecoverStep('biometric');
     try {
@@ -2161,14 +2296,14 @@ function CustomerView({
   storeLocation,
   favorites,
   onToggleFavorite,
-  focusSection
+  focusSection,
+  onOpenDebt
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
   const [myOrdersPage, setMyOrdersPage] = useState(1);
   const [orderDateFilter, setOrderDateFilter] = useState({ preset: 'all', date: null });
   const [showCalendar, setShowCalendar] = useState(false);
-  const [showDebtDetail, setShowDebtDetail] = useState(false);
   const [promoIdx, setPromoIdx] = useState(0);
   const PAGE_SIZE = 5;
 
@@ -2223,7 +2358,7 @@ function CustomerView({
     const timer = setTimeout(() => {
       const id = focusSection === 'orders' ? 'pedidos-seccion' : 'cuenta-seccion';
       if (focusSection === 'orders') setShowMyOrders(true);
-      if (focusSection === 'account') setShowDebtDetail(true);
+      if (focusSection === 'account') onOpenDebt?.();
       const el = document.getElementById(id);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
@@ -2352,7 +2487,7 @@ function CustomerView({
               )}
             </div>
             <button
-              onClick={() => setShowDebtDetail(true)}
+              onClick={onOpenDebt}
               className="text-right shrink-0 flex flex-col items-end gap-1 hover:opacity-90 transition-opacity"
               aria-label="Ver detalle de mi deuda"
             >
@@ -2700,16 +2835,6 @@ function CustomerView({
           ))}
         </div>
       )}
-      {showDebtDetail && customerProfile && (
-        <ErrorBoundary>
-          <CustomerDebtModal
-            customer={customerProfile}
-            orders={orders}
-            rate={rate}
-            onClose={() => setShowDebtDetail(false)}
-          />
-        </ErrorBoundary>
-      )}
     </div>
   );
 }
@@ -2735,6 +2860,14 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           loading="lazy"
         />
         <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1">
+          {isNewProduct(product) && !wasNewProductViewed(product.id) && (
+            <span
+              onClick={(e) => { e.stopPropagation(); markNewProductViewed(product.id); }}
+              className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-gradient-to-r from-fuchsia-500 to-teal-400 text-slate-950 text-[10px] sm:text-xs font-black uppercase tracking-wider shadow-lg shadow-fuchsia-500/30 animate-bounce-short cursor-pointer"
+            >
+              NUEVO
+            </span>
+          )}
           {product.brand && (
             <span className="hidden sm:inline px-2.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-medium text-teal-300 border border-teal-500/30">
               {product.brand}
@@ -2834,6 +2967,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   const [quantity, setQuantity] = useState(1);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [touchX, setTouchX] = useState(null);
+  const [slideDir, setSlideDir] = useState('right');
   const isOut = product.stock <= 0;
   const unitBs = usdToBs(product.price, rate?.rate);
   const lineTotal = product.price * quantity;
@@ -2851,6 +2985,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
       if (!hasSameBrand) return;
       const next = currentIndex + dir;
       if (next < 0 || next >= totalInBrand) return;
+      setSlideDir(dir > 0 ? 'right' : 'left');
       onNavigate?.(sameBrandProducts[next]);
       setQuantity(1);
     },
@@ -2885,36 +3020,37 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
       {/* Backdrop Click */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
-        {/* Handle visual para indicar arrastre en móvil */}
-        <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
+      <div className="relative w-full max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+      {/* Handle visual para indicar arrastre en móvil */}
+      <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all"
-        >
-          <Icon name="x" className="w-5 h-5" />
-        </button>
+      {/* Close Button */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all"
+      >
+        <Icon name="x" className="w-5 h-5" />
+      </button>
 
-        {/* Botón favorito */}
-        <button
-          onClick={onToggleFavorite}
-          className="absolute top-4 left-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all active:scale-75"
-          aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
-        >
-          <Icon
-            name={isFavorite ? 'heartFilled' : 'heart'}
-            className={`w-5 h-5 ${isFavorite ? 'text-rose-400' : ''}`}
-          />
-        </button>
+      {/* Botón favorito */}
+      <button
+        onClick={onToggleFavorite}
+        className="absolute top-4 left-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all active:scale-75"
+        aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+      >
+        <Icon
+          name={isFavorite ? 'heartFilled' : 'heart'}
+          className={`w-5 h-5 ${isFavorite ? 'text-rose-400' : ''}`}
+        />
+      </button>
 
-        {/* Imagen + full screen + paginación de la marca */}
-        <div
-          className="relative h-52 sm:h-64 bg-slate-950 shrink-0"
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
+      {/* Imagen + full screen + paginación de la marca */}
+      <div
+        key={`img-${product.id}`}
+        className={`relative h-40 sm:h-56 bg-slate-950 shrink-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
           <img
             src={product.image}
             alt={product.name}
@@ -2966,6 +3102,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
               <button
                 key={p.id}
                 onClick={() => {
+                  setSlideDir(i > currentIndex ? 'right' : 'left');
                   onNavigate?.(p);
                   setQuantity(1);
                 }}
@@ -2985,7 +3122,10 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
           </div>
         )}
 
-        <div className="p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1">
+        <div
+          key={`body-${product.id}`}
+          className={`p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+        >
           <div>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-3">
@@ -3581,6 +3721,206 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
   );
 }
 
+// Drawer de Mis Pedidos (mismo patrón que el carrito: ante menú inferior, X para cerrar)
+function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrackLiveOrder, onRequestCancelOrder }) {
+  const [page, setPage] = useState(1);
+  const [dateFilter, setDateFilter] = useState({ preset: 'all', date: null });
+  const [showCalendar, setShowCalendar] = useState(false);
+  const PAGE_SIZE = 6;
+
+  const filtered = useMemo(() => {
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const dow = (todayStart.getDay() + 6) % 7; // 0 = Monday
+    const thisMon = new Date(todayStart); thisMon.setDate(thisMon.getDate() - dow);
+    const thisSun = new Date(thisMon); thisSun.setDate(thisSun.getDate() + 6);
+    const lastMon = new Date(thisMon); lastMon.setDate(lastMon.getDate() - 7);
+    const lastSun = new Date(thisMon); lastSun.setDate(lastSun.getDate() - 1);
+    return (orders || []).filter((o) => {
+      const d = parseOrderDate(o);
+      if (isNaN(d)) return true;
+      switch (dateFilter.preset) {
+        case 'today': return startOfDay(d).getTime() === todayStart.getTime();
+        case 'thisWeek': return d >= thisMon && d <= thisSun;
+        case 'lastWeek': return d >= lastMon && d <= lastSun;
+        case 'day': return dateFilter.date && toYMD(d) === dateFilter.date;
+        default: return true;
+      }
+    });
+  }, [orders, dateFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  useEffect(() => { setPage(1); }, [dateFilter]);
+  useEffect(() => { if (isOpen) { setPage(1); setDateFilter({ preset: 'all', date: null }); } }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+
+      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+        {/* Drawer Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400">
+              <Icon name="package" className="w-5 h-5" />
+            </span>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white">Mis Pedidos</h2>
+              <span className="block text-[11px] text-slate-400">{orders?.length || 0} pedido{(orders?.length || 0) !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+          >
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Drawer Body */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+          {(!orders || orders.length === 0) ? (
+            <div className="h-full flex flex-col items-center justify-center text-center space-y-3 text-slate-500">
+              <Icon name="package" className="w-16 h-16 stroke-1 text-slate-700" />
+              <p className="font-semibold text-slate-400">Todavía no tenés pedidos</p>
+              <p className="text-xs">Hacé tu primer pedido y aparecerá aquí.</p>
+            </div>
+          ) : (
+            <>
+              {/* Filtros de fecha */}
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { key: 'all', label: 'Todos' },
+                    { key: 'today', label: 'Hoy' },
+                    { key: 'thisWeek', label: 'Esta semana' },
+                    { key: 'lastWeek', label: 'Semana anterior' }
+                  ].map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setDateFilter({ preset: f.key, date: null })}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                        dateFilter.preset === f.key
+                          ? 'bg-teal-500 text-slate-950 shadow-sm'
+                          : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-700/60'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowCalendar(!showCalendar)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-300 text-[11px] font-medium hover:bg-slate-700/60 flex items-center gap-1.5"
+                    >
+                      <Icon name="filter" className="w-3.5 h-3.5" />
+                      {dateFilter.preset === 'day' && dateFilter.date ? dateFilter.date : 'Calendario'}
+                    </button>
+                    {showCalendar && (
+                      <MiniCalendar
+                        value={dateFilter.date}
+                        onChange={(d) => { setDateFilter({ preset: 'day', date: d }); setShowCalendar(false); }}
+                        onClose={() => setShowCalendar(false)}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Paginación */}
+                <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                  <span>
+                    Mostrando {paged.length > 0 ? ((safePage - 1) * PAGE_SIZE + 1) : 0}–{Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      disabled={safePage === 1}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
+                    >
+                      <Icon name="minus" className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="px-2 font-semibold text-white">{safePage} / {totalPages}</span>
+                    <button
+                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                      disabled={safePage === totalPages}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista de pedidos */}
+              {paged.length === 0 ? (
+                <div className="text-center py-8 space-y-2 text-slate-500">
+                  <Icon name="search" className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-xs font-semibold text-slate-400">No hay pedidos en este filtro</p>
+                </div>
+              ) : (
+                paged.map((o) => {
+                  const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
+                  const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
+                  return (
+                    <div key={o.id} className="p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border border-slate-700/50">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs sm:text-sm font-bold text-white">
+                          Pedido <span className="text-teal-400">#{o.id}</span>
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${style.badge}`}>
+                          {STATUS_LABELS[o.status] || 'Pendiente'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
+                        {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
+                      </p>
+                      <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
+                        {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
+                      </p>
+                      <div className="flex items-center gap-2 mt-2.5">
+                        <button
+                          onClick={() => onViewOrderDetail(o)}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-1"
+                        >
+                          <Icon name="eye" className="w-3 h-3" />
+                          Ver detalle
+                        </button>
+                        {o.type === 'delivery' && o.status !== 'cancelado' && o.status !== 'entregado' && (
+                          <button
+                            onClick={() => onTrackLiveOrder(o)}
+                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1"
+                          >
+                            <Icon name="mapPin" className="w-3 h-3" />
+                            Rastrear
+                          </button>
+                        )}
+                        {cancellable && (
+                          <button
+                            onClick={() => onRequestCancelOrder(o)}
+                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1"
+                          >
+                            <Icon name="x" className="w-3 h-3" />
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
   return (
     <button
@@ -3781,20 +4121,15 @@ const makePinIcon = (color, label) =>
 function DeliveryMap({ order, storeLocation }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
-  const layersRef = useRef(null);
+  const layerGroupRef = useRef(null);
+  const fittedRef = useRef(false);
+  const courierMarkerRef = useRef(null);
+  const routeRef = useRef(null);
 
   const dest = order && order.lat != null && order.lng != null;
   const courier = order && order.courier_lat != null && order.courier_lng != null;
   const store = storeLocation && storeLocation.lat != null && storeLocation.lng != null;
   const showMap = order && order.type === 'delivery' && (dest || courier || store);
-
-  const markers = useMemo(() => {
-    const list = [];
-    if (store) list.push({ lat: Number(storeLocation.lat), lng: Number(storeLocation.lng), kind: 'store' });
-    if (dest) list.push({ lat: Number(order.lat), lng: Number(order.lng), kind: 'dest' });
-    if (courier) list.push({ lat: Number(order.courier_lat), lng: Number(order.courier_lng), kind: 'courier' });
-    return list;
-  }, [store, dest, courier, storeLocation?.lat, storeLocation?.lng, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
 
   // Crea el mapa una sola vez.
   useEffect(() => {
@@ -3804,67 +4139,101 @@ function DeliveryMap({ order, storeLocation }) {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
     mapRef.current = map;
-    layersRef.current = L.layerGroup().addTo(map);
+    layerGroupRef.current = L.layerGroup().addTo(map);
     return () => {
       map.remove();
       mapRef.current = null;
-      layersRef.current = null;
+      layerGroupRef.current = null;
+      fittedRef.current = false;
+      courierMarkerRef.current = null;
+      routeRef.current = null;
     };
   }, [showMap]);
 
-  // Dibuja marcadores y la ruta OSRM cuando cambian los datos.
+  // Dibuja/actualiza marcadores y ruta cuando cambian los datos. El viewport
+  // solo se ajusta la primera vez (o si aún no hay repartidor); después el mapa
+  // conserva el zoom y el desplazamiento que el usuario estableció, y cuando el
+  // repartidor sale de la vista se centra suavemente en él sin cambiar el zoom.
   useEffect(() => {
     const map = mapRef.current;
-    const layerGroup = layersRef.current;
+    const layerGroup = layerGroupRef.current;
     if (!map || !layerGroup) return;
-    layerGroup.clearLayers();
 
-    if (markers.length === 0) return;
-    markers.forEach((m) => {
+    const pts = [];
+    if (store) pts.push({ lat: Number(storeLocation.lat), lng: Number(storeLocation.lng), kind: 'store' });
+    if (dest) pts.push({ lat: Number(order.lat), lng: Number(order.lng), kind: 'dest' });
+    if (courier) pts.push({ lat: Number(order.courier_lat), lng: Number(order.courier_lng), kind: 'courier' });
+
+    // Marcadores estáticos (comercio y destino) se recrean; el del repartidor se
+    // reutiliza para no parpadear ni resetear el mapa en cada update.
+    layerGroup.clearLayers();
+    let courierMarker = courierMarkerRef.current;
+    pts.forEach((m) => {
       const icon =
         m.kind === 'courier'
           ? makePinIcon('#10b981', 'REPARTIDOR')
           : m.kind === 'store'
           ? makePinIcon('#22d3ee', 'COMERCIO')
           : makePinIcon('#f43f5e', 'DESTINO');
-      L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+      if (m.kind === 'courier') {
+        if (!courierMarker) {
+          courierMarker = L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+          courierMarkerRef.current = courierMarker;
+        } else {
+          courierMarker.setLatLng([m.lat, m.lng]);
+          courierMarker.setIcon(icon);
+          courierMarker.addTo(layerGroup);
+        }
+      } else {
+        L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+      }
     });
 
-    // Línea recta provisional entre repartidor y destino.
-    let straight = null;
+    // Ruta (línea recta provisional → OSRM cuando responde).
+    if (routeRef.current) {
+      layerGroup.removeLayer(routeRef.current);
+      routeRef.current = null;
+    }
     if (courier && dest) {
-      straight = L.polyline(
+      routeRef.current = L.polyline(
         [
           [Number(order.courier_lat), Number(order.courier_lng)],
           [Number(order.lat), Number(order.lng)]
         ],
         { color: '#10b981', weight: 3, dashArray: '6 6', opacity: 0.7 }
       ).addTo(layerGroup);
-    }
-
-    // Pedido de ruta real a OSRM (gratuito, sin key). Si responde, reemplaza la línea.
-    if (courier && dest) {
       const url = `https://router.project-osrm.org/route/v1/driving/${Number(order.courier_lng)},${Number(order.courier_lat)};${Number(order.lng)},${Number(order.lat)}?overview=full&geometries=geojson`;
       fetch(url)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((data) => {
           const coords = data?.routes?.[0]?.geometry?.coordinates;
           if (!Array.isArray(coords) || coords.length < 2) return;
-          if (straight) layerGroup.removeLayer(straight);
-          L.polyline(
+          if (routeRef.current) layerGroup.removeLayer(routeRef.current);
+          const poly = L.polyline(
             coords.map((c) => [c[1], c[0]]),
             { color: '#10b981', weight: 5, opacity: 0.9 }
           ).addTo(layerGroup);
+          routeRef.current = poly;
         })
         .catch(() => {});
     }
 
-    // Ajusta el viewport para abarcar todos los puntos.
-    const latLngs = markers.map((m) => [m.lat, m.lng]);
-    if (latLngs.length) {
+    // Ajuste de viewport: solo en el primer render (o cuando aún no hay
+    // repartidor en vivo). No se vuelve a llamar en cada update del rastreo.
+    const shouldFit = !fittedRef.current || !courier;
+    if (pts.length && shouldFit) {
+      const latLngs = pts.map((p) => [p.lat, p.lng]);
       map.fitBounds(L.latLngBounds(latLngs).pad(0.25), { animate: false });
+      fittedRef.current = true;
+    } else if (courier) {
+      // Sigue al repartidor: si salió del viewport actual, lo centra con pan
+      // suave SIN cambiar el zoom que el usuario dejó.
+      const courierLatLng = L.latLng(Number(order.courier_lat), Number(order.courier_lng));
+      if (!map.getBounds().contains(courierLatLng)) {
+        map.panTo(courierLatLng, { animate: true, duration: 0.5 });
+      }
     }
-  }, [markers, courier, dest, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
+  }, [courier, dest, store, storeLocation?.lat, storeLocation?.lng, order?.lat, order?.lng, order?.courier_lat, order?.courier_lng]);
 
   const destUrl = dest ? `https://www.google.com/maps?q=${Number(order.lat)},${Number(order.lng)}` : null;
   const courierUrl = courier ? `https://www.google.com/maps?q=${Number(order.courier_lat)},${Number(order.courier_lng)}` : null;

@@ -1723,6 +1723,7 @@ export default function App() {
         onClose={() => setIsOrdersDrawerOpen(false)}
         orders={customerOrders}
         rate={rate}
+        isBenefited={Boolean(customerProfile?.isBenefited)}
         onViewOrderDetail={(order) => {
           setIsOrdersDrawerOpen(false);
           setOrderDetailOrder(order);
@@ -3000,17 +3001,18 @@ function CustomerView({
               {pagedOrders.map((o) => {
                 const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                 const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
+                const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
                 return (
                   <div
                     key={o.id}
-                    className="p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border border-slate-700/50"
+                    className={`p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border ${payRejected ? 'border-rose-500/50' : 'border-slate-700/50'}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs sm:text-sm font-bold text-white">
                         Pedido <span className="text-teal-400">#{o.id}</span>
                       </span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${style.badge}`}>
-                        {STATUS_LABELS[o.status] || 'Pendiente'}
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
+                        {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
                       </span>
                     </div>
                     <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
@@ -3019,6 +3021,13 @@ function CustomerView({
                     <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                       {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
                     </p>
+                    {payRejected && (
+                      <div className="mt-2 flex items-start gap-1.5 rounded-xl bg-rose-500/10 border border-rose-500/40 p-2 text-[11px] text-rose-200/90">
+                        <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0 text-rose-400" />
+                        <span>Tu pago fue rechazado. Suministra otro comprobante
+                          {customerProfile?.isBenefited ? ' o pásalo a tu cuenta' : ''} en Ver detalle.</span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mt-2.5">
                       <button
                         onClick={() => onViewOrderDetail(o)}
@@ -3120,6 +3129,17 @@ function CustomerView({
               );
             })}
           </div>
+
+          {/* Aviso de pago rechazado: visible sin abrir el detalle */}
+          {currentOrderTracking.paymentMethod &&
+            currentOrderTracking.paymentMethod !== 'efectivo' &&
+            currentOrderTracking.paymentStatus === 'rechazado' && (
+              <div className="flex items-start gap-1.5 rounded-xl bg-rose-500/10 border border-rose-500/40 p-2.5 text-[11px] text-rose-200/90">
+                <Icon name="alertTriangle" className="w-4 h-4 mt-0.5 shrink-0 text-rose-400" />
+                <span>Tu pago fue rechazado. Suministra otro comprobante
+                  {customerProfile?.isBenefited ? ' o pásalo a tu cuenta' : ''} en Ver detalle.</span>
+              </div>
+            )}
 
           {/* Mapa de entrega a domicilio (destino + repartidor en vivo) */}
           {currentOrderTracking.type === 'delivery' && (
@@ -4283,7 +4303,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
 }
 
 // Drawer de Mis Pedidos (mismo patrón que el carrito: ante menú inferior, X para cerrar)
-function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrackLiveOrder, onRequestCancelOrder }) {
+function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrackLiveOrder, onRequestCancelOrder, isBenefited }) {
   const [page, setPage] = useState(1);
   const [dateFilter, setDateFilter] = useState({ preset: 'all', date: null });
   const [showCalendar, setShowCalendar] = useState(false);
@@ -4427,14 +4447,15 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
                 paged.map((o) => {
                   const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                   const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
+                  const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
                   return (
-                    <div key={o.id} className="p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border border-slate-700/50">
+                    <div key={o.id} className={`p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border ${payRejected ? 'border-rose-500/50' : 'border-slate-700/50'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs sm:text-sm font-bold text-white">
                           Pedido <span className="text-teal-400">#{o.id}</span>
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${style.badge}`}>
-                          {STATUS_LABELS[o.status] || 'Pendiente'}
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
+                          {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
                         </span>
                       </div>
                       <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
@@ -4443,6 +4464,13 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
                       <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                         {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
                       </p>
+                      {payRejected && (
+                        <div className="mt-2 flex items-start gap-1.5 rounded-xl bg-rose-500/10 border border-rose-500/40 p-2 text-[11px] text-rose-200/90">
+                          <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0 text-rose-400" />
+                          <span>Tu pago fue rechazado. Suministra otro comprobante
+                            {isBenefited ? ' o pásalo a tu cuenta' : ''} en Ver detalle.</span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 mt-2.5">
                         <button
                           onClick={() => onViewOrderDetail(o)}

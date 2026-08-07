@@ -456,12 +456,21 @@ app.post('/api/orders/:id/payment', requireAdmin, async (req, res) => {
     res.json(result);
     const updated = await store.getOrderById(req.params.id);
     if (updated && updated.phone) {
+      let body =
+        status === 'confirmado'
+          ? `Tu pago del pedido ${updated.id} fue confirmado. ¡Gracias!`
+          : `Tu pago del pedido ${updated.id} fue rechazado. Suministra otro comprobante para continuar.`;
+      if (status === 'rechazado') {
+        try {
+          const customer = await store.getCustomerByPhone(updated.phone);
+          if (customer?.isBenefited) {
+            body = `Tu pago del pedido ${updated.id} fue rechazado. Suministra otro comprobante o pásalo a tu cuenta.`;
+          }
+        } catch {}
+      }
       push.sendToPhone([updated.phone], {
         title: `Pago ${status === 'confirmado' ? 'confirmado' : 'rechazado'}`,
-        body:
-          status === 'confirmado'
-            ? `Tu pago del pedido ${updated.id} fue confirmado. ¡Gracias!`
-            : `El pago del pedido ${updated.id} fue rechazado. Contáctanos para resolverlo.`,
+        body,
         url: '/'
       }).catch(() => {});
     }

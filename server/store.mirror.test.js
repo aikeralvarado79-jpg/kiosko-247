@@ -15,6 +15,12 @@ const h = vi.hoisted(() => ({
           if (sql.includes('to_regclass')) {
             return { rows: [{ r: `public.${sql.match(/public\.(\w+)/)?.[1] || ''}` }] };
           }
+          if (sql.includes('information_schema.columns')) {
+            if (sql.includes('table_schema = $1 AND table_name = $2 ORDER BY ordinal_position')) {
+              return { rows: [{ column_name: 'id', data_type: 'text' }, { column_name: 'total', data_type: 'numeric' }] };
+            }
+            return { rows: [{ column_name: 'id' }, { column_name: 'total' }] };
+          }
           if (sql.includes('DROP TABLE')) return { rowCount: 0 };
           if (sql.includes('CREATE TABLE')) return { rowCount: 0 };
           if (sql.includes('INSERT INTO')) return { rowCount: 3 };
@@ -109,5 +115,23 @@ describe('refreshMirror', () => {
     expect(sqls.some((s) => s.includes('ALTER TABLE staging.customers ADD COLUMN IF NOT EXISTS balance'))).toBe(true);
     expect(sqls.some((s) => s.includes('ALTER TABLE staging.customers ADD COLUMN IF NOT EXISTS "isBenefited"'))).toBe(true);
     expect(sqls.some((s) => s.includes('ALTER TABLE staging.orders ADD COLUMN IF NOT EXISTS credit'))).toBe(true);
+  });
+
+  it('preserva los pedidos creados en staging (no borra la tabla orders)', async () => {
+    process.env.DATABASE_URL = 'postgres://fake';
+    delete process.env.MIRROR_SOURCE_SCHEMA;
+    delete process.env.MIRROR_TARGET_SCHEMA;
+    const store = await import('./store.js');
+    const res = await store.refreshMirror();
+    expect(res.ok).toBe(true);
+
+    const client = h.getOrCreateClient();
+    const sqls = client.query.mock.calls.map((c) => String(c[0]));
+    // La tabla orders NO se borra ni se recrea: se hace DELETE solo de los
+    // pedidos que vienen de producción e INSERT ... ON CONFLICT DO NOTHING.
+    expect(sqls.some((s) => s.includes('DROP TABLE IF EXISTS staging.orders'))).toBe(false);
+    expect(sqls.some((s) => s.includes('CREATE TABLE staging.orders'))).toBe(false);
+    expect(sqls.some((s) => s.includes('DELETE FROM staging.orders WHERE id IN (SELECT id FROM public.orders)'))).toBe(true);
+    expect(sqls.some((s) => s.includes('INSERT INTO staging.orders') && s.includes('ON CONFLICT (id) DO NOTHING'))).toBe(true);
   });
 });

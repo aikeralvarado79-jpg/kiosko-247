@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, Component } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment } from 'react';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
 import L from 'leaflet';
@@ -5906,6 +5906,172 @@ function AdminView({
   const [broadcastBody, setBroadcastBody] = useState('');
   const [reminderPhone, setReminderPhone] = useState('');
 
+  // Inventario: búsqueda en tiempo real + filtro por categoría + agrupación por marca
+  const [invSearch, setInvSearch] = useState('');
+  const [invCategory, setInvCategory] = useState('todas');
+  const [invGroupByBrand, setInvGroupByBrand] = useState(false);
+  const inventoryProducts = useMemo(() => products || [], [products]);
+  const searchOnly = useMemo(() => {
+    const q = invSearch.trim().toLowerCase();
+    if (!q) return inventoryProducts;
+    return inventoryProducts.filter((p) =>
+      `${p.name || ''} ${p.code || ''} ${p.brand || ''} ${p.category || ''}`.toLowerCase().includes(q)
+    );
+  }, [inventoryProducts, invSearch]);
+  const inventoryCategories = useMemo(() => {
+    const cats = ['todas'];
+    inventoryProducts.forEach((p) => {
+      if (p.category && !cats.includes(p.category)) cats.push(p.category);
+    });
+    return cats;
+  }, [inventoryProducts]);
+  const catCount = useCallback(
+    (c) => (c === 'todas' ? searchOnly.length : searchOnly.filter((p) => p.category === c).length),
+    [searchOnly]
+  );
+  const filteredProducts = useMemo(
+    () => (invCategory === 'todas' ? searchOnly : searchOnly.filter((p) => p.category === invCategory)),
+    [searchOnly, invCategory]
+  );
+  const groupedByBrand = useMemo(() => {
+    if (!invGroupByBrand) return [];
+    const map = {};
+    filteredProducts.forEach((p) => {
+      const br = (p.brand || 'Sin marca').trim() || 'Sin marca';
+      (map[br] = map[br] || []).push(p);
+    });
+    return Object.keys(map)
+      .sort((a, b) => a.localeCompare(b))
+      .map((br) => ({ brand: br, items: map[br] }));
+  }, [filteredProducts, invGroupByBrand]);
+  const clearInvFilters = () => {
+    setInvSearch('');
+    setInvCategory('todas');
+  };
+
+  const renderMobileCard = (p) => {
+    const isLow = p.stock <= 5;
+    const isOut = p.stock === 0;
+    return (
+      <div
+        key={p.id}
+        className="flex items-center gap-3 p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60"
+      >
+        <img
+          src={p.image}
+          alt={p.name}
+          className="w-14 h-14 rounded-xl object-cover bg-slate-900 border border-slate-700 shrink-0"
+        />
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-slate-100 text-sm truncate">{p.name}</p>
+          <p className="text-[11px] text-slate-400 truncate">{p.code} · {p.category}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="font-bold text-white text-xs">{formatUsd(p.price)}</span>
+            {rate?.rate > 0 && (
+              <span className="text-[10px] text-slate-400 font-semibold">
+                {formatBs(usdToBs(p.price, rate.rate))}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+              isOut
+                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                : isLow
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+            }`}
+          >
+            {isOut ? 'Agotado' : `${p.stock} un.`}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => onEditProduct(p)}
+              className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
+              title="Editar producto"
+            >
+              <Icon name="edit" className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onDeleteProduct(p)}
+              className="p-2 rounded-xl bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
+              title="Eliminar producto"
+            >
+              <Icon name="trash" className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTableRow = (p) => {
+    const isLow = p.stock <= 5;
+    const isOut = p.stock === 0;
+    return (
+      <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
+        <td className="p-4 flex items-center gap-3">
+          <img
+            src={p.image}
+            alt={p.name}
+            className="w-12 h-12 rounded-xl object-cover bg-slate-900 border border-slate-700"
+          />
+          <div>
+            <p className="font-bold text-slate-100">{p.name}</p>
+            <p className="text-xs text-slate-400 line-clamp-1 max-w-xs">
+              {[formatSize(p), p.description].filter(Boolean).join(' · ')}
+            </p>
+          </div>
+        </td>
+        <td className="p-4 font-mono text-xs text-slate-400">{p.code}</td>
+        <td className="p-4">
+          <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-300">
+            {p.category}
+          </span>
+        </td>
+        <td className="p-4 font-bold text-white">
+          {formatUsd(p.price)}
+          {rate?.rate > 0 && (
+            <span className="block text-[10px] text-slate-400 font-semibold">
+              {formatBs(usdToBs(p.price, rate.rate))}
+            </span>
+          )}
+        </td>
+        <td className="p-4">
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-bold ${
+              isOut
+                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                : isLow
+                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+            }`}
+          >
+            {p.stock} unidades
+          </span>
+        </td>
+        <td className="p-4 text-right space-x-2">
+          <button
+            onClick={() => onEditProduct(p)}
+            className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
+            title="Editar producto"
+          >
+            <Icon name="edit" className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onDeleteProduct(p)}
+            className="p-2 rounded-xl bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
+            title="Eliminar producto"
+          >
+            <Icon name="trash" className="w-4 h-4" />
+          </button>
+        </td>
+      </tr>
+    );
+  };
+
   const handlePushBroadcast = async () => {
     if (!broadcastTitle.trim()) return;
     const res = await api.pushBroadcast(broadcastTitle.trim(), broadcastBody.trim());
@@ -6273,65 +6439,90 @@ function AdminView({
       {/* Tab 1: Inventory Management */}
       {adminTab === 'inventory' && (
         <div className="space-y-4">
+          {/* Filtros: búsqueda en tiempo real + categoría + agrupación por marca */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <div className="relative flex-1">
+                <Icon name="search" className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <input
+                  value={invSearch}
+                  onChange={(e) => setInvSearch(e.target.value)}
+                  placeholder="Buscar por nombre, código o marca…"
+                  className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-slate-900/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500/60 transition-all"
+                />
+                {invSearch && (
+                  <button
+                    onClick={() => setInvSearch('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                    title="Limpiar búsqueda"
+                  >
+                    <Icon name="x" className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => setInvGroupByBrand((v) => !v)}
+                className={`shrink-0 px-3.5 py-2.5 rounded-2xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                  invGroupByBrand
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                }`}
+                title="Agrupar la lista por marca"
+              >
+                <Icon name="layers" className="w-4 h-4" />
+                {invGroupByBrand ? 'Agrupado por marca' : 'Agrupar por marca'}
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
+              {inventoryCategories.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setInvCategory(c)}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                    invCategory === c
+                      ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                >
+                  {c === 'todas' ? 'Todas' : c}
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{catCount(c)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredProducts.length === 0 && (
+            <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+              <Icon name="search" className="w-10 h-10 text-slate-700 mx-auto" />
+              <p className="font-bold text-slate-400">No hay productos con este filtro</p>
+              <button
+                onClick={clearInvFilters}
+                className="text-[11px] font-semibold text-teal-400 hover:text-teal-300"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+          )}
+
           {/* Mobile: card list */}
           <div className="grid grid-cols-1 gap-3 sm:hidden">
-            {products.map((p) => {
-              const isLow = p.stock <= 5;
-              const isOut = p.stock === 0;
-              return (
-                <div
-                  key={p.id}
-                  className="flex items-center gap-3 p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60"
-                >
-                  <img
-                    src={p.image}
-                    alt={p.name}
-                    className="w-14 h-14 rounded-xl object-cover bg-slate-900 border border-slate-700 shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-100 text-sm truncate">{p.name}</p>
-                    <p className="text-[11px] text-slate-400 truncate">{p.code} · {p.category}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="font-bold text-white text-xs">{formatUsd(p.price)}</span>
-                      {rate?.rate > 0 && (
-                        <span className="text-[10px] text-slate-400 font-semibold">
-                          {formatBs(usdToBs(p.price, rate.rate))}
-                        </span>
-                      )}
+            {invGroupByBrand
+              ? groupedByBrand.map((g) => (
+                  <div key={g.brand}>
+                    <div className="flex items-center gap-2 px-1 pt-1 pb-1.5">
+                      <span className="px-2.5 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+                        {g.brand}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        {g.items.length} producto{g.items.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {g.items.map((p) => renderMobileCard(p))}
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-2 shrink-0">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                        isOut
-                          ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                          : isLow
-                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                          : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                      }`}
-                    >
-                      {isOut ? 'Agotado' : `${p.stock} un.`}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => onEditProduct(p)}
-                        className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
-                        title="Editar producto"
-                      >
-                        <Icon name="edit" className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => onDeleteProduct(p)}
-                        className="p-2 rounded-xl bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
-                        title="Eliminar producto"
-                      >
-                        <Icon name="trash" className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                ))
+              : filteredProducts.map((p) => renderMobileCard(p))}
           </div>
 
           {/* Desktop: table */}
@@ -6349,71 +6540,23 @@ function AdminView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/50 text-sm">
-                  {products.map((p) => {
-                    const isLow = p.stock <= 5;
-                    const isOut = p.stock === 0;
-
-                    return (
-                      <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
-                        <td className="p-4 flex items-center gap-3">
-                          <img
-                            src={p.image}
-                            alt={p.name}
-                            className="w-12 h-12 rounded-xl object-cover bg-slate-900 border border-slate-700"
-                          />
-                          <div>
-                            <p className="font-bold text-slate-100">{p.name}</p>
-                            <p className="text-xs text-slate-400 line-clamp-1 max-w-xs">
-                              {[formatSize(p), p.description].filter(Boolean).join(' · ')}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="p-4 font-mono text-xs text-slate-400">{p.code}</td>
-                        <td className="p-4">
-                          <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-300">
-                            {p.category}
-                          </span>
-                        </td>
-                        <td className="p-4 font-bold text-white">
-                          {formatUsd(p.price)}
-                          {rate?.rate > 0 && (
-                            <span className="block text-[10px] text-slate-400 font-semibold">
-                              {formatBs(usdToBs(p.price, rate.rate))}
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-4">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              isOut
-                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                : isLow
-                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                            }`}
-                          >
-                            {p.stock} unidades
-                          </span>
-                        </td>
-                        <td className="p-4 text-right space-x-2">
-                          <button
-                            onClick={() => onEditProduct(p)}
-                            className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
-                            title="Editar producto"
-                          >
-                            <Icon name="edit" className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => onDeleteProduct(p)}
-                            className="p-2 rounded-xl bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
-                            title="Eliminar producto"
-                          >
-                            <Icon name="trash" className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {invGroupByBrand
+                    ? groupedByBrand.map((g) => (
+                        <Fragment key={g.brand}>
+                          <tr className="bg-slate-900/80">
+                            <td colSpan={6} className="p-2.5 pl-4">
+                              <span className="px-2.5 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+                                {g.brand}
+                              </span>
+                              <span className="ml-2 text-[10px] text-slate-500">
+                                {g.items.length} producto{g.items.length !== 1 ? 's' : ''}
+                              </span>
+                            </td>
+                          </tr>
+                          {g.items.map((p) => renderTableRow(p))}
+                        </Fragment>
+                      ))
+                    : filteredProducts.map((p) => renderTableRow(p))}
                 </tbody>
               </table>
             </div>

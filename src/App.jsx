@@ -446,6 +446,63 @@ const STATUS_LABELS = {
   cancelado: 'Cancelado'
 };
 
+// Time lapse de pasos de un pedido: muestra el avance con un color distinto por
+// estatus. Retiro en tienda: Pendiente → En prep. → Listo → Retirado.
+// Delivery: Pendiente → En prep. → Listo → En camino → Entregado.
+function OrderStepsTimeline({ order, className = '' }) {
+  if (!order) return null;
+  const isDelivery = order.type === 'delivery';
+  const steps = isDelivery
+    ? [
+        { key: 'pendiente', label: 'Pendiente', dot: 'bg-amber-400', text: 'text-amber-300' },
+        { key: 'en_preparacion', label: 'En prep.', dot: 'bg-cyan-400', text: 'text-cyan-300' },
+        { key: 'listo', label: 'Listo', dot: 'bg-emerald-400', text: 'text-emerald-300' },
+        { key: 'en_camino', label: 'En camino', dot: 'bg-sky-400', text: 'text-sky-300' },
+        { key: 'entregado', label: 'Entregado', dot: 'bg-violet-400', text: 'text-violet-300' }
+      ]
+    : [
+        { key: 'pendiente', label: 'Pendiente', dot: 'bg-amber-400', text: 'text-amber-300' },
+        { key: 'en_preparacion', label: 'En prep.', dot: 'bg-cyan-400', text: 'text-cyan-300' },
+        { key: 'listo', label: 'Listo', dot: 'bg-emerald-400', text: 'text-emerald-300' },
+        { key: 'entregado', label: 'Retirado', dot: 'bg-indigo-400', text: 'text-indigo-300' }
+      ];
+  const curIdx = steps.findIndex((s) => s.key === order.status);
+  return (
+    <div className={`flex items-stretch ${className}`}>
+      {steps.map((s, i) => {
+        const done = i < curIdx;
+        const active = i === curIdx;
+        return (
+          <Fragment key={s.key}>
+            <div className="flex flex-col items-center" style={{ width: `${100 / steps.length}%` }}>
+              <div className="relative w-full flex items-center justify-center">
+                {i > 0 && (
+                  <div className={`absolute right-1/2 top-1/2 -translate-y-1/2 h-0.5 w-full ${i <= curIdx ? 'bg-slate-500' : 'bg-slate-800'}`} />
+                )}
+                {i < steps.length - 1 && (
+                  <div className={`absolute left-1/2 top-1/2 -translate-y-1/2 h-0.5 w-full ${i < curIdx ? 'bg-slate-500' : 'bg-slate-800'}`} />
+                )}
+                <div
+                  className={`relative z-10 w-3 h-3 rounded-full border-2 transition-all ${
+                    active
+                      ? `${s.dot} border-white scale-125 shadow-lg`
+                      : done
+                        ? `${s.dot} border-transparent`
+                        : 'border-slate-600 bg-slate-800'
+                  }`}
+                />
+              </div>
+              <span className={`mt-1 text-[8px] font-bold whitespace-nowrap ${active ? s.text : done ? 'text-slate-400' : 'text-slate-600'}`}>
+                {s.label}
+              </span>
+            </div>
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
 function RateBanner({ rate }) {
   const [usdInput, setUsdInput] = useState('');
   const [bsInput, setBsInput] = useState('');
@@ -4737,7 +4794,7 @@ const makePinIcon = (color, label) =>
 // Mapa interactivo (Leaflet + OpenStreetMap, sin API key) para la entrega a
 // domicilio. Muestra el comercio (origen), el destino del cliente, la posición
 // en vivo del repartidor y el camino sugerido repartidor → destino (OSRM).
-function DeliveryMap({ order, storeLocation }) {
+function DeliveryMap({ order, storeLocation, fill = false }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const layerGroupRef = useRef(null);
@@ -4759,7 +4816,17 @@ function DeliveryMap({ order, storeLocation }) {
     }).addTo(map);
     mapRef.current = map;
     layerGroupRef.current = L.layerGroup().addTo(map);
+    // Al redimensionar el contenedor (GPS flotante con resize) Leaflet necesita
+    // invalidateSize para recalcular el viewport.
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            if (mapRef.current) mapRef.current.invalidateSize();
+          })
+        : null;
+    if (ro) ro.observe(containerRef.current);
     return () => {
+      if (ro) ro.disconnect();
       map.remove();
       mapRef.current = null;
       layerGroupRef.current = null;
@@ -4861,10 +4928,11 @@ function DeliveryMap({ order, storeLocation }) {
   if (!showMap) return null;
 
   return (
-    <div className="space-y-2">
-      <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
-        <div ref={containerRef} className="w-full h-44 sm:h-52" />
+    <div className={`space-y-2 ${fill ? 'h-full' : ''}`}>
+      <div className={`rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 ${fill ? 'h-full w-full rounded-none border-0' : ''}`}>
+        <div ref={containerRef} className={`w-full ${fill ? 'h-full' : 'h-44 sm:h-52'}`} />
       </div>
+      {!fill && (
       <div className="flex flex-wrap gap-2">
         {store && storeUrl && (
           <a
@@ -4900,6 +4968,144 @@ function DeliveryMap({ order, storeLocation }) {
           </a>
         )}
       </div>
+      )}
+    </div>
+  );
+}
+
+// GPS flotante que se superpone a la ficha del pedido: se puede arrastrar,
+// redimensionar desde los bordes/esquinas y minimizar con el botón "_" para
+// no estorbar mientras se revisa la ficha.
+function FloatingGpsPanel({ order, storeLocation, onClose }) {
+  const containerRef = useRef(null);
+  const [minimized, setMinimized] = useState(false);
+  const [box, setBox] = useState(() => ({
+    left: 12,
+    top: 76,
+    width: 300,
+    height: 260
+  }));
+
+  const drag = useRef(null);
+
+  const onPointerDown = (e, mode) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const start = { mode, x: e.clientX, y: e.clientY, box: box };
+    drag.current = start;
+    const rect = containerRef.current.getBoundingClientRect();
+    start.w = rect.width;
+    start.h = rect.height;
+    const onMove = (ev) => {
+      const d = drag.current;
+      if (!d) return;
+      const dx = ev.clientX - d.x;
+      const dy = ev.clientY - d.y;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      if (d.mode === 'move') {
+        setBox((b) => ({
+          ...b,
+          left: Math.max(4, Math.min(vw - b.width - 4, b.left + dx)),
+          top: Math.max(4, Math.min(vh - b.height - 4, b.top + dy))
+        }));
+      } else {
+        const mw = 200;
+        const mh = 140;
+        let next = { ...d.box };
+        if (d.mode.includes('e')) next.width = Math.max(mw, Math.min(vw - d.box.left - 4, d.box.width + dx));
+        if (d.mode.includes('s')) next.height = Math.max(mh, Math.min(vh - d.box.top - 4, d.box.height + dy));
+        if (d.mode.includes('w')) {
+          const w = Math.max(mw, d.box.width - dx);
+          next.left = d.box.left + (d.box.width - w);
+          next.width = w;
+        }
+        if (d.mode.includes('n')) {
+          const h = Math.max(mh, d.box.height - dy);
+          next.top = d.box.top + (d.box.height - h);
+          next.height = h;
+        }
+        setBox(next);
+      }
+    };
+    const onUp = () => {
+      drag.current = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  if (!order) return null;
+
+  const handleClass = 'absolute z-20 touch-none select-none';
+
+  return (
+    <div
+      ref={containerRef}
+      className="fixed z-[75] flex flex-col overflow-hidden rounded-2xl border-2 border-emerald-500/70 bg-slate-900 shadow-[0_0_30px_rgba(16,185,129,0.25)]"
+      style={{ left: box.left, top: box.top, width: box.width, height: minimized ? 40 : box.height }}
+    >
+      <div
+        className={`flex items-center gap-2 px-2.5 py-1.5 cursor-move bg-slate-800/95 border-b border-slate-700 ${handleClass}`}
+        style={{ touchAction: 'none' }}
+        onPointerDown={(e) => onPointerDown(e, 'move')}
+      >
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+        </span>
+        <span className="text-[10px] font-black tracking-wider text-emerald-300 uppercase flex-1 truncate">
+          GPS en vivo
+        </span>
+        <button
+          onClick={() => setMinimized((m) => !m)}
+          className="w-6 h-6 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-black flex items-center justify-center transition-colors"
+          title={minimized ? 'Expandir GPS' : 'Minimizar GPS'}
+        >
+          {minimized ? '+' : '_'}
+        </button>
+        <button
+          onClick={onClose}
+          className="w-6 h-6 rounded-md bg-slate-700 hover:bg-red-600 text-slate-200 text-[11px] font-black flex items-center justify-center transition-colors"
+          title="Cerrar GPS"
+        >
+          ✕
+        </button>
+      </div>
+      {!minimized && (
+        <>
+          <div className="relative flex-1 min-h-0">
+            <DeliveryMap order={order} storeLocation={storeLocation} fill />
+          </div>
+          <div
+            className="absolute bottom-0 right-0 w-4 h-4 z-30 cursor-se-resize"
+            style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(16,185,129,0.8) 50%)' }}
+            onPointerDown={(e) => onPointerDown(e, 'se')}
+          />
+          <div
+            className="absolute bottom-0 left-0 w-4 h-4 z-30 cursor-sw-resize"
+            style={{ background: 'linear-gradient(45deg, transparent 50%, rgba(16,185,129,0.8) 50%)' }}
+            onPointerDown={(e) => onPointerDown(e, 'sw')}
+          />
+          <div
+            className="absolute top-0 right-0 w-4 h-4 z-30 cursor-ne-resize"
+            style={{ background: 'linear-gradient(-45deg, transparent 50%, rgba(16,185,129,0.8) 50%)' }}
+            onPointerDown={(e) => onPointerDown(e, 'ne')}
+          />
+          <div
+            className="absolute top-0 left-0 w-4 h-4 z-30 cursor-nw-resize"
+            style={{ background: 'linear-gradient(225deg, transparent 50%, rgba(16,185,129,0.8) 50%)' }}
+            onPointerDown={(e) => onPointerDown(e, 'nw')}
+          />
+          <div className="absolute top-0 left-5 right-5 h-1.5 z-30 cursor-n-resize" onPointerDown={(e) => onPointerDown(e, 'n')} />
+          <div className="absolute bottom-0 left-5 right-5 h-1.5 z-30 cursor-s-resize" onPointerDown={(e) => onPointerDown(e, 's')} />
+          <div className="absolute top-5 bottom-5 left-0 w-1.5 z-30 cursor-w-resize" onPointerDown={(e) => onPointerDown(e, 'w')} />
+          <div className="absolute top-5 bottom-5 right-0 w-1.5 z-30 cursor-e-resize" onPointerDown={(e) => onPointerDown(e, 'e')} />
+        </>
+      )}
     </div>
   );
 }
@@ -5997,7 +6203,7 @@ function AdminView({
       const raw = JSON.parse(localStorage.getItem(ORDER_PREFS_KEY) || '{}');
       return {
         statusFilter: raw.statusFilter || 'todos',
-        ordersView: raw.ordersView || 'lista',
+        ordersView: ['lista', 'despacho', 'entregas', 'historial'].includes(raw.ordersView) ? raw.ordersView : 'lista',
         productFilter: raw.productFilter || null,
         ageSortOldest: Boolean(raw.ageSortOldest)
       };
@@ -6007,7 +6213,7 @@ function AdminView({
   };
   const [initialOrderPrefs] = useState(loadOrderPrefs);
   const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
-  const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | salida
+  const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
   const [ageSortOldest, setAgeSortOldest] = useState(initialOrderPrefs.ageSortOldest);
   const [pinnedOrders, setPinnedOrders] = useState(() => {
@@ -6029,6 +6235,15 @@ function AdminView({
   const [showStorePicker, setShowStorePicker] = useState(false);
   const [proofOrder, setProofOrder] = useState(null);
   const [fichaOrder, setFichaOrder] = useState(null);
+  const [fichaGpsVisible, setFichaGpsVisible] = useState(false);
+  const openFicha = (o) => {
+    setFichaOrder(o);
+    setFichaGpsVisible(!!(o && o.type === 'delivery'));
+  };
+  const closeFicha = () => {
+    setFichaOrder(null);
+    setFichaGpsVisible(false);
+  };
   const [broadcastTitle, setBroadcastTitle] = useState('');
   const [broadcastBody, setBroadcastBody] = useState('');
   const [reminderPhone, setReminderPhone] = useState('');
@@ -6494,13 +6709,21 @@ function AdminView({
 
   // "Despacho vs Caja": separa lo que hay que alistar/despachar de lo que hay
   // que validar en caja (pagos digitales en revisión o rechazados).
+  // Lógica por tipo:
+  //  • Retiro en tienda: Iniciar → Marcar listo → Retirado (final = entregado).
+  //  • Delivery: Iniciar → Marcar listo y desaparece de despacho para aparecer
+  //    en Entregas (cuando queda "listo" se mueve a la pestaña Entregas).
   const isPaymentBlocked = (o) =>
     o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'pendiente' && !o.credit;
   const despachoOrders = useMemo(
     () =>
       orders
         .filter((o) => !isPaymentBlocked(o) && o.paymentStatus !== 'rechazado')
-        .filter((o) => ['pendiente', 'en_preparacion', 'listo'].includes(o.status))
+        .filter((o) =>
+          o.type === 'delivery'
+            ? ['pendiente', 'en_preparacion'].includes(o.status)
+            : ['pendiente', 'en_preparacion', 'listo'].includes(o.status)
+        )
         .sort((a, b) => orderAgeMinutes(b) - orderAgeMinutes(a)),
     [orders]
   );
@@ -6512,17 +6735,12 @@ function AdminView({
         .sort((a, b) => orderAgeMinutes(b) - orderAgeMinutes(a)),
     [orders]
   );
-  const nextStatus = (s) => {
-    const i = STATUS_FLOW.indexOf(s);
-    return i >= 0 && i < STATUS_FLOW.length - 1 ? STATUS_FLOW[i + 1] : null;
-  };
-
-  // Entregas del día: pedidos a domicilio activos con su ruta sugerida (orden
-  // por cercanía desde el comercio) y los que no tienen coordenadas.
+  // Entregas del día: pedidos a domicilio listos para salir o ya en camino,
+  // con su ruta sugerida (orden por cercanía desde el comercio).
   const activeDeliveries = useMemo(() => {
     const list = orders
       .filter((o) => o.type === 'delivery')
-      .filter((o) => o.status !== 'entregado' && o.status !== 'cancelado');
+      .filter((o) => o.status === 'listo' || o.status === 'en_camino');
     const withCoords = list.filter((o) => o.lat != null && o.lng != null);
     const withoutCoords = list.filter((o) => o.lat == null || o.lng == null);
     const store = storeLocation;
@@ -6553,9 +6771,6 @@ function AdminView({
     }
     return { ordered, withoutCoords };
   }, [orders, storeLocation]);
-
-  // Cola de salida: pedidos listos para retirar o despachar.
-  const salidaOrders = useMemo(() => orders.filter((o) => o.status === 'listo'), [orders]);
 
   // Calculated Analytics
   const lowStockProducts = products.filter((p) => p.stock <= 5);
@@ -7224,13 +7439,12 @@ function AdminView({
       {/* Tab 2: Orders */}
       {adminTab === 'orders' && (
         <div className="space-y-4">
-          {/* Vista operativa: Activos / Despacho·Caja / Entregas / Cola de salida / Historial */}
+          {/* Vista operativa: Activos / Despacho·Caja / Entregas / Historial */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
             {[
               { key: 'lista', label: 'Activos', icon: 'clock' },
               { key: 'despacho', label: 'Despacho / Caja', icon: 'package' },
               { key: 'entregas', label: 'Entregas (ruta)', icon: 'mapPin' },
-              { key: 'salida', label: 'Cola de salida', icon: 'checkCircle' },
               { key: 'historial', label: 'Historial', icon: 'list' }
             ].map((v) => (
               <button
@@ -7375,8 +7589,26 @@ function AdminView({
                     {despachoOrders.map((o) => {
                       const sem = semaforoOf(o);
                       const missing = lowStockInOrder(o);
-                      const nxt = nextStatus(o.status);
                       const wa = formatPhoneWhatsApp(o.phone);
+                      const isPickup = o.type !== 'delivery';
+                      const nxt =
+                        o.status === 'pendiente'
+                          ? 'en_preparacion'
+                          : o.status === 'en_preparacion'
+                            ? 'listo'
+                            : isPickup && o.status === 'listo'
+                              ? 'entregado'
+                              : null;
+                      const nxtLabel =
+                        nxt === 'en_preparacion' ? 'Iniciar ▸' : nxt === 'listo' ? 'Marcar listo ✓' : nxt === 'entregado' ? 'Retirado ✓' : null;
+                      const nxtTone =
+                        nxt === 'en_preparacion'
+                          ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/25'
+                          : nxt === 'listo'
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                            : nxt === 'entregado'
+                              ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/25'
+                              : 'bg-slate-700/40 border-slate-600 text-slate-300';
                       return (
                         <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
                           <div className="flex items-center justify-between gap-2">
@@ -7387,7 +7619,7 @@ function AdminView({
                                 {sem.text}
                               </span>
                               <button
-                                onClick={() => setFichaOrder(o)}
+                                onClick={() => openFicha(o)}
                                 title="Ver ficha del pedido"
                                 className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-700/40 border border-slate-600 text-slate-200 text-[10px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all"
                               >
@@ -7412,26 +7644,24 @@ function AdminView({
                               {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
                             </span>
                           </div>
+                          <OrderStepsTimeline order={o} />
                           {missing.length > 0 && (
                             <p className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2 py-1.5">
                               ⚠️ Sin stock suficiente: {missing.map((m) => m.name).join(', ')}
                             </p>
                           )}
                           <div className="flex gap-2">
-                            {nxt ? (
+                            {nxt && nxtLabel ? (
                               <button
                                 onClick={() => onUpdateOrderStatus(o.id, nxt)}
-                                className="flex-1 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-xs font-bold hover:bg-cyan-500/25 transition-all"
+                                className={`flex-1 py-2 rounded-xl border text-xs font-bold transition-all ${nxtTone}`}
                               >
-                                {nxt === 'en_preparacion' ? 'Iniciar ▸' : nxt === 'listo' ? 'Marcar listo ✓' : nxt === 'en_camino' ? 'Enviar 🚚' : `Avanzar a ${STATUS_LABELS[nxt]}`}
+                                {nxtLabel}
                               </button>
                             ) : (
-                              <button
-                                onClick={() => onUpdateOrderStatus(o.id, 'entregado')}
-                                className="flex-1 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all"
-                              >
-                                Marcar entregado ✓
-                              </button>
+                              <div className="flex-1 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-xs font-bold text-center">
+                                {isPickup ? 'Esperando retiro' : 'Pasa a Entregas'}
+                              </div>
                             )}
                             {wa && (
                               <a
@@ -7556,69 +7786,100 @@ function AdminView({
                 <div className="space-y-2.5">
                   {activeDeliveries.ordered.map((o) => {
                     const wa = formatPhoneWhatsApp(o.phone);
+                    const isTracking = courierActive && courierOrderId === o.id;
                     return (
-                      <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center gap-3 flex-wrap sm:flex-nowrap">
-                        <span
-                          className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black ${
-                            o.status === 'en_camino'
-                              ? 'bg-emerald-500 text-slate-950'
-                              : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                          }`}
-                        >
-                          {o.routeNumber}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
-                            <span className="text-xs font-bold text-white truncate">{o.customerName}</span>
-                          </div>
-                          <p className="text-[11px] text-slate-400 truncate">{o.address}</p>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                          <button
-                            onClick={() => setFichaOrder(o)}
-                            title="Ver ficha del pedido"
-                            className="px-2.5 py-1.5 rounded-xl bg-slate-700/40 border border-slate-600 text-slate-200 text-[11px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all inline-flex items-center gap-1"
+                      <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2.5">
+                        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+                          <span
+                            className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black ${
+                              o.status === 'en_camino'
+                                ? 'bg-emerald-500 text-slate-950'
+                                : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                            }`}
                           >
-                            <Icon name="eye" className="w-3 h-3" /> Ficha
-                          </button>
-                          {o.status === 'listo' && (
+                            {o.routeNumber}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                              <span className="text-xs font-bold text-white truncate">{o.customerName}</span>
+                              {isTracking && (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  GPS en vivo
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 truncate">{o.address}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                             <button
-                              onClick={() => onUpdateOrderStatus(o.id, 'en_camino')}
-                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+                              onClick={() => openFicha(o)}
+                              title="Ver ficha del pedido"
+                              className="px-2.5 py-1.5 rounded-xl bg-slate-700/40 border border-slate-600 text-slate-200 text-[11px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all inline-flex items-center gap-1"
                             >
-                              En camino
+                              <Icon name="eye" className="w-3 h-3" /> Ficha
                             </button>
-                          )}
-                          {o.status === 'en_camino' && (
+                            {o.lat != null && o.lng != null && (
+                              <a
+                                href={`https://www.google.com/maps?q=${o.lat},${o.lng}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1.5 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[11px] font-bold hover:bg-sky-500/25 transition-all inline-flex items-center gap-1"
+                              >
+                                <Icon name="mapPin" className="w-3 h-3" /> Maps
+                              </a>
+                            )}
+                            {wa && (
+                              <a
+                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, tu pedido ${o.id} en Kiosko 247 está en camino`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/25 transition-all inline-flex items-center gap-1"
+                              >
+                                <Icon name="whatsapp" className="w-3 h-3" /> WA
+                              </a>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Acción principal: ocupa todo el ancho del contenedor del pedido */}
+                        {o.status === 'listo' && (
+                          <button
+                            onClick={() => {
+                              onUpdateOrderStatus(o.id, 'en_camino');
+                              startCourierTracking(o.id);
+                            }}
+                            className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <Icon name="mapPin" className="w-4 h-4" /> Iniciar entrega (rastreo GPS en vivo)
+                          </button>
+                        )}
+                        {o.status === 'en_camino' && (
+                          <div className="space-y-2">
+                            {isTracking ? (
+                              <button
+                                onClick={stopCourierTracking}
+                                className="w-full py-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                              >
+                                <Icon name="mapPin" className="w-4 h-4" /> Detener rastreo en vivo
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => startCourierTracking(o.id)}
+                                className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                              >
+                                <Icon name="mapPin" className="w-4 h-4" /> Compartir GPS en vivo
+                              </button>
+                            )}
                             <button
                               onClick={() => onUpdateOrderStatus(o.id, 'entregado')}
-                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+                              className="w-full py-2.5 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold hover:bg-sky-500/25 transition-all flex items-center justify-center gap-1.5"
                             >
-                              Entregado ✓
+                              <Icon name="check" className="w-4 h-4" /> Marcar entregado
                             </button>
-                          )}
-                          {o.lat != null && o.lng != null && (
-                            <a
-                              href={`https://www.google.com/maps?q=${o.lat},${o.lng}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-2.5 py-1.5 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[11px] font-bold hover:bg-sky-500/25 transition-all inline-flex items-center gap-1"
-                            >
-                              <Icon name="mapPin" className="w-3 h-3" /> Maps
-                            </a>
-                          )}
-                          {wa && (
-                            <a
-                              href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, tu pedido ${o.id} en Kiosko 247 está en camino`)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/25 transition-all inline-flex items-center gap-1"
-                            >
-                              <Icon name="whatsapp" className="w-3 h-3" /> WA
-                            </a>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -7628,106 +7889,6 @@ function AdminView({
                       {activeDeliveries.withoutCoords.map((o) => o.id).join(', ')}
                     </div>
                   )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Vista Cola de salida: listos para retirar o despachar */}
-          {ordersView === 'salida' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-black text-slate-200 flex items-center gap-2">
-                  <Icon name="checkCircle" className="w-4 h-4 text-emerald-400" />
-                  Cola de salida — listos para entregar
-                </h3>
-                <span className="text-[11px] text-slate-500">{salidaOrders.length} pedido(s)</span>
-              </div>
-              {salidaOrders.length === 0 ? (
-                <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
-                  <Icon name="checkCircle" className="w-10 h-10 text-slate-700 mx-auto" />
-                  <p className="font-bold text-slate-400">No hay pedidos listos para salir</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                  {salidaOrders.map((o) => {
-                    const wa = formatPhoneWhatsApp(o.phone);
-                    return (
-                      <div key={o.id} className="p-4 rounded-3xl bg-slate-800/80 border border-emerald-500/40 shadow-xl space-y-3 flex flex-col justify-between">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
-                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${
-                                  o.type === 'delivery'
-                                    ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
-                                    : 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                                }`}
-                              >
-                                {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
-                              </span>
-                              <button
-                                onClick={() => setFichaOrder(o)}
-                                title="Ver ficha del pedido"
-                                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-700/40 border border-slate-600 text-slate-200 text-[10px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all"
-                              >
-                                <Icon name="eye" className="w-3 h-3" />
-                                Ficha
-                              </button>
-                            </div>
-                          </div>
-                          <p className="font-bold text-white text-sm">{o.customerName}</p>
-                          <p className="text-[11px] text-slate-400 line-clamp-2">
-                            {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
-                          </p>
-                          <p className="text-xs font-black text-teal-400">{formatUsd(o.total)}</p>
-                          {o.type === 'delivery' && (
-                            <p className="text-[11px] text-amber-300">📦 {o.address}</p>
-                          )}
-                        </div>
-                        <div className="pt-2 border-t border-slate-700/60 space-y-2">
-                          {o.type === 'delivery' ? (
-                            <button
-                              onClick={() => onUpdateOrderStatus(o.id, 'en_camino')}
-                              className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                            >
-                              <Icon name="mapPin" className="w-3.5 h-3.5" /> Iniciar entrega
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => onUpdateOrderStatus(o.id, 'entregado')}
-                              className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                            >
-                              <Icon name="check" className="w-3.5 h-3.5" /> Marcar entregado
-                            </button>
-                          )}
-                          <div className="flex gap-2">
-                            {wa && (
-                              <a
-                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, tu pedido ${o.id} en Kiosko 247 está listo`)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex-1 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition-all inline-flex items-center justify-center gap-1.5"
-                              >
-                                <Icon name="whatsapp" className="w-3.5 h-3.5" /> WhatsApp
-                              </a>
-                            )}
-                            {o.type === 'delivery' && o.lat != null && o.lng != null && (
-                              <a
-                                href={`https://www.google.com/maps?q=${o.lat},${o.lng}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex-1 py-2 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold hover:bg-sky-500/25 transition-all inline-flex items-center justify-center gap-1.5"
-                              >
-                                <Icon name="mapPin" className="w-3.5 h-3.5" /> Maps
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
               )}
             </div>
@@ -7878,14 +8039,23 @@ function AdminView({
                                 </span>
                               </td>
                               <td className="p-3 text-right">
-                                {o.status === 'cancelado' && (
+                                <div className="inline-flex items-center gap-2">
                                   <button
-                                    onClick={() => onDeleteOrder(o)}
-                                    className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 transition-all inline-flex items-center gap-1.5 text-[11px] font-bold"
+                                    onClick={() => openFicha(o)}
+                                    title="Ver ficha del pedido"
+                                    className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-300 hover:bg-teal-500/25 transition-all inline-flex items-center gap-1.5 text-[11px] font-bold"
                                   >
-                                    <Icon name="trash" className="w-3.5 h-3.5" /> Eliminar
+                                    <Icon name="eye" className="w-3.5 h-3.5" /> Ficha
                                   </button>
-                                )}
+                                  {o.status === 'cancelado' && (
+                                    <button
+                                      onClick={() => onDeleteOrder(o)}
+                                      className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 transition-all inline-flex items-center gap-1.5 text-[11px] font-bold"
+                                    >
+                                      <Icon name="trash" className="w-3.5 h-3.5" /> Eliminar
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           );
@@ -7918,15 +8088,24 @@ function AdminView({
                           </p>
                           <div className="flex items-center justify-between gap-2 pt-1">
                             <span className="text-sm font-black text-teal-400">{formatUsd(o.total)}</span>
-                            {o.status === 'cancelado' && (
+                            <div className="flex items-center gap-1.5">
                               <button
-                                onClick={() => onDeleteOrder(o)}
-                                className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 transition-all"
-                                title="Eliminar pedido"
+                                onClick={() => openFicha(o)}
+                                className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-300 hover:bg-teal-500/25 transition-all"
+                                title="Ver ficha del pedido"
                               >
-                                <Icon name="trash" className="w-3.5 h-3.5" />
+                                <Icon name="eye" className="w-3.5 h-3.5" />
                               </button>
-                            )}
+                              {o.status === 'cancelado' && (
+                                <button
+                                  onClick={() => onDeleteOrder(o)}
+                                  className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 transition-all"
+                                  title="Eliminar pedido"
+                                >
+                                  <Icon name="trash" className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -8428,9 +8607,9 @@ function AdminView({
 
       {fichaOrder && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-md animate-fade-in" role="dialog" aria-label={`Ficha del pedido ${fichaOrder.id}`}>
-          <div className="absolute inset-0" onClick={() => setFichaOrder(null)} />
+          <div className="absolute inset-0" onClick={closeFicha} />
           <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col max-h-[92vh]">
-            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95 backdrop-blur sticky top-0 z-30">
               <div>
                 <h3 className="font-black text-white text-sm flex items-center gap-2">
                   <Icon name="eye" className="w-4 h-4 text-teal-400" />
@@ -8439,7 +8618,7 @@ function AdminView({
                 <p className="text-[11px] text-slate-500 mt-0.5">Diseño original — {fichaOrder.id}</p>
               </div>
               <button
-                onClick={() => setFichaOrder(null)}
+                onClick={closeFicha}
                 className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-all shrink-0"
                 aria-label="Cerrar ficha"
               >
@@ -8447,10 +8626,21 @@ function AdminView({
               </button>
             </div>
             <div className="p-4 sm:p-5 overflow-y-auto">
-              {renderOrderCard(fichaOrder)}
+              <OrderStepsTimeline order={fichaOrder} />
+              <div className="mt-4">
+                {renderOrderCard(fichaOrder)}
+              </div>
             </div>
           </div>
         </div>
+      )}
+      {fichaGpsVisible && fichaOrder && (
+        <FloatingGpsPanel
+          key={fichaOrder.id}
+          order={fichaOrder}
+          storeLocation={storeLocation}
+          onClose={() => setFichaGpsVisible(false)}
+        />
       )}
     </div>
   );

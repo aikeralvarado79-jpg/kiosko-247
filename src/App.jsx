@@ -28,6 +28,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
+    pin: <path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />,
     clock: <path d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
     filter: <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />,
     eye: <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
@@ -165,6 +166,17 @@ const parseOrderDate = (o) => {
 
 const toYMD = (d) => isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+// Distancia en km entre dos puntos (fórmula de Haversine). Se usa para armar la
+// ruta del día de entregas ordenando los destinos por cercanía.
+const haversineKm = (lat1, lng1, lat2, lng2) => {
+  const R = 6371;
+  const toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+};
 
 // Productos "nuevos": creados en las últimas 4 horas. Se considera la fecha del
 // dispositivo del cliente como referencia razonable para la app.
@@ -370,6 +382,13 @@ const STATUS_STYLES = {
   en_camino: { badge: 'bg-sky-500/20 text-sky-300 border-sky-500/40', ring: 'border-sky-500/50', dot: 'bg-sky-400' },
   entregado: { badge: 'bg-slate-500/20 text-slate-300 border-slate-500/40', ring: 'border-slate-500/50', dot: 'bg-slate-400' },
   cancelado: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', ring: 'border-rose-500/50', dot: 'bg-rose-400' }
+};
+
+// Colores del semáforo de espera según la antigüedad del pedido.
+const SEM_TONES = {
+  emerald: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+  amber: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+  rose: 'bg-rose-500/15 text-rose-300 border-rose-500/40'
 };
 
 const playChime = (() => {
@@ -4885,6 +4904,77 @@ function DeliveryMap({ order, storeLocation }) {
   );
 }
 
+// Mapa de entregas del día (Leaflet + OpenStreetMap): muestra el comercio y los
+// destinos de los pedidos a domicilio activos, numerados según la ruta sugerida
+// (el más cercano al comercio primero, y luego el siguiente más cercano).
+function DeliveriesRouteMap({ storeLocation, deliveries, storeLabel = 'KIOSKO' }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layerGroupRef = useRef(null);
+  const hasStore = storeLocation && storeLocation.lat != null && storeLocation.lng != null;
+  const hasDeliveries = Array.isArray(deliveries) && deliveries.some((d) => d.lat != null && d.lng != null);
+
+  // Crea el mapa una sola vez (con una vista por defecto de Caracas como base).
+  useEffect(() => {
+    if (!hasStore && !hasDeliveries) return;
+    if (!containerRef.current || mapRef.current) return;
+    const map = L.map(containerRef.current, { zoomControl: false, attributionControl: true }).setView([10.4806, -66.9036], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    mapRef.current = map;
+    layerGroupRef.current = L.layerGroup().addTo(map);
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      layerGroupRef.current = null;
+    };
+  }, [hasStore, hasDeliveries]);
+
+  // Dibuja el comercio y los destinos numerados, más la línea de la ruta.
+  useEffect(() => {
+    const map = mapRef.current;
+    const layerGroup = layerGroupRef.current;
+    if (!map || !layerGroup) return;
+    layerGroup.clearLayers();
+
+    const store = hasStore ? { lat: Number(storeLocation.lat), lng: Number(storeLocation.lng) } : null;
+    const dests = (deliveries || []).filter((d) => d.lat != null && d.lng != null);
+    const ordered = [...dests].sort((a, b) => Number(a.routeNumber || 99) - Number(b.routeNumber || 99));
+
+    // Ajusta el viewport a todos los puntos.
+    const all = [];
+    if (store) all.push([store.lat, store.lng]);
+    ordered.forEach((d) => all.push([Number(d.lat), Number(d.lng)]));
+    if (all.length) {
+      map.fitBounds(L.latLngBounds(all).pad(0.25), { animate: false });
+    }
+
+    if (store) {
+      L.marker([store.lat, store.lng], { icon: makePinIcon('#22d3ee', storeLabel) }).addTo(layerGroup);
+    }
+    ordered.forEach((d) => {
+      L.marker([Number(d.lat), Number(d.lng)], {
+        icon: makePinIcon('#f43f5e', String(d.routeNumber || ''))
+      }).addTo(layerGroup);
+    });
+
+    // Línea de la ruta: comercio → destino 1 → 2 → …
+    const linePts = [];
+    if (store) linePts.push([store.lat, store.lng]);
+    ordered.forEach((d) => linePts.push([Number(d.lat), Number(d.lng)]));
+    if (linePts.length > 1) {
+      L.polyline(linePts, { color: '#f43f5e', weight: 2.5, dashArray: '6 6', opacity: 0.6 }).addTo(layerGroup);
+    }
+  }, [storeLocation, deliveries, hasStore, hasDeliveries, storeLabel]);
+
+  if (!hasStore && !hasDeliveries) return null;
+  return (
+    <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 w-full">
+      <div ref={containerRef} className="w-full h-72 sm:h-96" />
+    </div>
+  );
+}
 // Modal selector de punto en el mapa (Leaflet + OpenStreetMap). Lo usan el
 // cliente (para elegir dónde recibir distinto de su ubicación actual) y el
 // admin (para fijar la ubicación del comercio).
@@ -5898,8 +5988,39 @@ function AdminView({
   onSaveStoreLocation,
   adminPhone
 }) {
-  // Order status filter state
-  const [statusFilter, setStatusFilter] = useState('todos');
+  // Order status filter state + preferencias recordadas (filtro, vista, orden
+  // por antigüedad y pedidos fijados se persisten en localStorage).
+  const ORDER_PREFS_KEY = 'kiosko_admin_order_prefs';
+  const PINNED_KEY = 'kiosko_admin_pinned';
+  const loadOrderPrefs = () => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(ORDER_PREFS_KEY) || '{}');
+      return {
+        statusFilter: raw.statusFilter || 'todos',
+        ordersView: raw.ordersView || 'lista',
+        productFilter: raw.productFilter || null,
+        ageSortOldest: Boolean(raw.ageSortOldest)
+      };
+    } catch {
+      return { statusFilter: 'todos', ordersView: 'lista', productFilter: null, ageSortOldest: false };
+    }
+  };
+  const [initialOrderPrefs] = useState(loadOrderPrefs);
+  const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
+  const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | salida
+  const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
+  const [ageSortOldest, setAgeSortOldest] = useState(initialOrderPrefs.ageSortOldest);
+  const [pinnedOrders, setPinnedOrders] = useState(() => {
+    try {
+      const list = JSON.parse(localStorage.getItem(PINNED_KEY) || '[]');
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  });
+  // Contador de pedidos nuevos no vistos en la pestaña de pedidos.
+  const [unviewedCount, setUnviewedCount] = useState(0);
+  const knownOrderIdsRef = useRef(null);
   const [showStorePicker, setShowStorePicker] = useState(false);
   const [proofOrder, setProofOrder] = useState(null);
   const [broadcastTitle, setBroadcastTitle] = useState('');
@@ -6208,9 +6329,192 @@ function AdminView({
     setOverdueList((prev) => prev.filter((x) => x.id !== c.id));
   };
 
-  const filteredOrders = statusFilter === 'todos'
+  // --- Mejoras operativas de la sección Pedidos ---
+
+  // Alerta de pedido nuevo: detecta ids que antes no estaban, suena y avisa con
+  // un toast (si el panel está visible) y acumula el contador de "no vistos"
+  // hasta que se abre la pestaña de pedidos. La primera carga real de pedidos
+  // solo siembra el conjunto para no alertar pedidos que ya existían.
+  const addToastRef = useRef(addToast);
+  useEffect(() => {
+    addToastRef.current = addToast;
+  }, [addToast]);
+  useEffect(() => {
+    if (knownOrderIdsRef.current === null) {
+      knownOrderIdsRef.current = orders.length > 0 ? new Set(orders.map((o) => o.id)) : null;
+      return;
+    }
+    const prev = knownOrderIdsRef.current;
+    const fresh = orders.filter((o) => !prev.has(o.id));
+    knownOrderIdsRef.current = new Set(orders.map((o) => o.id));
+    if (fresh.length === 0) return;
+    setUnviewedCount((c) => c + fresh.length);
+    if (document.visibilityState === 'visible') {
+      playChime();
+      addToastRef.current(`${fresh.length} pedido${fresh.length !== 1 ? 's' : ''} nuevo${fresh.length !== 1 ? 's' : ''}: ${fresh.map((o) => o.id).join(', ')}`, 'info');
+    }
+  }, [orders]);
+
+  // Al abrir la pestaña de pedidos se limpia el contador de no vistos.
+  useEffect(() => {
+    if (adminTab === 'orders') setUnviewedCount(0);
+  }, [adminTab]);
+
+  // Preferencias de la sección Pedidos: se recuerdan entre sesiones.
+  useEffect(() => {
+    try {
+      localStorage.setItem(ORDER_PREFS_KEY, JSON.stringify({ statusFilter, ordersView, productFilter, ageSortOldest }));
+    } catch {}
+  }, [statusFilter, ordersView, productFilter, ageSortOldest]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PINNED_KEY, JSON.stringify(pinnedOrders));
+    } catch {}
+  }, [pinnedOrders]);
+
+  const togglePin = (id) =>
+    setPinnedOrders((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  // Antigüedad del pedido en minutos (semáforo de espera).
+  const orderAgeMinutes = (o) => {
+    const d = parseOrderDate(o);
+    if (isNaN(d)) return 0;
+    return Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+  };
+
+  const semaforoOf = (o) => {
+    const mins = orderAgeMinutes(o);
+    const est = Number(o.estimatedMinutes) || 0;
+    if (est > 0 && mins > est) {
+      return { tone: 'rose', text: `${mins} min (+${mins - est})`, label: 'Supera lo estimado' };
+    }
+    if (mins >= 10) return { tone: 'rose', text: `${mins} min`, label: 'Espera alta' };
+    if (mins >= 5) return { tone: 'amber', text: `${mins} min`, label: 'Espera media' };
+    return { tone: 'emerald', text: `${mins} min`, label: 'Reciente' };
+  };
+
+  // Pedidos que incluyen un producto cuyo stock no alcanza lo pedido.
+  const lowStockInOrder = useCallback(
+    (o) => {
+      const missing = [];
+      (o.items || []).forEach((it) => {
+        const p = products.find((pr) => pr.id === it.id);
+        if (p && Number(p.stock) < Number(it.quantity)) {
+          missing.push({ name: it.name, have: p.stock, need: it.quantity });
+        }
+      });
+      return missing;
+    },
+    [products]
+  );
+
+  const lowStockOrdersCount = useMemo(
+    () =>
+      orders.filter(
+        (o) => o.status !== 'cancelado' && o.status !== 'entregado' && lowStockInOrder(o).length > 0
+      ).length,
+    [orders, lowStockInOrder]
+  );
+
+  // Lista principal: filtros por estado y por producto, fijados arriba y
+  // opcionalmente ordenados por el más antiguo primero.
+  const statusFiltered = statusFilter === 'todos'
     ? orders
     : orders.filter((o) => o.status === statusFilter);
+
+  const productFilteredOrders = productFilter
+    ? statusFiltered.filter((o) => o.items.some((it) => it.id === productFilter))
+    : statusFiltered;
+
+  const filteredOrders = useMemo(() => {
+    const pinnedSet = new Set(pinnedOrders);
+    return [...productFilteredOrders].sort((a, b) => {
+      const pa = pinnedSet.has(a.id) ? 1 : 0;
+      const pb = pinnedSet.has(b.id) ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      if (ageSortOldest) return orderAgeMinutes(b) - orderAgeMinutes(a);
+      return 0;
+    });
+  }, [productFilteredOrders, pinnedOrders, ageSortOldest]);
+
+  // Productos presentes en los pedidos del filtro de estado actual (para el
+  // filtro rápido por producto).
+  const productFilterOptions = useMemo(() => {
+    const map = {};
+    statusFiltered.forEach((o) =>
+      o.items.forEach((it) => {
+        if (!map[it.id]) map[it.id] = { id: it.id, name: it.name, count: 0 };
+        map[it.id].count += 1;
+      })
+    );
+    return Object.values(map).sort((a, b) => b.count - a.count).slice(0, 12);
+  }, [statusFiltered]);
+
+  // "Despacho vs Caja": separa lo que hay que alistar/despachar de lo que hay
+  // que validar en caja (pagos digitales en revisión o rechazados).
+  const isPaymentBlocked = (o) =>
+    o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'pendiente' && !o.credit;
+  const despachoOrders = useMemo(
+    () =>
+      orders
+        .filter((o) => !isPaymentBlocked(o) && o.paymentStatus !== 'rechazado')
+        .filter((o) => ['pendiente', 'en_preparacion', 'listo'].includes(o.status))
+        .sort((a, b) => orderAgeMinutes(b) - orderAgeMinutes(a)),
+    [orders]
+  );
+  const cajaOrders = useMemo(
+    () =>
+      orders
+        .filter((o) => o.paymentMethod && o.paymentMethod !== 'efectivo')
+        .filter((o) => o.paymentStatus === 'pendiente' || o.paymentStatus === 'rechazado')
+        .sort((a, b) => orderAgeMinutes(b) - orderAgeMinutes(a)),
+    [orders]
+  );
+  const nextStatus = (s) => {
+    const i = STATUS_FLOW.indexOf(s);
+    return i >= 0 && i < STATUS_FLOW.length - 1 ? STATUS_FLOW[i + 1] : null;
+  };
+
+  // Entregas del día: pedidos a domicilio activos con su ruta sugerida (orden
+  // por cercanía desde el comercio) y los que no tienen coordenadas.
+  const activeDeliveries = useMemo(() => {
+    const list = orders
+      .filter((o) => o.type === 'delivery')
+      .filter((o) => o.status !== 'entregado' && o.status !== 'cancelado');
+    const withCoords = list.filter((o) => o.lat != null && o.lng != null);
+    const withoutCoords = list.filter((o) => o.lat == null || o.lng == null);
+    const store = storeLocation;
+    const start =
+      store && store.lat != null && store.lng != null
+        ? { lat: Number(store.lat), lng: Number(store.lng) }
+        : null;
+    const ordered = [];
+    const remaining = [...withCoords];
+    let cur = start;
+    while (remaining.length > 0) {
+      let bestIdx = 0;
+      if (cur) {
+        let bestDist = Infinity;
+        remaining.forEach((o, i) => {
+          const d = haversineKm(cur.lat, cur.lng, Number(o.lat), Number(o.lng));
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = i;
+          }
+        });
+      }
+      const pick = remaining.splice(bestIdx, 1)[0];
+      const routeKm =
+        cur != null ? haversineKm(cur.lat, cur.lng, Number(pick.lat), Number(pick.lng)) : null;
+      ordered.push({ ...pick, routeNumber: ordered.length + 1, routeKm });
+      cur = { lat: Number(pick.lat), lng: Number(pick.lng) };
+    }
+    return { ordered, withoutCoords };
+  }, [orders, storeLocation]);
+
+  // Cola de salida: pedidos listos para retirar o despachar.
+  const salidaOrders = useMemo(() => orders.filter((o) => o.status === 'listo'), [orders]);
 
   // Calculated Analytics
   const lowStockProducts = products.filter((p) => p.stock <= 5);
@@ -6432,6 +6736,11 @@ function AdminView({
             <Icon name={tab.icon} className="w-4 h-4" />
             <span className="sm:hidden">{tab.label}</span>
             <span className="hidden sm:inline">{tab.full}</span>
+            {tab.key === 'orders' && unviewedCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black leading-none shrink-0">
+                {unviewedCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -6567,6 +6876,31 @@ function AdminView({
       {/* Tab 2: Orders */}
       {adminTab === 'orders' && (
         <div className="space-y-4">
+          {/* Vista operativa: Lista / Despacho·Caja / Entregas / Cola de salida */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
+            {[
+              { key: 'lista', label: 'Lista', icon: 'list' },
+              { key: 'despacho', label: 'Despacho / Caja', icon: 'package' },
+              { key: 'entregas', label: 'Entregas (ruta)', icon: 'mapPin' },
+              { key: 'salida', label: 'Cola de salida', icon: 'checkCircle' }
+            ].map((v) => (
+              <button
+                key={v.key}
+                onClick={() => setOrdersView(v.key)}
+                className={`px-3.5 sm:px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap border transition-all shrink-0 flex items-center gap-1.5 ${
+                  ordersView === v.key
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                }`}
+              >
+                <Icon name={v.icon} className="w-4 h-4" />
+                {v.label}
+              </button>
+            ))}
+          </div>
+
+          {ordersView === 'lista' && (
+          <>
           {/* Status Quick Filters */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
             {[
@@ -6593,6 +6927,63 @@ function AdminView({
             ))}
           </div>
 
+          {/* Filtro rápido por producto + alerta de stock + orden por antigüedad */}
+          <div className="space-y-2.5">
+            {lowStockOrdersCount > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold">
+                <Icon name="alertTriangle" className="w-4 h-4" />
+                {lowStockOrdersCount} pedido(s) incluyen productos sin stock suficiente
+              </div>
+            )}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0 flex-1">
+                <span className="px-2 py-1 rounded-lg bg-slate-800/80 text-slate-500 text-[10px] font-black uppercase tracking-wider shrink-0">
+                  Producto
+                </span>
+                <button
+                  onClick={() => setProductFilter(null)}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                    productFilter === null
+                      ? 'bg-teal-500 text-slate-950 border-teal-400'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                >
+                  Todos
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{statusFiltered.length}</span>
+                </button>
+                {productFilterOptions.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setProductFilter(productFilter === p.id ? null : p.id)}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                      productFilter === p.id
+                        ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                        : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                    }`}
+                    title={p.name}
+                  >
+                    {p.name.split(' ').slice(0, 3).join(' ')}
+                    <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{p.count}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setAgeSortOldest((v) => !v)}
+                  className={`px-3.5 py-2 rounded-2xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                    ageSortOldest
+                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title="Ordenar por el más antiguo primero (semáforo de espera)"
+                >
+                  <Icon name="clock" className="w-4 h-4" />
+                  {ageSortOldest ? 'Más antiguos primero' : 'Antigüedad'}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {filteredOrders.length === 0 ? (
               <div className="col-span-full py-16 text-center text-slate-500 space-y-2">
@@ -6603,41 +6994,65 @@ function AdminView({
               filteredOrders.map((order) => {
                 const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
                 const wa = formatPhoneWhatsApp(order.phone);
+                const sem = semaforoOf(order);
+                const missingStock = lowStockInOrder(order);
+                const isPinned = pinnedOrders.includes(order.id);
                 return (
                   <div
                     key={order.id}
                     className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${st.ring}`}
                   >
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
-                        <span
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
-                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
-                        </span>
-                        {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
+                          {['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
+                            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 shrink-0 ${SEM_TONES[sem.tone]}`}>
+                              <Icon name="clock" className="w-3 h-3" />
+                              {sem.text}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
                           <span
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold ${
-                              order.paymentStatus === 'confirmado'
-                                ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
-                                : order.paymentStatus === 'rechazado'
-                                  ? 'border-rose-400/40 bg-rose-500/15 text-rose-300'
-                                  : 'border-amber-400/40 bg-amber-500/15 text-amber-300'
-                            }`}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
                           >
-                            <Icon name="creditCard" className="w-3 h-3" />
-                            {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago'} ·{' '}
-                            {({ pendiente: 'En revisión', confirmado: 'Confirmado', rechazado: 'Rechazado' })[order.paymentStatus] || 'Pendiente'}
+                            <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
+                            {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
                           </span>
-                        )}
-                        {order.credit && (
-                          <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
-                            <Icon name="creditCard" className="w-3 h-3" />
-                            A cuenta
-                          </span>
-                        )}
+                          {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+                            <span
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold ${
+                                order.paymentStatus === 'confirmado'
+                                  ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
+                                  : order.paymentStatus === 'rechazado'
+                                    ? 'border-rose-400/40 bg-rose-500/15 text-rose-300'
+                                    : 'border-amber-400/40 bg-amber-500/15 text-amber-300'
+                              }`}
+                            >
+                              <Icon name="creditCard" className="w-3 h-3" />
+                              {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago'} ·{' '}
+                              {({ pendiente: 'En revisión', confirmado: 'Confirmado', rechazado: 'Rechazado' })[order.paymentStatus] || 'Pendiente'}
+                            </span>
+                          )}
+                          {order.credit && (
+                            <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
+                              <Icon name="creditCard" className="w-3 h-3" />
+                              A cuenta
+                            </span>
+                          )}
+                          <button
+                            onClick={() => togglePin(order.id)}
+                            className={`p-1.5 rounded-lg border transition-all ${
+                              isPinned
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                                : 'bg-slate-900/60 text-slate-500 border-slate-700 hover:text-amber-300'
+                            }`}
+                            title={isPinned ? 'Quitar de fijados' : 'Fijar pedido arriba'}
+                          >
+                            <Icon name="pin" className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
 
                       <div>
@@ -6714,6 +7129,21 @@ function AdminView({
                           </span>
                         </div>
                       </div>
+
+                      {missingStock.length > 0 && (
+                        <div className="flex items-start gap-1.5 p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] font-semibold">
+                          <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                          <span>
+                            Sin stock suficiente: {missingStock.map((m) => `${m.name} (${m.have}/${m.need})`).join(', ')}
+                          </span>
+                        </div>
+                      )}
+                      {sem.tone === 'rose' && sem.label === 'Supera lo estimado' && (
+                        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px] font-bold">
+                          <Icon name="alertTriangle" className="w-3.5 h-3.5 shrink-0" />
+                          Lleva más del tiempo estimado
+                        </div>
+                      )}
 
                       {order.notes && (
                         <p className="text-xs text-slate-400 italic bg-slate-900/40 p-2 rounded-xl">
@@ -6868,6 +7298,360 @@ function AdminView({
               })
             )}
           </div>
+          </>
+          )}
+
+          {/* Vista Despacho / Caja: separa lo que hay que alistar de lo que hay que validar */}
+          {ordersView === 'despacho' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-200 flex items-center gap-2">
+                    <Icon name="package" className="w-4 h-4 text-cyan-400" />
+                    Por alistar
+                  </h3>
+                  <span className="text-[11px] text-slate-500">{despachoOrders.length} pedido(s)</span>
+                </div>
+                {despachoOrders.length === 0 ? (
+                  <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+                    <Icon name="checkCircle" className="w-10 h-10 text-slate-700 mx-auto" />
+                    <p className="font-bold text-slate-400">Nada por alistar</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {despachoOrders.map((o) => {
+                      const sem = semaforoOf(o);
+                      const missing = lowStockInOrder(o);
+                      const nxt = nextStatus(o.status);
+                      const wa = formatPhoneWhatsApp(o.phone);
+                      return (
+                        <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 ${SEM_TONES[sem.tone]}`}>
+                              <Icon name="clock" className="w-3 h-3" />
+                              {sem.text}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-white">{o.customerName}</p>
+                          <p className="text-[11px] text-slate-400 line-clamp-2">
+                            {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
+                          </p>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-black text-teal-400">{formatUsd(o.total)}</span>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                                o.type === 'delivery'
+                                  ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+                                  : 'text-teal-300 border-teal-500/40 bg-teal-500/10'
+                              }`}
+                            >
+                              {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
+                            </span>
+                          </div>
+                          {missing.length > 0 && (
+                            <p className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2 py-1.5">
+                              ⚠️ Sin stock suficiente: {missing.map((m) => m.name).join(', ')}
+                            </p>
+                          )}
+                          <div className="flex gap-2">
+                            {nxt ? (
+                              <button
+                                onClick={() => onUpdateOrderStatus(o.id, nxt)}
+                                className="flex-1 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-xs font-bold hover:bg-cyan-500/25 transition-all"
+                              >
+                                {nxt === 'en_preparacion' ? 'Iniciar ▸' : nxt === 'listo' ? 'Marcar listo ✓' : nxt === 'en_camino' ? 'Enviar 🚚' : `Avanzar a ${STATUS_LABELS[nxt]}`}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => onUpdateOrderStatus(o.id, 'entregado')}
+                                className="flex-1 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all"
+                              >
+                                Marcar entregado ✓
+                              </button>
+                            )}
+                            {wa && (
+                              <a
+                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, sobre tu pedido ${o.id} en Kiosko 247`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 inline-flex items-center gap-1 px-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition-all"
+                              >
+                                <Icon name="whatsapp" className="w-3.5 h-3.5" /> WA
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-200 flex items-center gap-2">
+                    <Icon name="creditCard" className="w-4 h-4 text-amber-400" />
+                    Por validar (caja)
+                  </h3>
+                  <span className="text-[11px] text-slate-500">{cajaOrders.length} pago(s)</span>
+                </div>
+                {cajaOrders.length === 0 ? (
+                  <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+                    <Icon name="checkCircle" className="w-10 h-10 text-slate-700 mx-auto" />
+                    <p className="font-bold text-slate-400">Sin pagos por validar</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {cajaOrders.map((o) => {
+                      const wa = formatPhoneWhatsApp(o.phone);
+                      return (
+                        <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                                o.paymentStatus === 'rechazado'
+                                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                                  : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                              }`}
+                            >
+                              {o.paymentStatus === 'rechazado' ? 'Rechazado' : 'En revisión'}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-white">{o.customerName}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {(o.paymentMethod === 'pago_movil' ? 'Pago Móvil' : 'Transferencia')} · Ref:{' '}
+                            <span className="font-mono text-white">{o.paymentReference || '—'}</span>
+                          </p>
+                          {o.paymentProof ? (
+                            <button
+                              onClick={() => setProofOrder(o)}
+                              className="w-full flex items-center gap-2 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
+                            >
+                              <img src={o.paymentProof} alt="Comprobante de pago" className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
+                              <span className="text-xs font-bold text-white flex-1">Ver comprobante</span>
+                              <Icon name="eye" className="w-4 h-4 text-teal-400" />
+                            </button>
+                          ) : (
+                            <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1.5">
+                              Sin comprobante adjunto
+                            </p>
+                          )}
+                          {o.paymentStatus === 'rechazado' && (
+                            <p className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2 py-1.5">
+                              El cliente debe subir otro comprobante o pasar el pedido a cuenta.
+                            </p>
+                          )}
+                          <div className="flex gap-2 flex-wrap">
+                            {o.paymentStatus === 'pendiente' && (
+                              <>
+                                <button
+                                  onClick={() => onUpdateOrderPayment(o.id, 'confirmado')}
+                                  className="flex-1 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all"
+                                >
+                                  Confirmar ✓
+                                </button>
+                                <button
+                                  onClick={() => onUpdateOrderPayment(o.id, 'rechazado')}
+                                  className="flex-1 py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all"
+                                >
+                                  Rechazar
+                                </button>
+                              </>
+                            )}
+                            {wa && (
+                              <a
+                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, sobre el pago de tu pedido ${o.id} en Kiosko 247`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 inline-flex items-center gap-1 px-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition-all"
+                              >
+                                <Icon name="whatsapp" className="w-3.5 h-3.5" /> WA
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Vista Entregas: ruta del día ordenada por cercanía */}
+          {ordersView === 'entregas' && (
+            <div className="space-y-4">
+              <DeliveriesRouteMap storeLocation={storeLocation} deliveries={activeDeliveries.ordered} />
+              {activeDeliveries.ordered.length === 0 && activeDeliveries.withoutCoords.length === 0 ? (
+                <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+                  <Icon name="mapPin" className="w-10 h-10 text-slate-700 mx-auto" />
+                  <p className="font-bold text-slate-400">No hay entregas activas</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {activeDeliveries.ordered.map((o) => {
+                    const wa = formatPhoneWhatsApp(o.phone);
+                    return (
+                      <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center gap-3 flex-wrap sm:flex-nowrap">
+                        <span
+                          className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black ${
+                            o.status === 'en_camino'
+                              ? 'bg-emerald-500 text-slate-950'
+                              : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                          }`}
+                        >
+                          {o.routeNumber}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                            <span className="text-xs font-bold text-white truncate">{o.customerName}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 truncate">{o.address}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                          {o.status === 'listo' && (
+                            <button
+                              onClick={() => onUpdateOrderStatus(o.id, 'en_camino')}
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+                            >
+                              En camino
+                            </button>
+                          )}
+                          {o.status === 'en_camino' && (
+                            <button
+                              onClick={() => onUpdateOrderStatus(o.id, 'entregado')}
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+                            >
+                              Entregado ✓
+                            </button>
+                          )}
+                          {o.lat != null && o.lng != null && (
+                            <a
+                              href={`https://www.google.com/maps?q=${o.lat},${o.lng}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1.5 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[11px] font-bold hover:bg-sky-500/25 transition-all inline-flex items-center gap-1"
+                            >
+                              <Icon name="mapPin" className="w-3 h-3" /> Maps
+                            </a>
+                          )}
+                          {wa && (
+                            <a
+                              href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, tu pedido ${o.id} en Kiosko 247 está en camino`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/25 transition-all inline-flex items-center gap-1"
+                            >
+                              <Icon name="whatsapp" className="w-3 h-3" /> WA
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {activeDeliveries.withoutCoords.length > 0 && (
+                    <div className="px-3 py-2 rounded-2xl bg-slate-800/40 border border-slate-700/50 text-[11px] text-slate-400">
+                      {activeDeliveries.withoutCoords.length} entrega(s) sin coordenadas (no aparecen en el mapa):{' '}
+                      {activeDeliveries.withoutCoords.map((o) => o.id).join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Vista Cola de salida: listos para retirar o despachar */}
+          {ordersView === 'salida' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-black text-slate-200 flex items-center gap-2">
+                  <Icon name="checkCircle" className="w-4 h-4 text-emerald-400" />
+                  Cola de salida — listos para entregar
+                </h3>
+                <span className="text-[11px] text-slate-500">{salidaOrders.length} pedido(s)</span>
+              </div>
+              {salidaOrders.length === 0 ? (
+                <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+                  <Icon name="checkCircle" className="w-10 h-10 text-slate-700 mx-auto" />
+                  <p className="font-bold text-slate-400">No hay pedidos listos para salir</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {salidaOrders.map((o) => {
+                    const wa = formatPhoneWhatsApp(o.phone);
+                    return (
+                      <div key={o.id} className="p-4 rounded-3xl bg-slate-800/80 border border-emerald-500/40 shadow-xl space-y-3 flex flex-col justify-between">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                                o.type === 'delivery'
+                                  ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+                                  : 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                              }`}
+                            >
+                              {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
+                            </span>
+                          </div>
+                          <p className="font-bold text-white text-sm">{o.customerName}</p>
+                          <p className="text-[11px] text-slate-400 line-clamp-2">
+                            {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
+                          </p>
+                          <p className="text-xs font-black text-teal-400">{formatUsd(o.total)}</p>
+                          {o.type === 'delivery' && (
+                            <p className="text-[11px] text-amber-300">📦 {o.address}</p>
+                          )}
+                        </div>
+                        <div className="pt-2 border-t border-slate-700/60 space-y-2">
+                          {o.type === 'delivery' ? (
+                            <button
+                              onClick={() => onUpdateOrderStatus(o.id, 'en_camino')}
+                              className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Icon name="mapPin" className="w-3.5 h-3.5" /> Iniciar entrega
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onUpdateOrderStatus(o.id, 'entregado')}
+                              className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Icon name="check" className="w-3.5 h-3.5" /> Marcar entregado
+                            </button>
+                          )}
+                          <div className="flex gap-2">
+                            {wa && (
+                              <a
+                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, tu pedido ${o.id} en Kiosko 247 está listo`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition-all inline-flex items-center justify-center gap-1.5"
+                              >
+                                <Icon name="whatsapp" className="w-3.5 h-3.5" /> WhatsApp
+                              </a>
+                            )}
+                            {o.type === 'delivery' && o.lat != null && o.lng != null && (
+                              <a
+                                href={`https://www.google.com/maps?q=${o.lat},${o.lng}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 py-2 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold hover:bg-sky-500/25 transition-all inline-flex items-center justify-center gap-1.5"
+                              >
+                                <Icon name="mapPin" className="w-3.5 h-3.5" /> Maps
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

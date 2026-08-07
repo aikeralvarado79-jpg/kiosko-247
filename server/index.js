@@ -216,7 +216,8 @@ app.post('/api/auth/admin/biometric-register', async (req, res) => {
 // Public
 app.get('/api/state', async (req, res) => {
   try {
-    const [state, rate] = await Promise.all([store.getState(), getBcvRate()]);
+    const clientId = typeof req.query.clientId === 'string' ? req.query.clientId : undefined;
+    const [state, rate] = await Promise.all([store.getState(clientId), getBcvRate()]);
     res.json({ ...state, rate });
   } catch (err) {
     fail(res, err, 'No se pudo cargar la tienda. Intenta de nuevo en unos segundos.');
@@ -239,6 +240,29 @@ app.post('/api/orders', async (req, res) => {
     notifyAdminsNewOrder(result.order).catch(() => {});
   } catch (err) {
     fail(res, err, 'No se pudo realizar el pedido. Intenta de nuevo.');
+  }
+});
+
+// Reserva de stock en tiempo real: sincroniza el carrito del cliente (clientId)
+// con el servidor. El stock reservado por otros clientes se descuenta del stock
+// visible; las reservas expiran (5 min carrito / 7 min checkout).
+app.post('/api/holds', async (req, res) => {
+  try {
+    const { clientId, items, ttlMs } = req.body || {};
+    const result = await store.holdStock(clientId, items, ttlMs);
+    if (result.error) return res.status(409).json({ error: result.error, available: result.available });
+    res.json(result);
+  } catch (err) {
+    fail(res, err, 'No se pudo reservar el stock. Intenta de nuevo.');
+  }
+});
+
+app.delete('/api/holds', async (req, res) => {
+  try {
+    const { clientId } = req.body || {};
+    res.json(await store.releaseStock(clientId));
+  } catch (err) {
+    fail(res, err, 'No se pudo liberar el stock. Intenta de nuevo.');
   }
 });
 

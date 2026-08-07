@@ -17,7 +17,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  getState: () => request('/api/state'),
+  getState: (clientId) => request(`/api/state${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`),
+  holdStock: (clientId, items, ttlMs) => request('/api/holds', { method: 'POST', body: JSON.stringify({ clientId, items, ttlMs }) }),
+  releaseHold: (clientId) => request('/api/holds', { method: 'DELETE', body: JSON.stringify({ clientId }) }),
   login: (phone, password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ phone, password }) }),
   createOrder: (order) => request('/api/orders', { method: 'POST', body: JSON.stringify(order) }),
   createProduct: (product) => request('/api/products', { method: 'POST', body: JSON.stringify(product) }),

@@ -82,7 +82,7 @@ describe('fileStore', () => {
     const result = await store.createOrder({
       items: [{ id: 'p1', name: product.name, price: product.price, quantity: product.stock + 10 }]
     });
-    expect(result.error).toContain('Stock insuficiente');
+    expect(result.error).toContain('Unidades disponibles');
     const despues = await store.getState();
     expect(despues.products.find((p) => p.id === 'p1').stock).toBe(product.stock);
   });
@@ -336,5 +336,60 @@ describe('fileStore', () => {
     const tracking = await store.getOrderTracking(created.order.id);
     expect(tracking.storeLocation.address).toBe('Av. Principal 123');
     expect(Number(tracking.storeLocation.lat)).toBeCloseTo(10.4806, 4);
+  });
+
+  it('reserva stock para un cliente y otro cliente ve menos disponible', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    const stock = product.stock;
+
+    const held = await store.holdStock('cliente-a', [{ id: 'p1', qty: 5 }]);
+    expect(held.ok).toBe(true);
+    // El propio cliente ve el stock completo (su reserva no cuenta contra sí mismo).
+    expect((await store.getState('cliente-a')).products.find((p) => p.id === 'p1').reserved).toBe(0);
+    // Otro cliente ve 5 reservados.
+    expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(5);
+
+    // El cliente B no puede reservar más de lo que queda.
+    const denied = await store.holdStock('cliente-b', [{ id: 'p1', qty: stock }]);
+    expect(denied.ok).toBeFalsy();
+    expect(denied.available['p1']).toBe(stock - 5);
+
+    // El cliente B sí puede tomar lo que queda.
+    const ok = await store.holdStock('cliente-b', [{ id: 'p1', qty: stock - 5 }]);
+    expect(ok.ok).toBe(true);
+  });
+
+  it('libera la reserva al crear el pedido y la liberación devuelve el stock', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+
+    await store.holdStock('cliente-a', [{ id: 'p1', qty: 5 }]);
+    await store.createOrder({
+      clientId: 'cliente-a',
+      customerName: 'A',
+      phone: '41111111111',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 5 }],
+      total: product.price * 5
+    });
+    // Tras el pedido, la reserva del cliente A desaparece.
+    expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(0);
+
+    const released = await store.releaseStock('cliente-b');
+    expect(released.ok).toBe(true);
+  });
+
+  it('las reservas expiran tras su TTL y el stock vuelve a estar disponible', async () => {
+    const store = await freshStore();
+
+    await store.holdStock('cliente-a', [{ id: 'p1', qty: 3 }], 50); // TTL 50 ms
+    expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(3);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    // getState purga las reservas vencidas.
+    expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(0);
   });
 });

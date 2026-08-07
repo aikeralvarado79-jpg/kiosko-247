@@ -425,6 +425,13 @@ const haptic = (ms = 12) => {
 
 // Persistencia de favoritos del cliente (ids de productos, localStorage)
 const FAVORITES_KEY = 'kiosko_favorites';
+
+// Reserva de stock en tiempo real: tiempo que el cliente tiene para confirmar
+// desde el carrito (5 min) y desde el paso de pago (7 min) antes de que el
+// stock vuelva a estar disponible para los demás.
+const HOLD_CART_MS = 5 * 60 * 1000;
+const HOLD_CHECKOUT_MS = 7 * 60 * 1000;
+
 const loadFavorites = () => {
   try {
     const raw = localStorage.getItem(FAVORITES_KEY);
@@ -610,12 +617,29 @@ export default function App() {
   const [isAdminAuthed, setIsAdminAuthed] = useState(() => Boolean(getToken()));
   const [refreshingDb, setRefreshingDb] = useState(false);
 
+  // Identidad de sesión para reservar stock en el servidor (persistente en la pestaña).
+  const [clientId] = useState(() => {
+    try {
+      let id = sessionStorage.getItem('kiosko_client_id');
+      if (!id) {
+        id = `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        sessionStorage.setItem('kiosko_client_id', id);
+      }
+      return id;
+    } catch {
+      return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+  });
+
+  // Stock que el cliente VE disponible: el servidor ya excluye su propia reserva.
+  const availableStock = (p) => Math.max(0, (Number(p.stock) || 0) - (Number(p.reserved) || 0));
+
   const loadState = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
       setIsLoading(true);
       setLoadError('');
     }
-    const res = await api.getState();
+    const res = await api.getState(clientId);
     if (!res.ok) {
       if (!silent) {
         setLoadError('No se pudo conectar con el servidor. Verifica tu conexión a internet e intenta de nuevo.');
@@ -631,7 +655,7 @@ export default function App() {
     if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
     setIsLoading(false);
-  }, []);
+  }, [clientId]);
 
   useEffect(() => {
     loadState();
@@ -1052,8 +1076,9 @@ export default function App() {
   };
 
   const addToCart = (product, quantityToAdd = 1, sourceRect = null) => {
-    if (product.stock <= 0) {
-      addToast('Este producto no tiene stock disponible', 'error');
+    const avail = availableStock(product);
+    if (avail <= 0) {
+      addToast(`Solo hay ${avail} Unidades disponibles`, 'error');
       return;
     }
 
@@ -1061,8 +1086,8 @@ export default function App() {
     const currentQty = existing ? existing.quantity : 0;
     const newQty = currentQty + quantityToAdd;
 
-    if (newQty > product.stock) {
-      addToast(`Solo hay ${product.stock} unidades en stock`, 'warning');
+    if (newQty > avail) {
+      addToast(`Solo hay ${avail} Unidades disponibles`, 'warning');
       return;
     }
 
@@ -1084,8 +1109,8 @@ export default function App() {
     if (!item) return;
 
     const newQty = item.quantity + delta;
-    if (newQty > item.product.stock) {
-      addToast(`Máximo disponible: ${item.product.stock}`, 'warning');
+    if (newQty > availableStock(item.product)) {
+      addToast(`Solo hay ${availableStock(item.product)} Unidades disponibles`, 'warning');
       return;
     }
 
@@ -1111,6 +1136,72 @@ export default function App() {
   const cartCount = useMemo(() => {
     return cart.reduce((acc, item) => acc + item.quantity, 0);
   }, [cart]);
+
+  // ---- Reserva de stock en tiempo real ----
+  // Cada cambio del carrito sincroniza la reserva con el servidor (5 min en
+  // carrito; 7 min al llegar al pago). Si la reserva expira, el stock vuelve
+  // al catálogo y se libera el carrito.
+  const cartHoldTimer = useRef(null);
+  const [holdDeadline, setHoldDeadline] = useState(null); // timestamp de expiración de la reserva
+
+  const releaseCartHold = useCallback(() => {
+    api.releaseHold(clientId).catch(() => {});
+  }, [clientId]);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      releaseCartHold();
+      return;
+    }
+    const items = cart.map((item) => ({ id: item.product.id, qty: item.quantity }));
+    const ttlMs = isCheckoutOpen ? HOLD_CHECKOUT_MS : HOLD_CART_MS;
+    setHoldDeadline(Date.now() + ttlMs);
+    api
+      .holdStock(clientId, items, ttlMs)
+      .then((res) => {
+        if (!res.ok) {
+          const avail = res.data?.available || {};
+          const missing = items.filter((it) => it.qty > (avail[it.id] ?? Infinity));
+          if (missing.length > 0) {
+            const first = missing[0];
+            addToast(`Solo hay ${avail[first.id]} Unidades disponibles`, 'warning');
+            // Recorta el carrito a lo disponible para no dejar reservas fantasma.
+            setCart((prev) =>
+              prev
+                .map((item) =>
+                  avail[item.product.id] != null && item.quantity > avail[item.product.id]
+                    ? { ...item, quantity: avail[item.product.id] }
+                    : item
+                )
+                .filter((item) => item.quantity > 0)
+            );
+          }
+        }
+      })
+      .catch(() => {});
+  }, [cart, isCheckoutOpen, clientId, releaseCartHold]);
+
+  // Expiración local: si el tiempo de la reserva vence sin confirmar, se libera.
+  useEffect(() => {
+    if (cartHoldTimer.current) clearTimeout(cartHoldTimer.current);
+    if (cart.length === 0) return;
+    const ttlMs = isCheckoutOpen ? HOLD_CHECKOUT_MS : HOLD_CART_MS;
+    cartHoldTimer.current = setTimeout(() => {
+      if (cart.length === 0) return;
+      releaseCartHold();
+      setCart([]);
+      if (isCheckoutOpen) setIsCheckoutOpen(false);
+      addToast(
+        isCheckoutOpen
+          ? 'Tu tiempo para confirmar el pago se agotó. El producto volvió a estar disponible.'
+          : 'El tiempo en el carrito se agotó. El producto volvió a estar disponible.',
+        'warning'
+      );
+    }, ttlMs);
+    return () => {
+      if (cartHoldTimer.current) clearTimeout(cartHoldTimer.current);
+    };
+  }, [cart, isCheckoutOpen, releaseCartHold]);
 
   const filteredProducts = useMemo(() => {
     let list = products.filter((p) => {
@@ -1166,7 +1257,8 @@ export default function App() {
       paymentMethod: formData.paymentMethod || 'efectivo',
       paymentReference: formData.paymentReference || '',
       timestamp: formatTimestamp(),
-      estimatedMinutes: formData.type === 'delivery' ? 25 : 10
+      estimatedMinutes: formData.type === 'delivery' ? 25 : 10,
+      clientId
     };
 
     try {
@@ -1247,13 +1339,13 @@ export default function App() {
     let skipped = 0;
     order.items.forEach((it) => {
       const live = products.find((p) => p.id === it.id);
-      if (!live || live.stock <= 0) {
+      if (!live || availableStock(live) <= 0) {
         skipped++;
         return;
       }
       restored.push({
         product: live,
-        quantity: Math.min(it.quantity, Math.max(0, live.stock))
+        quantity: Math.min(it.quantity, Math.max(0, availableStock(live)))
       });
     });
     if (restored.length === 0) {
@@ -1334,6 +1426,7 @@ export default function App() {
     setSavedCustomer(null);
     setCustomerProfile(null);
     setCart([]);
+    releaseCartHold();
     setIdentityMode('login');
     setIsIdentityOpen(false);
     addToast('Sesión cerrada', 'info');
@@ -1788,6 +1881,7 @@ export default function App() {
         rate={rate}
         onUpdateQty={updateCartQty}
         onRemove={removeFromCart}
+        holdDeadline={holdDeadline}
         onProceedToCheckout={() => {
           setIsCartOpen(false);
           setIsCheckoutOpen(true);
@@ -1861,6 +1955,7 @@ export default function App() {
           onSaveAddress={handleSaveCustomerAddress}
           addToast={addToast}
           paymentConfig={paymentConfig}
+          holdDeadline={holdDeadline}
         />
       )}
 
@@ -3338,8 +3433,9 @@ function CustomerView({
 }
 
 function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite }) {
-  const isOut = product.stock <= 0;
-  const isLow = product.stock > 0 && product.stock <= 5;
+  const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
+  const isOut = avail <= 0;
+  const isLow = avail > 0 && avail <= 5;
   const [justAdded, setJustAdded] = useState(false);
 
   const handleAdd = (e) => {
@@ -3400,7 +3496,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           </div>
         ) : isLow ? (
           <span className="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-amber-500/90 text-slate-950 font-extrabold text-[10px] sm:text-[11px] shadow-lg">
-            ¡Últimas {product.stock} un.!
+            ¡Últimas {avail} un.!
           </span>
         ) : null}
       </div>
@@ -3466,7 +3562,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [touchX, setTouchX] = useState(null);
   const [slideDir, setSlideDir] = useState('right');
-  const isOut = product.stock <= 0;
+  const isOut = product.stock <= 0 || product.reserved >= product.stock;
   const unitBs = usdToBs(product.price, rate?.rate);
   const lineTotal = product.price * quantity;
 
@@ -3632,8 +3728,8 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
                   <span className="text-xs font-semibold text-teal-400">{product.brand}</span>
                 )}
               </div>
-              <span className={`text-xs font-semibold ${product.stock > 5 ? 'text-teal-400' : product.stock > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
-                {product.stock > 0 ? `Stock: ${product.stock} un.` : 'Agotado'}
+              <span className={`text-xs font-semibold ${product.stock - product.reserved > 5 ? 'text-teal-400' : product.stock - product.reserved > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
+                {product.stock - product.reserved > 0 ? `Stock: ${product.stock - product.reserved} un.` : 'Agotado'}
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-white mt-1">{product.name}</h2>
@@ -3665,7 +3761,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
                 </button>
                 <span className="font-bold text-slate-100 text-sm w-6 text-center">{quantity}</span>
                 <button
-                  onClick={() => setQuantity((q) => Math.min(product.stock, q + 1))}
+                  onClick={() => setQuantity((q) => Math.min(product.stock - product.reserved, q + 1))}
                   className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800"
                 >
                   <Icon name="plus" className="w-4 h-4" />
@@ -4240,7 +4336,17 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
   );
 }
 
-function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout }) {
+function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout, holdDeadline }) {
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const holdLeft = holdDeadline ? Math.max(0, holdDeadline - nowMs) : 0;
+  const holdMin = Math.floor(holdLeft / 60000);
+  const holdSec = Math.floor((holdLeft % 60000) / 1000);
+
   if (!isOpen) return null;
 
   return (
@@ -4254,7 +4360,14 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
             <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400">
               <Icon name="shoppingBag" className="w-5 h-5" />
             </span>
-            <h2 className="text-base sm:text-lg font-bold text-white">Tu Carrito</h2>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white">Tu Carrito</h2>
+              {holdLeft > 0 && (
+                <p className={`text-[11px] font-bold ${holdLeft <= 60000 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+                  ⏳ Reservado por {holdMin}:{String(holdSec).padStart(2, '0')}
+                </p>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -5424,7 +5537,16 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig, holdDeadline }) {
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const holdLeft = holdDeadline ? Math.max(0, holdDeadline - nowMs) : 0;
+  const holdMin = Math.floor(holdLeft / 60000);
+  const holdSec = Math.floor((holdLeft % 60000) / 1000);
+
   const [formData, setFormData] = useState({
     customerName: savedCustomer?.customerName || '',
     phoneCode: savedCustomer?.phoneCode || '0412',
@@ -5580,6 +5702,11 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-white">Finalizar Pedido</h2>
+            {holdLeft > 0 && (
+              <p className={`text-[11px] font-bold mt-0.5 ${holdLeft <= 60000 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+                ⏳ Reserva por {holdMin}:{String(holdSec).padStart(2, '0')} para completar el pago
+              </p>
+            )}
             {savedCustomer?.customerName ? (
               <p className="text-xs text-teal-400 mt-0.5 flex items-center gap-1">
                 <Icon name="user" className="w-3 h-3" />

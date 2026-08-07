@@ -18,6 +18,70 @@ const defaultState = () => ({
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
 
+// ---------------------------------------------------------------------------
+// Reservas de stock en tiempo real. Por proceso (un solo dyno): si el servidor
+// se reinicia, las reservas expiran y el stock vuelve a estar disponible.
+// Cada cliente (clientId) reserva unidades; el resto del mundo ve el stock
+// real menos lo reservado por OTROS clientes.
+// ---------------------------------------------------------------------------
+const HOLD_CART_MS = 5 * 60 * 1000; // carrito sin confirmar → 5 minutos
+const holds = new Map(); // clientId -> Map(productId -> { qty, expiresAt })
+
+const purgeExpiredHolds = (now = Date.now()) => {
+  for (const [clientId, items] of holds) {
+    for (const [pid, h] of items) {
+      if (h.expiresAt <= now) items.delete(pid);
+    }
+    if (items.size === 0) holds.delete(clientId);
+  }
+};
+
+const reservedByProduct = (excludeClientId, now = Date.now()) => {
+  purgeExpiredHolds(now);
+  const map = new Map();
+  for (const [clientId, items] of holds) {
+    if (clientId === excludeClientId) continue;
+    for (const [pid, h] of items) {
+      map.set(pid, (map.get(pid) || 0) + h.qty);
+    }
+  }
+  return map;
+};
+
+// Reemplaza la reserva de un cliente con los items indicados (sync total del
+// carrito). items vacío/omitido libera las reservas del cliente.
+export const holdStock = async (clientId, items, ttlMs = HOLD_CART_MS) => {
+  purgeExpiredHolds();
+  if (!clientId) return { error: 'Sesión de cliente inválida' };
+  const list = Array.isArray(items) ? items.filter((it) => it && it.id && it.qty > 0) : [];
+  const state = await store.getState(clientId);
+  const reserved = reservedByProduct(clientId);
+  const available = {};
+  for (const it of list) {
+    const p = state.products.find((x) => x.id === it.id);
+    if (!p) return { error: `Producto "${it.id}" no encontrado`, available };
+    const avail = Math.max(0, Number(p.stock) - (reserved.get(it.id) || 0));
+    available[it.id] = avail;
+    if (it.qty > avail) {
+      return { error: `Solo hay ${avail} Unidades disponibles`, available };
+    }
+  }
+  const now = Date.now();
+  if (list.length === 0) {
+    holds.delete(clientId);
+  } else {
+    const mine = new Map();
+    for (const it of list) mine.set(it.id, { qty: it.qty, expiresAt: now + ttlMs });
+    holds.set(clientId, mine);
+  }
+  return { ok: true, available, expiresAt: now + ttlMs, state: await store.getState(clientId) };
+};
+
+export const releaseStock = async (clientId) => {
+  if (clientId) holds.delete(clientId);
+  return { ok: true, state: await store.getState(clientId) };
+};
+
 const generateProductId = () => `p-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
 // ---------------------------------------------------------------------------
@@ -46,11 +110,13 @@ const fileStore = {
     }
   },
 
-  async getState() {
+  async getState(clientId) {
     this.persist();
     const state = { ...this.state, settings: { ...this.state.settings } };
     delete state.settings.adminPassword;
     delete state.settings.adminCredentials;
+    const reserved = reservedByProduct(clientId);
+    state.products = state.products.map((p) => ({ ...p, reserved: reserved.get(p.id) || 0 }));
     return state;
   },
 
@@ -544,13 +610,14 @@ const pgStore = {
     }
   },
 
-  async getState() {
+  async getState(clientId) {
     const [productsRes, categoriesRes, ordersRes, settingsRes] = await Promise.all([
       this.pool.query(`SELECT * FROM ${q('products')}`),
       this.pool.query(`SELECT * FROM ${q('categories')} ORDER BY name`),
       this.pool.query(`SELECT * FROM ${q('orders')}`),
       this.pool.query(`SELECT key, value FROM ${q('settings')}`)
     ]);
+    const reserved = reservedByProduct(clientId);
     const products = productsRes.rows.map((r) => ({
       id: r.id,
       code: r.code,
@@ -560,6 +627,7 @@ const pgStore = {
       price: Number(r.price),
       category: r.category,
       stock: r.stock,
+      reserved: reserved.get(r.id) || 0,
       sizeValue: r.sizeValue === '' || r.sizeValue === null ? '' : Number(r.sizeValue),
       sizeUnit: r.sizeUnit,
       image: r.image,
@@ -867,11 +935,14 @@ const pgStore = {
         [orderData.items.map((it) => it.id)]
       );
       const stockMap = new Map(stockRes.rows.map((r) => [r.id, r.stock]));
+      // Lo que otros clientes tienen reservado (el propio cliente ya reservó su
+      // cantidad y la "reclama" al crear el pedido).
+      const reserved = reservedByProduct(orderData.clientId);
       for (const it of orderData.items) {
-        const available = stockMap.get(it.id);
+        const available = stockMap.get(it.id) - (reserved.get(it.id) || 0);
         if (available === undefined || available < it.quantity) {
           await client.query('ROLLBACK');
-          return { error: `Stock insuficiente para "${it.name}"` };
+          return { error: `Solo hay ${Math.max(0, available)} Unidades disponibles para "${it.name}"` };
         }
       }
 
@@ -935,7 +1006,8 @@ const pgStore = {
       }
 
       await client.query('COMMIT');
-      return { state: await this.getState(), order };
+      if (orderData.clientId) holds.delete(orderData.clientId);
+      return { state: await this.getState(orderData.clientId), order };
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
@@ -1152,7 +1224,7 @@ export async function initStore() {
 
 export const isMirrorEnabled = () => Boolean(pgPool);
 
-export const getState = () => store.getState();
+export const getState = (clientId) => store.getState(clientId);
 
 export const saveSettings = (settings) => store.saveSettings(settings);
 
@@ -1250,10 +1322,12 @@ export const createOrder = async (orderData) => {
 
   const state = await store.getState();
 
+  const reserved = reservedByProduct(orderData.clientId);
   for (const it of orderData.items) {
     const p = state.products.find((x) => x.id === it.id);
-    if (!p || p.stock < it.quantity) {
-      return { error: `Stock insuficiente para "${it.name}"` };
+    const available = p ? p.stock - (reserved.get(it.id) || 0) : 0;
+    if (!p || available < it.quantity) {
+      return { error: `Solo hay ${Math.max(0, available)} Unidades disponibles para "${it.name}"` };
     }
   }
 
@@ -1304,7 +1378,8 @@ export const createOrder = async (orderData) => {
     });
   }
 
-  const newState = await store.getState();
+  if (orderData.clientId) holds.delete(orderData.clientId);
+  const newState = await store.getState(orderData.clientId);
   return { state: newState, order };
 };
 

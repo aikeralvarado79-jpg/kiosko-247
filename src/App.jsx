@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, Component } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment } from 'react';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
 import L from 'leaflet';
@@ -16,6 +16,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     edit: <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />,
     x: <path d="M18 6 6 18M6 6l12 12" />,
     check: <path d="M20 6 9 17l-5-5" />,
+    bell: <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />,
     package: <path d="m16.5 9.4-9-5.19M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" />,
     alertTriangle: <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3zM12 9v4M12 17h.01" />,
     trendingUp: <path d="m22 7-8.5 8.5-5-5L1 18M16 7h6v6" />,
@@ -27,6 +28,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
+    pin: <path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />,
     clock: <path d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
     filter: <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />,
     eye: <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
@@ -165,6 +167,17 @@ const parseOrderDate = (o) => {
 const toYMD = (d) => isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
+// Distancia en km entre dos puntos (fórmula de Haversine). Se usa para armar la
+// ruta del día de entregas ordenando los destinos por cercanía.
+const haversineKm = (lat1, lng1, lat2, lng2) => {
+  const R = 6371;
+  const toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+};
+
 // Productos "nuevos": creados en las últimas 4 horas. Se considera la fecha del
 // dispositivo del cliente como referencia razonable para la app.
 const NEW_PRODUCT_HOURS = 4;
@@ -187,6 +200,45 @@ const markNewProductViewed = (id) => {
   } catch {}
 };
 const wasNewProductViewed = (id) => loadNewProductViews().includes(id);
+
+// Convierte la clave VAPID (base64url) al ArrayBuffer que exige el navegador.
+const urlBase64ToUint8Array = (base64) => {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+};
+
+// Suscribe el dispositivo a Web Push usando la clave VAPID del servidor.
+const subscribeToPush = async (phone) => {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      return false;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    if (!reg.pushManager) return false;
+    let subscription = await reg.pushManager.getSubscription();
+    if (!subscription) {
+      const keyRes = await api.getVapidKey();
+      if (!keyRes.ok || !keyRes.data?.publicKey) return false;
+      subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyRes.data.publicKey)
+      });
+    }
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!key || key.length < 7) return false;
+    await api.subscribePush(key, {
+      endpoint: subscription.endpoint,
+      keys: subscription.toJSON().keys
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 // Mini calendario compacto (popover) para filtro de fecha
 function MiniCalendar({ value, onChange, onClose }) {
@@ -249,6 +301,32 @@ const parsePhone = (phone) => {
   return { code: num.slice(0, 4), number: num.slice(-7) };
 };
 
+// Redimensiona y comprime una imagen (p. ej. comprobante de pago) a un data URL
+// liviano para que quepa en los límites del servidor, sin perder legibilidad.
+const compressImage = (file, maxDimension = 1280, quality = 0.72) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Imagen inválida'));
+      img.onload = () => {
+        const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const out = canvas.toDataURL('image/jpeg', quality);
+        resolve(out);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
 const loadSavedCustomer = () => {
   try {
     const raw = localStorage.getItem(CUSTOMER_KEY);
@@ -306,6 +384,13 @@ const STATUS_STYLES = {
   cancelado: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', ring: 'border-rose-500/50', dot: 'bg-rose-400' }
 };
 
+// Colores del semáforo de espera según la antigüedad del pedido.
+const SEM_TONES = {
+  emerald: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+  amber: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+  rose: 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+};
+
 const playChime = (() => {
   let ctx = null;
   const note = (freq, start, dur, type = 'sine', gain = 0.12) => {
@@ -340,6 +425,13 @@ const haptic = (ms = 12) => {
 
 // Persistencia de favoritos del cliente (ids de productos, localStorage)
 const FAVORITES_KEY = 'kiosko_favorites';
+
+// Reserva de stock en tiempo real: tiempo que el cliente tiene para confirmar
+// desde el carrito (5 min) y desde el paso de pago (7 min) antes de que el
+// stock vuelva a estar disponible para los demás.
+const HOLD_CART_MS = 5 * 60 * 1000;
+const HOLD_CHECKOUT_MS = 7 * 60 * 1000;
+
 const loadFavorites = () => {
   try {
     const raw = localStorage.getItem(FAVORITES_KEY);
@@ -360,6 +452,63 @@ const STATUS_LABELS = {
   entregado: 'Entregado',
   cancelado: 'Cancelado'
 };
+
+// Time lapse de pasos de un pedido: muestra el avance con un color distinto por
+// estatus. Retiro en tienda: Pendiente → En prep. → Listo → Retirado.
+// Delivery: Pendiente → En prep. → Listo → En camino → Entregado.
+function OrderStepsTimeline({ order, className = '' }) {
+  if (!order) return null;
+  const isDelivery = order.type === 'delivery';
+  const steps = isDelivery
+    ? [
+        { key: 'pendiente', label: 'Pendiente', dot: 'bg-amber-400', text: 'text-amber-300' },
+        { key: 'en_preparacion', label: 'En prep.', dot: 'bg-cyan-400', text: 'text-cyan-300' },
+        { key: 'listo', label: 'Listo', dot: 'bg-emerald-400', text: 'text-emerald-300' },
+        { key: 'en_camino', label: 'En camino', dot: 'bg-sky-400', text: 'text-sky-300' },
+        { key: 'entregado', label: 'Entregado', dot: 'bg-violet-400', text: 'text-violet-300' }
+      ]
+    : [
+        { key: 'pendiente', label: 'Pendiente', dot: 'bg-amber-400', text: 'text-amber-300' },
+        { key: 'en_preparacion', label: 'En prep.', dot: 'bg-cyan-400', text: 'text-cyan-300' },
+        { key: 'listo', label: 'Listo', dot: 'bg-emerald-400', text: 'text-emerald-300' },
+        { key: 'entregado', label: 'Retirado', dot: 'bg-indigo-400', text: 'text-indigo-300' }
+      ];
+  const curIdx = steps.findIndex((s) => s.key === order.status);
+  return (
+    <div className={`flex items-stretch ${className}`}>
+      {steps.map((s, i) => {
+        const done = i < curIdx;
+        const active = i === curIdx;
+        return (
+          <Fragment key={s.key}>
+            <div className="flex flex-col items-center" style={{ width: `${100 / steps.length}%` }}>
+              <div className="relative w-full flex items-center justify-center">
+                {i > 0 && (
+                  <div className={`absolute right-1/2 top-1/2 -translate-y-1/2 h-0.5 w-full ${i <= curIdx ? 'bg-slate-500' : 'bg-slate-800'}`} />
+                )}
+                {i < steps.length - 1 && (
+                  <div className={`absolute left-1/2 top-1/2 -translate-y-1/2 h-0.5 w-full ${i < curIdx ? 'bg-slate-500' : 'bg-slate-800'}`} />
+                )}
+                <div
+                  className={`relative z-10 w-3 h-3 rounded-full border-2 transition-all ${
+                    active
+                      ? `${s.dot} border-white scale-125 shadow-lg`
+                      : done
+                        ? `${s.dot} border-transparent`
+                        : 'border-slate-600 bg-slate-800'
+                  }`}
+                />
+              </div>
+              <span className={`mt-1 text-[8px] font-bold whitespace-nowrap ${active ? s.text : done ? 'text-slate-400' : 'text-slate-600'}`}>
+                {s.label}
+              </span>
+            </div>
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
 
 function RateBanner({ rate }) {
   const [usdInput, setUsdInput] = useState('');
@@ -459,6 +608,7 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [promos, setPromos] = useState([]);
   const [storeLocation, setStoreLocation] = useState(null);
+  const [paymentConfig, setPaymentConfig] = useState(null);
   const [rate, setRate] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -467,12 +617,29 @@ export default function App() {
   const [isAdminAuthed, setIsAdminAuthed] = useState(() => Boolean(getToken()));
   const [refreshingDb, setRefreshingDb] = useState(false);
 
+  // Identidad de sesión para reservar stock en el servidor (persistente en la pestaña).
+  const [clientId] = useState(() => {
+    try {
+      let id = sessionStorage.getItem('kiosko_client_id');
+      if (!id) {
+        id = `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        sessionStorage.setItem('kiosko_client_id', id);
+      }
+      return id;
+    } catch {
+      return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+  });
+
+  // Stock que el cliente VE disponible: el servidor ya excluye su propia reserva.
+  const availableStock = (p) => Math.max(0, (Number(p.stock) || 0) - (Number(p.reserved) || 0));
+
   const loadState = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
       setIsLoading(true);
       setLoadError('');
     }
-    const res = await api.getState();
+    const res = await api.getState(clientId);
     if (!res.ok) {
       if (!silent) {
         setLoadError('No se pudo conectar con el servidor. Verifica tu conexión a internet e intenta de nuevo.');
@@ -485,9 +652,10 @@ export default function App() {
     setOrders(res.data.orders || []);
     if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
+    if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
     setIsLoading(false);
-  }, []);
+  }, [clientId]);
 
   useEffect(() => {
     loadState();
@@ -509,6 +677,15 @@ export default function App() {
       document.removeEventListener('visibilitychange', poll);
     };
   }, [loadState]);
+
+  // Mantiene sincronizadas las vistas del cliente (detalle / rastreo) con la
+  // última copia del pedido que trae el polling, para que un cambio de pago o
+  // de estado hecho por el admin se refleje en vivo.
+  useEffect(() => {
+    setOrderDetailOrder((prev) => (prev ? orders.find((o) => o.id === prev.id) || prev : prev));
+    setLiveTrackingOrder((prev) => (prev ? orders.find((o) => o.id === prev.id) || prev : prev));
+    setCurrentOrderTracking((prev) => (prev ? orders.find((o) => o.id === prev.id) || prev : prev));
+  }, [orders]);
 
   // Cart State
   const [cart, setCart] = useState(() => {
@@ -575,6 +752,11 @@ export default function App() {
 
   // Tour tutorial para usuarios nuevos (se muestra tras la bienvenida).
   const [showTour, setShowTour] = useState(false);
+
+  // Banner de notificaciones: ocultable, se recuerda la decisión del usuario.
+  const [pushBannerHidden, setPushBannerHidden] = useState(() => {
+    try { return localStorage.getItem('kiosko_push_banner_hidden') === '1'; } catch { return false; }
+  });
 
   // True si el cliente identificado figura en la lista de administradores por teléfono
   const isCurrentAdmin = useMemo(() => {
@@ -894,8 +1076,9 @@ export default function App() {
   };
 
   const addToCart = (product, quantityToAdd = 1, sourceRect = null) => {
-    if (product.stock <= 0) {
-      addToast('Este producto no tiene stock disponible', 'error');
+    const avail = availableStock(product);
+    if (avail <= 0) {
+      addToast(`Solo hay ${avail} Unidades disponibles`, 'error');
       return;
     }
 
@@ -903,8 +1086,8 @@ export default function App() {
     const currentQty = existing ? existing.quantity : 0;
     const newQty = currentQty + quantityToAdd;
 
-    if (newQty > product.stock) {
-      addToast(`Solo hay ${product.stock} unidades en stock`, 'warning');
+    if (newQty > avail) {
+      addToast(`Solo hay ${avail} Unidades disponibles`, 'warning');
       return;
     }
 
@@ -926,8 +1109,8 @@ export default function App() {
     if (!item) return;
 
     const newQty = item.quantity + delta;
-    if (newQty > item.product.stock) {
-      addToast(`Máximo disponible: ${item.product.stock}`, 'warning');
+    if (newQty > availableStock(item.product)) {
+      addToast(`Solo hay ${availableStock(item.product)} Unidades disponibles`, 'warning');
       return;
     }
 
@@ -953,6 +1136,72 @@ export default function App() {
   const cartCount = useMemo(() => {
     return cart.reduce((acc, item) => acc + item.quantity, 0);
   }, [cart]);
+
+  // ---- Reserva de stock en tiempo real ----
+  // Cada cambio del carrito sincroniza la reserva con el servidor (5 min en
+  // carrito; 7 min al llegar al pago). Si la reserva expira, el stock vuelve
+  // al catálogo y se libera el carrito.
+  const cartHoldTimer = useRef(null);
+  const [holdDeadline, setHoldDeadline] = useState(null); // timestamp de expiración de la reserva
+
+  const releaseCartHold = useCallback(() => {
+    api.releaseHold(clientId).catch(() => {});
+  }, [clientId]);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      releaseCartHold();
+      return;
+    }
+    const items = cart.map((item) => ({ id: item.product.id, qty: item.quantity }));
+    const ttlMs = isCheckoutOpen ? HOLD_CHECKOUT_MS : HOLD_CART_MS;
+    setHoldDeadline(Date.now() + ttlMs);
+    api
+      .holdStock(clientId, items, ttlMs)
+      .then((res) => {
+        if (!res.ok) {
+          const avail = res.data?.available || {};
+          const missing = items.filter((it) => it.qty > (avail[it.id] ?? Infinity));
+          if (missing.length > 0) {
+            const first = missing[0];
+            addToast(`Solo hay ${avail[first.id]} Unidades disponibles`, 'warning');
+            // Recorta el carrito a lo disponible para no dejar reservas fantasma.
+            setCart((prev) =>
+              prev
+                .map((item) =>
+                  avail[item.product.id] != null && item.quantity > avail[item.product.id]
+                    ? { ...item, quantity: avail[item.product.id] }
+                    : item
+                )
+                .filter((item) => item.quantity > 0)
+            );
+          }
+        }
+      })
+      .catch(() => {});
+  }, [cart, isCheckoutOpen, clientId, releaseCartHold]);
+
+  // Expiración local: si el tiempo de la reserva vence sin confirmar, se libera.
+  useEffect(() => {
+    if (cartHoldTimer.current) clearTimeout(cartHoldTimer.current);
+    if (cart.length === 0) return;
+    const ttlMs = isCheckoutOpen ? HOLD_CHECKOUT_MS : HOLD_CART_MS;
+    cartHoldTimer.current = setTimeout(() => {
+      if (cart.length === 0) return;
+      releaseCartHold();
+      setCart([]);
+      if (isCheckoutOpen) setIsCheckoutOpen(false);
+      addToast(
+        isCheckoutOpen
+          ? 'Tu tiempo para confirmar el pago se agotó. El producto volvió a estar disponible.'
+          : 'El tiempo en el carrito se agotó. El producto volvió a estar disponible.',
+        'warning'
+      );
+    }, ttlMs);
+    return () => {
+      if (cartHoldTimer.current) clearTimeout(cartHoldTimer.current);
+    };
+  }, [cart, isCheckoutOpen, releaseCartHold]);
 
   const filteredProducts = useMemo(() => {
     let list = products.filter((p) => {
@@ -1005,8 +1254,11 @@ export default function App() {
       })),
       total: cartTotal,
       credit: Boolean(formData.credit),
+      paymentMethod: formData.paymentMethod || 'efectivo',
+      paymentReference: formData.paymentReference || '',
       timestamp: formatTimestamp(),
-      estimatedMinutes: formData.type === 'delivery' ? 25 : 10
+      estimatedMinutes: formData.type === 'delivery' ? 25 : 10,
+      clientId
     };
 
     try {
@@ -1034,11 +1286,37 @@ export default function App() {
       };
       saveCustomerData(customerRecord);
       setSavedCustomer(customerRecord);
+      autoSubscribePushIfAllowed();
 
       if (res.data.state) {
         setProducts(res.data.state.products || []);
         setOrders(res.data.state.orders || []);
       }
+
+      // Adjuntar el comprobante de pago digital tras confirmar el pedido.
+      if (formData.paymentProof && res.data.order?.id) {
+        try {
+          const attach = await api.attachPaymentProof(
+            res.data.order.id,
+            orderPayload.phone,
+            formData.paymentProof,
+            orderPayload.paymentReference
+          );
+          if (!attach.ok) {
+            console.warn('[kiosko] No se pudo adjuntar el comprobante:', attach.data?.error);
+            addToast(
+              'Pedido enviado, pero el comprobante no se adjuntó (' +
+                (attach.data?.error || 'error desconocido') +
+                '). Contacta al kiosko para enviarlo.',
+              'warning'
+            );
+          }
+        } catch (proofErr) {
+          console.warn('[kiosko] Error al adjuntar comprobante:', proofErr);
+          addToast('Pedido enviado, pero el comprobante no se pudo adjuntar.', 'warning');
+        }
+      }
+
       haptic([20, 40, 20]);
       playChime();
       addToast('¡Pedido realizado con éxito!', 'success');
@@ -1061,13 +1339,13 @@ export default function App() {
     let skipped = 0;
     order.items.forEach((it) => {
       const live = products.find((p) => p.id === it.id);
-      if (!live || live.stock <= 0) {
+      if (!live || availableStock(live) <= 0) {
         skipped++;
         return;
       }
       restored.push({
         product: live,
-        quantity: Math.min(it.quantity, Math.max(0, live.stock))
+        quantity: Math.min(it.quantity, Math.max(0, availableStock(live)))
       });
     });
     if (restored.length === 0) {
@@ -1132,6 +1410,7 @@ export default function App() {
       const res = await api.upsertCustomer(phoneKey, { customerName });
       if (res.ok && res.data?.phone) setCustomerProfile(res.data);
     }
+    autoSubscribePushIfAllowed();
   };
 
   // Confirmación por biometría del modal de identidad. "switchback" = volver al
@@ -1147,9 +1426,36 @@ export default function App() {
     setSavedCustomer(null);
     setCustomerProfile(null);
     setCart([]);
+    releaseCartHold();
     setIdentityMode('login');
     setIsIdentityOpen(false);
     addToast('Sesión cerrada', 'info');
+  };
+
+  // Pide permiso de notificaciones y suscribe el dispositivo al teléfono activo.
+  const handleEnableNotifications = async () => {
+    if (!('Notification' in window) || !('PushManager' in window)) {
+      addToast('Tu navegador no soporta notificaciones', 'error');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      addToast('Notificaciones bloqueadas. Actívalas en los ajustes del navegador', 'error');
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      addToast('Notificaciones no activadas', 'info');
+      return;
+    }
+    const ok = await subscribeToPush(savedCustomer?.phoneNumber || '');
+    addToast(ok ? 'Notificaciones activadas. Te avisaremos de tu pedido.' : 'No se pudieron activar las notificaciones', ok ? 'success' : 'error');
+  };
+
+  // Re-suscribe en silencio si el permiso ya está concedido (al entrar o pedir).
+  const autoSubscribePushIfAllowed = async () => {
+    if (!savedCustomer?.phoneNumber) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    subscribeToPush(savedCustomer.phoneNumber).catch(() => {});
   };
 
   const handleSaveProduct = async (productData) => {
@@ -1199,6 +1505,27 @@ export default function App() {
     setOrders(res.data.state.orders || []);
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
   };
+
+  // Admin confirma o rechaza el pago digital de un pedido (dispara push al cliente).
+  const handleUpdateOrderPayment = async (orderId, newStatus) => {
+    const res = await api.updateOrderPayment(orderId, newStatus);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el pago', 'error');
+      return;
+    }
+    setOrders(res.data.state.orders || []);
+    addToast(`Pago del pedido ${orderId} ${newStatus === 'confirmado' ? 'confirmado' : 'rechazado'}`);
+  };
+
+  // Refresca la copia de un pedido en todos los sitios donde el cliente lo ve
+  // (historial, detalle y rastreo) tras subir comprobante o pasar a cuenta.
+  const handleOrderUpdated = useCallback((updatedOrder) => {
+    if (!updatedOrder) return;
+    setOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
+    setOrderDetailOrder((prev) => (prev && prev.id === updatedOrder.id ? updatedOrder : prev));
+    setLiveTrackingOrder((prev) => (prev && prev.id === updatedOrder.id ? updatedOrder : prev));
+    setCurrentOrderTracking((prev) => (prev && prev.id === updatedOrder.id ? updatedOrder : prev));
+  }, []);
 
   // Envía la posición en vivo del repartidor (el admin que entrega) al servidor.
   const handleUpdateCourierLocation = async (orderId, lat, lng) => {
@@ -1251,6 +1578,17 @@ export default function App() {
     }
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     addToast('Ubicación del comercio guardada');
+    return true;
+  };
+
+  const handleSavePaymentConfig = async (cfg) => {
+    const res = await api.saveSettings({ promos, paymentConfig: cfg });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar la configuración de pagos', 'error');
+      return false;
+    }
+    if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
+    addToast('Configuración de pagos guardada');
     return true;
   };
 
@@ -1506,6 +1844,7 @@ export default function App() {
             }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onUpdateOrderPayment={handleUpdateOrderPayment}
             onUpdateCourierLocation={handleUpdateCourierLocation}
             onDeleteOrder={(order) => setDeleteOrderTarget(order)}
             allCustomers={allCustomers}
@@ -1520,6 +1859,8 @@ export default function App() {
             addToast={addToast}
             storeLocation={storeLocation}
             onSaveStoreLocation={handleSaveStoreLocation}
+            adminPhone={savedCustomer ? `${savedCustomer.phoneCode || ''} ${savedCustomer.phoneNumber || ''}`.trim() : ''}
+            headerHeight={headerHeight}
           />
         ) : (
           <AdminLoginView
@@ -1540,6 +1881,7 @@ export default function App() {
         rate={rate}
         onUpdateQty={updateCartQty}
         onRemove={removeFromCart}
+        holdDeadline={holdDeadline}
         onProceedToCheckout={() => {
           setIsCartOpen(false);
           setIsCheckoutOpen(true);
@@ -1552,6 +1894,7 @@ export default function App() {
         onClose={() => setIsOrdersDrawerOpen(false)}
         orders={customerOrders}
         rate={rate}
+        isBenefited={Boolean(customerProfile?.isBenefited)}
         onViewOrderDetail={(order) => {
           setIsOrdersDrawerOpen(false);
           setOrderDetailOrder(order);
@@ -1611,6 +1954,8 @@ export default function App() {
           customerProfile={customerProfile}
           onSaveAddress={handleSaveCustomerAddress}
           addToast={addToast}
+          paymentConfig={paymentConfig}
+          holdDeadline={holdDeadline}
         />
       )}
 
@@ -1638,6 +1983,9 @@ export default function App() {
         <OrderDetailModal
           order={orderDetailOrder}
           rate={rate}
+          isBenefited={Boolean(customerProfile?.isBenefited)}
+          onOrderUpdated={handleOrderUpdated}
+          addToast={addToast}
           onClose={() => setOrderDetailOrder(null)}
           onTrackLiveOrder={(order) => {
             setOrderDetailOrder(null);
@@ -1654,6 +2002,9 @@ export default function App() {
       {liveTrackingOrder && (
         <LiveTrackingModal
           order={liveTrackingOrder}
+          isBenefited={Boolean(customerProfile?.isBenefited)}
+          onOrderUpdated={handleOrderUpdated}
+          addToast={addToast}
           onClose={() => setLiveTrackingOrder(null)}
           storeLocation={storeLocation}
         />
@@ -1756,7 +2107,7 @@ export default function App() {
         onCustomerLogout={openIdentityLogout}
         adminTab={adminTab}
         onAdminTab={handleAdminTabChange}
-        pendingOrders={orders.filter((o) => o.status === 'pendiente').length}
+        pendingOrders={orders.filter((o) => !['entregado', 'cancelado'].includes(o.status)).length}
         onLogout={handleAdminLogout}
         isAdminAuthed={isAdminAuthed}
       />
@@ -1768,6 +2119,22 @@ export default function App() {
       >
         <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
       </footer>
+
+      {/* Banner de notificaciones push (solo cliente identificado y permiso sin decidir) */}
+      {activeView === 'customer' &&
+        savedCustomer?.phoneNumber &&
+        !pushBannerHidden &&
+        'Notification' in window &&
+        'PushManager' in window &&
+        Notification.permission === 'default' && (
+        <PushBanner
+          onEnable={handleEnableNotifications}
+          onDismiss={() => {
+            setPushBannerHidden(true);
+            try { localStorage.setItem('kiosko_push_banner_hidden', '1'); } catch {}
+          }}
+        />
+      )}
 
       {/* Bienvenida a pantalla completa tras el inicio de sesión */}
       {welcome && (
@@ -1823,10 +2190,42 @@ function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
   );
 }
 
+// Banner que invita a activar las notificaciones push tras identificarse.
+function PushBanner({ onEnable, onDismiss }) {
+  return (
+    <div className="fixed left-4 right-4 sm:left-6 sm:right-auto bottom-24 sm:bottom-6 z-[45] sm:max-w-sm rounded-2xl border border-teal-500/40 bg-slate-900/95 p-4 shadow-2xl backdrop-blur animate-screen-up">
+      <div className="flex items-start gap-3">
+        <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
+          <Icon name="bell" className="w-5 h-5" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-white">Activa las notificaciones</p>
+          <p className="text-xs text-slate-400 mt-0.5 leading-snug">
+            Te avisamos al instante cuando tu pedido está listo o en camino.
+          </p>
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              onClick={onEnable}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all active:scale-95"
+            >
+              Activar ahora
+            </button>
+            <button
+              onClick={onDismiss}
+              className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+            >
+              Ahora no
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Tour tutorial para clientes nuevos: se muestra tras la bienvenida para que
 // descubran cómo pedir, seguir sus pedidos y revisar su saldo.
-function NewUserTour({ onClose }) {
-  const steps = [
+function NewUserTour({ onClose }) {  const steps = [
     {
       icon: 'store',
       title: 'Explora el catálogo',
@@ -2774,17 +3173,18 @@ function CustomerView({
               {pagedOrders.map((o) => {
                 const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                 const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
+                const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
                 return (
                   <div
                     key={o.id}
-                    className="p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border border-slate-700/50"
+                    className={`p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border ${payRejected ? 'border-rose-500/50' : 'border-slate-700/50'}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs sm:text-sm font-bold text-white">
                         Pedido <span className="text-teal-400">#{o.id}</span>
                       </span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${style.badge}`}>
-                        {STATUS_LABELS[o.status] || 'Pendiente'}
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
+                        {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
                       </span>
                     </div>
                     <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
@@ -2793,6 +3193,13 @@ function CustomerView({
                     <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                       {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
                     </p>
+                    {payRejected && (
+                      <div className="mt-2 flex items-start gap-1.5 rounded-xl bg-rose-500/10 border border-rose-500/40 p-2 text-[11px] text-rose-200/90">
+                        <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0 text-rose-400" />
+                        <span>Tu pago fue rechazado. Suministra otro comprobante
+                          {customerProfile?.isBenefited ? ' o pásalo a tu cuenta' : ''} en Ver detalle.</span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mt-2.5">
                       <button
                         onClick={() => onViewOrderDetail(o)}
@@ -2894,6 +3301,17 @@ function CustomerView({
               );
             })}
           </div>
+
+          {/* Aviso de pago rechazado: visible sin abrir el detalle */}
+          {currentOrderTracking.paymentMethod &&
+            currentOrderTracking.paymentMethod !== 'efectivo' &&
+            currentOrderTracking.paymentStatus === 'rechazado' && (
+              <div className="flex items-start gap-1.5 rounded-xl bg-rose-500/10 border border-rose-500/40 p-2.5 text-[11px] text-rose-200/90">
+                <Icon name="alertTriangle" className="w-4 h-4 mt-0.5 shrink-0 text-rose-400" />
+                <span>Tu pago fue rechazado. Suministra otro comprobante
+                  {customerProfile?.isBenefited ? ' o pásalo a tu cuenta' : ''} en Ver detalle.</span>
+              </div>
+            )}
 
           {/* Mapa de entrega a domicilio (destino + repartidor en vivo) */}
           {currentOrderTracking.type === 'delivery' && (
@@ -3015,8 +3433,9 @@ function CustomerView({
 }
 
 function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite }) {
-  const isOut = product.stock <= 0;
-  const isLow = product.stock > 0 && product.stock <= 5;
+  const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
+  const isOut = avail <= 0;
+  const isLow = avail > 0 && avail <= 5;
   const [justAdded, setJustAdded] = useState(false);
 
   const handleAdd = (e) => {
@@ -3077,7 +3496,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           </div>
         ) : isLow ? (
           <span className="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-amber-500/90 text-slate-950 font-extrabold text-[10px] sm:text-[11px] shadow-lg">
-            ¡Últimas {product.stock} un.!
+            ¡Últimas {avail} un.!
           </span>
         ) : null}
       </div>
@@ -3143,7 +3562,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [touchX, setTouchX] = useState(null);
   const [slideDir, setSlideDir] = useState('right');
-  const isOut = product.stock <= 0;
+  const isOut = product.stock <= 0 || product.reserved >= product.stock;
   const unitBs = usdToBs(product.price, rate?.rate);
   const lineTotal = product.price * quantity;
 
@@ -3309,8 +3728,8 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
                   <span className="text-xs font-semibold text-teal-400">{product.brand}</span>
                 )}
               </div>
-              <span className={`text-xs font-semibold ${product.stock > 5 ? 'text-teal-400' : product.stock > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
-                {product.stock > 0 ? `Stock: ${product.stock} un.` : 'Agotado'}
+              <span className={`text-xs font-semibold ${product.stock - product.reserved > 5 ? 'text-teal-400' : product.stock - product.reserved > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
+                {product.stock - product.reserved > 0 ? `Stock: ${product.stock - product.reserved} un.` : 'Agotado'}
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-white mt-1">{product.name}</h2>
@@ -3342,7 +3761,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
                 </button>
                 <span className="font-bold text-slate-100 text-sm w-6 text-center">{quantity}</span>
                 <button
-                  onClick={() => setQuantity((q) => Math.min(product.stock, q + 1))}
+                  onClick={() => setQuantity((q) => Math.min(product.stock - product.reserved, q + 1))}
                   className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800"
                 >
                   <Icon name="plus" className="w-4 h-4" />
@@ -3917,7 +4336,17 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
   );
 }
 
-function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout }) {
+function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout, holdDeadline }) {
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const holdLeft = holdDeadline ? Math.max(0, holdDeadline - nowMs) : 0;
+  const holdMin = Math.floor(holdLeft / 60000);
+  const holdSec = Math.floor((holdLeft % 60000) / 1000);
+
   if (!isOpen) return null;
 
   return (
@@ -3931,7 +4360,14 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
             <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400">
               <Icon name="shoppingBag" className="w-5 h-5" />
             </span>
-            <h2 className="text-base sm:text-lg font-bold text-white">Tu Carrito</h2>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white">Tu Carrito</h2>
+              {holdLeft > 0 && (
+                <p className={`text-[11px] font-bold ${holdLeft <= 60000 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+                  ⏳ Reservado por {holdMin}:{String(holdSec).padStart(2, '0')}
+                </p>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -4057,7 +4493,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
 }
 
 // Drawer de Mis Pedidos (mismo patrón que el carrito: ante menú inferior, X para cerrar)
-function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrackLiveOrder, onRequestCancelOrder }) {
+function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrackLiveOrder, onRequestCancelOrder, isBenefited }) {
   const [page, setPage] = useState(1);
   const [dateFilter, setDateFilter] = useState({ preset: 'all', date: null });
   const [showCalendar, setShowCalendar] = useState(false);
@@ -4201,14 +4637,15 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
                 paged.map((o) => {
                   const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                   const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
+                  const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
                   return (
-                    <div key={o.id} className="p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border border-slate-700/50">
+                    <div key={o.id} className={`p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border ${payRejected ? 'border-rose-500/50' : 'border-slate-700/50'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs sm:text-sm font-bold text-white">
                           Pedido <span className="text-teal-400">#{o.id}</span>
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${style.badge}`}>
-                          {STATUS_LABELS[o.status] || 'Pendiente'}
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
+                          {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
                         </span>
                       </div>
                       <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
@@ -4217,6 +4654,13 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
                       <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                         {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
                       </p>
+                      {payRejected && (
+                        <div className="mt-2 flex items-start gap-1.5 rounded-xl bg-rose-500/10 border border-rose-500/40 p-2 text-[11px] text-rose-200/90">
+                          <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0 text-rose-400" />
+                          <span>Tu pago fue rechazado. Suministra otro comprobante
+                            {isBenefited ? ' o pásalo a tu cuenta' : ''} en Ver detalle.</span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 mt-2.5">
                         <button
                           onClick={() => onViewOrderDetail(o)}
@@ -4589,7 +5033,7 @@ function DeliveryMap({ order, storeLocation }) {
 
   return (
     <div className="space-y-2">
-      <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+      <div className="relative z-0 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
         <div ref={containerRef} className="w-full h-44 sm:h-52" />
       </div>
       <div className="flex flex-wrap gap-2">
@@ -4631,6 +5075,77 @@ function DeliveryMap({ order, storeLocation }) {
   );
 }
 
+// Mapa de entregas del día (Leaflet + OpenStreetMap): muestra el comercio y los
+// destinos de los pedidos a domicilio activos, numerados según la ruta sugerida
+// (el más cercano al comercio primero, y luego el siguiente más cercano).
+function DeliveriesRouteMap({ storeLocation, deliveries, storeLabel = 'KIOSKO' }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layerGroupRef = useRef(null);
+  const hasStore = storeLocation && storeLocation.lat != null && storeLocation.lng != null;
+  const hasDeliveries = Array.isArray(deliveries) && deliveries.some((d) => d.lat != null && d.lng != null);
+
+  // Crea el mapa una sola vez (con una vista por defecto de Caracas como base).
+  useEffect(() => {
+    if (!hasStore && !hasDeliveries) return;
+    if (!containerRef.current || mapRef.current) return;
+    const map = L.map(containerRef.current, { zoomControl: false, attributionControl: true }).setView([10.4806, -66.9036], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    mapRef.current = map;
+    layerGroupRef.current = L.layerGroup().addTo(map);
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      layerGroupRef.current = null;
+    };
+  }, [hasStore, hasDeliveries]);
+
+  // Dibuja el comercio y los destinos numerados, más la línea de la ruta.
+  useEffect(() => {
+    const map = mapRef.current;
+    const layerGroup = layerGroupRef.current;
+    if (!map || !layerGroup) return;
+    layerGroup.clearLayers();
+
+    const store = hasStore ? { lat: Number(storeLocation.lat), lng: Number(storeLocation.lng) } : null;
+    const dests = (deliveries || []).filter((d) => d.lat != null && d.lng != null);
+    const ordered = [...dests].sort((a, b) => Number(a.routeNumber || 99) - Number(b.routeNumber || 99));
+
+    // Ajusta el viewport a todos los puntos.
+    const all = [];
+    if (store) all.push([store.lat, store.lng]);
+    ordered.forEach((d) => all.push([Number(d.lat), Number(d.lng)]));
+    if (all.length) {
+      map.fitBounds(L.latLngBounds(all).pad(0.25), { animate: false });
+    }
+
+    if (store) {
+      L.marker([store.lat, store.lng], { icon: makePinIcon('#22d3ee', storeLabel) }).addTo(layerGroup);
+    }
+    ordered.forEach((d) => {
+      L.marker([Number(d.lat), Number(d.lng)], {
+        icon: makePinIcon('#f43f5e', String(d.routeNumber || ''))
+      }).addTo(layerGroup);
+    });
+
+    // Línea de la ruta: comercio → destino 1 → 2 → …
+    const linePts = [];
+    if (store) linePts.push([store.lat, store.lng]);
+    ordered.forEach((d) => linePts.push([Number(d.lat), Number(d.lng)]));
+    if (linePts.length > 1) {
+      L.polyline(linePts, { color: '#f43f5e', weight: 2.5, dashArray: '6 6', opacity: 0.6 }).addTo(layerGroup);
+    }
+  }, [storeLocation, deliveries, hasStore, hasDeliveries, storeLabel]);
+
+  if (!hasStore && !hasDeliveries) return null;
+  return (
+    <div className="relative z-0 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 w-full">
+      <div ref={containerRef} className="w-full h-72 sm:h-96" />
+    </div>
+  );
+}
 // Modal selector de punto en el mapa (Leaflet + OpenStreetMap). Lo usan el
 // cliente (para elegir dónde recibir distinto de su ubicación actual) y el
 // admin (para fijar la ubicación del comercio).
@@ -4841,9 +5356,17 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
 
 // Modal de rastreo en vivo para el cliente: consulta el estado del pedido y la
 // posición del repartidor cada 5s mientras está abierto, mostrando el mapa.
-function LiveTrackingModal({ order, onClose, storeLocation }) {
+function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrderUpdated, addToast }) {
   const [track, setTrack] = useState(order);
   const [error, setError] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [messageText, setMessageText] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const loadMessages = async () => {
+    const res = await api.getOrderMessages(order.id, order.phone);
+    if (res.ok && Array.isArray(res.data.messages)) setMessages(res.data.messages);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -4856,6 +5379,7 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
       } else {
         setError(res.data?.error || 'No se pudo obtener el rastreo del pedido.');
       }
+      loadMessages();
     };
     load();
     const timer = setInterval(load, 5000);
@@ -4864,6 +5388,20 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
       clearInterval(timer);
     };
   }, [order.id]);
+
+  const handleSendMessage = async () => {
+    const text = messageText.trim();
+    if (!text || sending) return;
+    setSending(true);
+    const res = await api.sendOrderMessage(order.id, order.phone, text);
+    setSending(false);
+    if (res.ok) {
+      setMessageText('');
+      loadMessages();
+    } else {
+      setError(res.data?.error || 'No se pudo enviar el mensaje.');
+    }
+  };
 
   const status = track?.status || order.status;
   const style = STATUS_STYLES[status] || STATUS_STYLES.pendiente;
@@ -4921,6 +5459,9 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
           {/* Mapa: destino + repartidor en vivo */}
           <DeliveryMap order={track} storeLocation={storeLocation} />
 
+          {/* Estado del pago digital y acciones si fue rechazado */}
+          <PaymentStatusCard order={order} isBenefited={isBenefited} onOrderUpdated={onOrderUpdated} addToast={addToast} />
+
           {/* Estado del repartidor */}
           <div className="rounded-xl bg-slate-800/60 p-3 text-xs space-y-1">
             <div className="flex items-center gap-2">
@@ -4938,6 +5479,44 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
             </div>
             {order.address && <p className="text-slate-400">Destino: <span className="text-white font-bold">{order.address}</span></p>}
             <p className="text-slate-500">La posición se actualiza automáticamente cada 5 segundos.</p>
+          </div>
+
+          {/* Chat del pedido con la tienda */}
+          <div className="rounded-2xl bg-slate-800/60 border border-slate-700 overflow-hidden">
+            <div className="p-3 border-b border-slate-700/70 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+              <span className="text-xs font-bold text-white">Chat con la tienda</span>
+            </div>
+            <div className="p-3 space-y-2.5 max-h-52 overflow-y-auto">
+              {messages.length === 0 && (
+                <p className="text-xs text-slate-500 text-center py-3">
+                  Sin mensajes todavía. Escríbenos si necesitas algo.
+                </p>
+              )}
+              {messages.map((m, idx) => (
+                <ChatBubble key={m.id || idx} m={m} order={order} perspective="customer" />
+              ))}
+            </div>
+            <div className="p-3 border-t border-slate-700/70 flex gap-2">
+              <input
+                type="text"
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSendMessage();
+                }}
+                placeholder="Escribe un mensaje…"
+                maxLength={300}
+                className="flex-1 min-w-0 px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={sending || !messageText.trim()}
+                className="shrink-0 px-3.5 py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-50 disabled:pointer-events-none transition-all active:scale-95"
+              >
+                Enviar
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -4958,7 +5537,16 @@ function LiveTrackingModal({ order, onClose, storeLocation }) {
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig, holdDeadline }) {
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const holdLeft = holdDeadline ? Math.max(0, holdDeadline - nowMs) : 0;
+  const holdMin = Math.floor(holdLeft / 60000);
+  const holdSec = Math.floor((holdLeft % 60000) / 1000);
+
   const [formData, setFormData] = useState({
     customerName: savedCustomer?.customerName || '',
     phoneCode: savedCustomer?.phoneCode || '0412',
@@ -4969,7 +5557,10 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     credit: false,
     lat: null,
     lng: null,
-    mapAddress: null
+    mapAddress: null,
+    paymentMethod: 'efectivo',
+    paymentReference: '',
+    paymentProof: null
   });
 
   const [errors, setErrors] = useState({});
@@ -5060,6 +5651,14 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     if (formData.type === 'delivery' && !formData.address.trim() && (formData.lat == null || formData.lng == null)) {
       newErrors.address = 'Ingresa la dirección o comparte tu ubicación';
     }
+    if (
+      !formData.credit &&
+      formData.paymentMethod &&
+      formData.paymentMethod !== 'efectivo' &&
+      !formData.paymentProof
+    ) {
+      newErrors.payment = 'Adjunta el comprobante del pago (foto de la transferencia o pago móvil)';
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -5103,6 +5702,11 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-white">Finalizar Pedido</h2>
+            {holdLeft > 0 && (
+              <p className={`text-[11px] font-bold mt-0.5 ${holdLeft <= 60000 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+                ⏳ Reserva por {holdMin}:{String(holdSec).padStart(2, '0')} para completar el pago
+              </p>
+            )}
             {savedCustomer?.customerName ? (
               <p className="text-xs text-teal-400 mt-0.5 flex items-center gap-1">
                 <Icon name="user" className="w-3 h-3" />
@@ -5381,6 +5985,128 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
             </div>
           )}
 
+          {/* Método de pago */}
+          {!formData.credit && (
+            <div className="space-y-2.5">
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Método de pago</span>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { key: 'efectivo', label: 'Efectivo', icon: 'dollarSign' },
+                  { key: 'pago_movil', label: 'Pago Móvil', icon: 'zap' },
+                  { key: 'transferencia', label: 'Transferencia', icon: 'creditCard' }
+                ].map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() =>
+                      setFormData({ ...formData, paymentMethod: formData.paymentMethod === m.key ? '' : m.key })
+                    }
+                    className={`px-2 py-3 rounded-xl border text-[11px] sm:text-xs font-bold flex flex-col items-center gap-1.5 transition-all ${
+                      formData.paymentMethod === m.key
+                        ? 'bg-teal-500/15 border-teal-500/50 text-teal-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-teal-500/40'
+                    }`}
+                  >
+                    <Icon name={m.icon} className="w-4 h-4" />
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {formData.paymentMethod === 'pago_movil' && paymentConfig?.pagoMovil && (
+                <p className="text-[11px] text-slate-300 bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                  <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">
+                    Datos para el pago móvil
+                  </span>
+                  Banco: <span className="text-white font-bold">{paymentConfig.pagoMovil.bank || '—'}</span> · Teléfono:{' '}
+                  <span className="text-white font-bold">{paymentConfig.pagoMovil.phone || '—'}</span> · Cedula:{' '}
+                  <span className="text-white font-bold">{paymentConfig.pagoMovil.id || '—'}</span>
+                </p>
+              )}
+
+              {formData.paymentMethod === 'transferencia' && paymentConfig?.bank && (
+                <p className="text-[11px] text-slate-300 bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                  <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">
+                    Datos para la transferencia
+                  </span>
+                  Banco: <span className="text-white font-bold">{paymentConfig.bank.name || '—'}</span> · Número de cuenta:{' '}
+                  <span className="text-white font-bold">{paymentConfig.bank.account || '—'}</span>
+                  {paymentConfig.bank.titular ? (
+                    <> · Titular: <span className="text-white font-bold">{paymentConfig.bank.titular}</span></>
+                  ) : null}
+                </p>
+              )}
+
+              {formData.paymentMethod !== '' && formData.paymentMethod !== 'efectivo' && (
+                <div className="space-y-2.5 animate-fade-in">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Número de referencia / comprobante (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.paymentReference}
+                      onChange={(e) => setFormData({ ...formData, paymentReference: e.target.value })}
+                      placeholder="Ej: 12H3456789"
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Foto del comprobante *
+                    </label>
+                    <label className="w-full flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-xl border-2 border-dashed border-slate-700 bg-slate-800/60 cursor-pointer hover:border-teal-500/50 transition-all text-center">
+                      {formData.paymentProof ? (
+                        <>
+                          <img
+                            src={formData.paymentProof}
+                            alt="Comprobante de pago"
+                            className="max-h-36 rounded-lg object-contain"
+                          />
+                          <span className="text-[11px] text-teal-300 font-semibold flex items-center gap-1">
+                            <Icon name="check" className="w-3.5 h-3.5" />
+                            Comprobante adjunto — toca para cambiarlo
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="upload" className="w-6 h-6 text-slate-500" />
+                          <span className="text-xs text-slate-400">
+                            Toca para tomar una foto, elegir de la galería o subir un archivo del comprobante
+                          </span>
+                          <span className="text-[10px] text-slate-500">Se comprime automáticamente</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files && e.target.files[0];
+                          if (!file) return;
+                          if (file.size > 8 * 1024 * 1024) {
+                            addToast('La imagen supera 8 MB. Elige una más liviana.', 'error');
+                            e.target.value = '';
+                            return;
+                          }
+                          try {
+                            const compressed = await compressImage(file);
+                            setFormData({ ...formData, paymentProof: compressed });
+                          } catch {
+                            addToast('No se pudo procesar la imagen. Prueba con otra.', 'error');
+                          } finally {
+                            e.target.value = '';
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {errors.payment && <p className="text-xs text-rose-400 mt-1">{errors.payment}</p>}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isPlacingOrder}
@@ -5430,6 +6156,7 @@ function AdminView({
   onEditProduct,
   onDeleteProduct,
   onUpdateOrderStatus,
+  onUpdateOrderPayment,
   onUpdateCourierLocation,
   onDeleteOrder,
   allCustomers,
@@ -5443,11 +6170,263 @@ function AdminView({
   onDeleteCollection,
   addToast,
   storeLocation,
-  onSaveStoreLocation
+  onSaveStoreLocation,
+  adminPhone,
+  headerHeight
 }) {
-  // Order status filter state
-  const [statusFilter, setStatusFilter] = useState('todos');
+  // Order status filter state + preferencias recordadas (filtro, vista, orden
+  // por antigüedad y pedidos fijados se persisten en localStorage).
+  const ORDER_PREFS_KEY = 'kiosko_admin_order_prefs';
+  const PINNED_KEY = 'kiosko_admin_pinned';
+  const loadOrderPrefs = () => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(ORDER_PREFS_KEY) || '{}');
+      return {
+        statusFilter: raw.statusFilter || 'todos',
+        ordersView: ['lista', 'despacho', 'entregas', 'historial'].includes(raw.ordersView) ? raw.ordersView : 'lista',
+        productFilter: raw.productFilter || null,
+        ageSortOldest: Boolean(raw.ageSortOldest)
+      };
+    } catch {
+      return { statusFilter: 'todos', ordersView: 'lista', productFilter: null, ageSortOldest: false };
+    }
+  };
+  const [initialOrderPrefs] = useState(loadOrderPrefs);
+  const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
+  const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
+  const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
+  const [ageSortOldest, setAgeSortOldest] = useState(initialOrderPrefs.ageSortOldest);
+  const [pinnedOrders, setPinnedOrders] = useState(() => {
+    try {
+      const list = JSON.parse(localStorage.getItem(PINNED_KEY) || '[]');
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  });
+  // Contador de pedidos nuevos no vistos en la pestaña de pedidos.
+  const [unviewedCount, setUnviewedCount] = useState(0);
+  const knownOrderIdsRef = useRef(null);
+  // Historial (pedidos finalizados): filtros propios para no interferir con la
+  // lista de pedidos activos.
+  const [histStatus, setHistStatus] = useState('todos'); // todos | entregado | cancelado
+  const [histSearch, setHistSearch] = useState('');
+  const [histRange, setHistRange] = useState('7d'); // hoy | 7d | todo
   const [showStorePicker, setShowStorePicker] = useState(false);
+  const [proofOrder, setProofOrder] = useState(null);
+  const [fichaOrder, setFichaOrder] = useState(null);
+  const openFicha = (o) => {
+    setFichaOrder(o);
+  };
+  const closeFicha = () => {
+    setFichaOrder(null);
+  };
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [broadcastBody, setBroadcastBody] = useState('');
+  const [reminderPhone, setReminderPhone] = useState('');
+
+  // Inventario: búsqueda en tiempo real + filtro por categoría + agrupación por marca
+  const [invSearch, setInvSearch] = useState('');
+  const [invCategory, setInvCategory] = useState('todas');
+  const [invGroupByBrand, setInvGroupByBrand] = useState(false);
+  const inventoryProducts = useMemo(() => products || [], [products]);
+  const searchOnly = useMemo(() => {
+    const q = invSearch.trim().toLowerCase();
+    if (!q) return inventoryProducts;
+    return inventoryProducts.filter((p) =>
+      `${p.name || ''} ${p.code || ''} ${p.brand || ''} ${p.category || ''}`.toLowerCase().includes(q)
+    );
+  }, [inventoryProducts, invSearch]);
+  const inventoryCategories = useMemo(() => {
+    const cats = ['todas'];
+    inventoryProducts.forEach((p) => {
+      if (p.category && !cats.includes(p.category)) cats.push(p.category);
+    });
+    return cats;
+  }, [inventoryProducts]);
+  const catCount = useCallback(
+    (c) => (c === 'todas' ? searchOnly.length : searchOnly.filter((p) => p.category === c).length),
+    [searchOnly]
+  );
+  const filteredProducts = useMemo(
+    () => (invCategory === 'todas' ? searchOnly : searchOnly.filter((p) => p.category === invCategory)),
+    [searchOnly, invCategory]
+  );
+  const groupedByBrand = useMemo(() => {
+    if (!invGroupByBrand) return [];
+    const map = {};
+    filteredProducts.forEach((p) => {
+      const br = (p.brand || 'Sin marca').trim() || 'Sin marca';
+      (map[br] = map[br] || []).push(p);
+    });
+    return Object.keys(map)
+      .sort((a, b) => a.localeCompare(b))
+      .map((br) => ({ brand: br, items: map[br] }));
+  }, [filteredProducts, invGroupByBrand]);
+  const clearInvFilters = () => {
+    setInvSearch('');
+    setInvCategory('todas');
+  };
+
+  const renderMobileCard = (p) => {
+    const isLow = p.stock <= 5;
+    const isOut = p.stock === 0;
+    return (
+      <div
+        key={p.id}
+        className="flex items-center gap-3 p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60"
+      >
+        <img
+          src={p.image}
+          alt={p.name}
+          className="w-14 h-14 rounded-xl object-cover bg-slate-900 border border-slate-700 shrink-0"
+        />
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-slate-100 text-sm truncate">{p.name}</p>
+          <p className="text-[11px] text-slate-400 truncate">{p.code} · {p.category}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="font-bold text-white text-xs">{formatUsd(p.price)}</span>
+            {rate?.rate > 0 && (
+              <span className="text-[10px] text-slate-400 font-semibold">
+                {formatBs(usdToBs(p.price, rate.rate))}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+              isOut
+                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                : isLow
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+            }`}
+          >
+            {isOut ? 'Agotado' : `${p.stock} un.`}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => onEditProduct(p)}
+              className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
+              title="Editar producto"
+            >
+              <Icon name="edit" className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onDeleteProduct(p)}
+              className="p-2 rounded-xl bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
+              title="Eliminar producto"
+            >
+              <Icon name="trash" className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTableRow = (p) => {
+    const isLow = p.stock <= 5;
+    const isOut = p.stock === 0;
+    return (
+      <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
+        <td className="p-4 flex items-center gap-3">
+          <img
+            src={p.image}
+            alt={p.name}
+            className="w-12 h-12 rounded-xl object-cover bg-slate-900 border border-slate-700"
+          />
+          <div>
+            <p className="font-bold text-slate-100">{p.name}</p>
+            <p className="text-xs text-slate-400 line-clamp-1 max-w-xs">
+              {[formatSize(p), p.description].filter(Boolean).join(' · ')}
+            </p>
+          </div>
+        </td>
+        <td className="p-4 font-mono text-xs text-slate-400">{p.code}</td>
+        <td className="p-4">
+          <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-300">
+            {p.category}
+          </span>
+        </td>
+        <td className="p-4 font-bold text-white">
+          {formatUsd(p.price)}
+          {rate?.rate > 0 && (
+            <span className="block text-[10px] text-slate-400 font-semibold">
+              {formatBs(usdToBs(p.price, rate.rate))}
+            </span>
+          )}
+        </td>
+        <td className="p-4">
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-bold ${
+              isOut
+                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                : isLow
+                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+            }`}
+          >
+            {p.stock} unidades
+          </span>
+        </td>
+        <td className="p-4 text-right space-x-2">
+          <button
+            onClick={() => onEditProduct(p)}
+            className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
+            title="Editar producto"
+          >
+            <Icon name="edit" className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onDeleteProduct(p)}
+            className="p-2 rounded-xl bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
+            title="Eliminar producto"
+          >
+            <Icon name="trash" className="w-4 h-4" />
+          </button>
+        </td>
+      </tr>
+    );
+  };
+
+  const handlePushBroadcast = async () => {
+    if (!broadcastTitle.trim()) return;
+    const res = await api.pushBroadcast(broadcastTitle.trim(), broadcastBody.trim());
+    if (res.ok) {
+      addToast(`Promoción enviada a ${res.data.sent || 0} dispositivo(s)`, 'success');
+      setBroadcastTitle('');
+      setBroadcastBody('');
+    } else {
+      addToast(res.data?.error || 'No se pudo enviar la notificación', 'error');
+    }
+  };
+
+  const handlePushTest = async () => {
+    const phone = (reminderPhone || adminPhone || '').trim();
+    if (!phone) {
+      addToast('Escribe tu teléfono para enviar la prueba', 'warning');
+      return;
+    }
+    const res = await api.pushTest(phone, 'Notificación de prueba', 'Si ves esto, las notificaciones están funcionando.');
+    if (res.ok) {
+      addToast(`Prueba enviada${res.data.sent > 0 ? '' : ' (sin suscripciones activas)'}`, res.data.sent > 0 ? 'success' : 'warning');
+    } else {
+      addToast(res.data?.error || 'No se pudo enviar la prueba', 'error');
+    }
+  };
+
+  const handlePushReminder = async () => {
+    if (!reminderPhone.trim()) return;
+    const res = await api.pushReminder(reminderPhone.trim());
+    if (res.ok) {
+      addToast(`Recordatorio enviado a ${res.data.sent || 0} dispositivo(s)`, 'success');
+      setReminderPhone('');
+    } else {
+      addToast(res.data?.error || 'No se pudo enviar el recordatorio', 'error');
+    }
+  };
 
   // Modo Repartidor: cuando un pedido a domicilio está en "En Camino", el admin
   // (que reparte) comparte su GPS en vivo para que el cliente lo rastree.
@@ -5548,15 +6527,233 @@ function AdminView({
     setOverdueList((prev) => prev.filter((x) => x.id !== c.id));
   };
 
-  const filteredOrders = statusFilter === 'todos'
-    ? orders
-    : orders.filter((o) => o.status === statusFilter);
+  // --- Mejoras operativas de la sección Pedidos ---
+
+  // Alerta de pedido nuevo: detecta ids que antes no estaban, suena y avisa con
+  // un toast (si el panel está visible) y acumula el contador de "no vistos"
+  // hasta que se abre la pestaña de pedidos. La primera carga real de pedidos
+  // solo siembra el conjunto para no alertar pedidos que ya existían.
+  const addToastRef = useRef(addToast);
+  useEffect(() => {
+    addToastRef.current = addToast;
+  }, [addToast]);
+  useEffect(() => {
+    if (knownOrderIdsRef.current === null) {
+      knownOrderIdsRef.current = orders.length > 0 ? new Set(orders.map((o) => o.id)) : null;
+      return;
+    }
+    const prev = knownOrderIdsRef.current;
+    const fresh = orders.filter((o) => !prev.has(o.id));
+    knownOrderIdsRef.current = new Set(orders.map((o) => o.id));
+    if (fresh.length === 0) return;
+    setUnviewedCount((c) => c + fresh.length);
+    if (document.visibilityState === 'visible') {
+      playChime();
+      addToastRef.current(`${fresh.length} pedido${fresh.length !== 1 ? 's' : ''} nuevo${fresh.length !== 1 ? 's' : ''}: ${fresh.map((o) => o.id).join(', ')}`, 'info');
+    }
+  }, [orders]);
+
+  // Al abrir la pestaña de pedidos se limpia el contador de no vistos.
+  useEffect(() => {
+    if (adminTab === 'orders') setUnviewedCount(0);
+  }, [adminTab]);
+
+  // Preferencias de la sección Pedidos: se recuerdan entre sesiones.
+  useEffect(() => {
+    try {
+      localStorage.setItem(ORDER_PREFS_KEY, JSON.stringify({ statusFilter, ordersView, productFilter, ageSortOldest }));
+    } catch {}
+  }, [statusFilter, ordersView, productFilter, ageSortOldest]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PINNED_KEY, JSON.stringify(pinnedOrders));
+    } catch {}
+  }, [pinnedOrders]);
+
+  const togglePin = (id) =>
+    setPinnedOrders((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  // Antigüedad del pedido en minutos (semáforo de espera).
+  const orderAgeMinutes = (o) => {
+    const d = parseOrderDate(o);
+    if (isNaN(d)) return 0;
+    return Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+  };
+
+  const semaforoOf = (o) => {
+    const mins = orderAgeMinutes(o);
+    const est = Number(o.estimatedMinutes) || 0;
+    if (est > 0 && mins > est) {
+      return { tone: 'rose', text: `${mins} min (+${mins - est})`, label: 'Supera lo estimado' };
+    }
+    if (mins >= 10) return { tone: 'rose', text: `${mins} min`, label: 'Espera alta' };
+    if (mins >= 5) return { tone: 'amber', text: `${mins} min`, label: 'Espera media' };
+    return { tone: 'emerald', text: `${mins} min`, label: 'Reciente' };
+  };
+
+  // Pedidos que incluyen un producto cuyo stock no alcanza lo pedido.
+  const lowStockInOrder = useCallback(
+    (o) => {
+      const missing = [];
+      (o.items || []).forEach((it) => {
+        const p = products.find((pr) => pr.id === it.id);
+        if (p && Number(p.stock) < Number(it.quantity)) {
+          missing.push({ name: it.name, have: p.stock, need: it.quantity });
+        }
+      });
+      return missing;
+    },
+    [products]
+  );
+
+  const lowStockOrdersCount = useMemo(
+    () =>
+      orders.filter(
+        (o) => o.status !== 'cancelado' && o.status !== 'entregado' && lowStockInOrder(o).length > 0
+      ).length,
+    [orders, lowStockInOrder]
+  );
+
+  // Lista principal de PEDIDOS ACTIVOS: solo estados en curso. Los finalizados
+  // (entregado / cancelado) viven en el panel de Historial, no acá.
+  const ACTIVE_ORDER_STATUSES = ['pendiente', 'en_preparacion', 'listo', 'en_camino'];
+  const activeStatus =
+    statusFilter === 'todos' || !ACTIVE_ORDER_STATUSES.includes(statusFilter) ? 'todos' : statusFilter;
+  const statusFiltered = activeStatus === 'todos'
+    ? orders.filter((o) => ACTIVE_ORDER_STATUSES.includes(o.status))
+    : orders.filter((o) => o.status === activeStatus);
+
+  const productFilteredOrders = productFilter
+    ? statusFiltered.filter((o) => o.items.some((it) => it.id === productFilter))
+    : statusFiltered;
+
+  const filteredOrders = useMemo(() => {
+    const pinnedSet = new Set(pinnedOrders);
+    return [...productFilteredOrders].sort((a, b) => {
+      const pa = pinnedSet.has(a.id) ? 1 : 0;
+      const pb = pinnedSet.has(b.id) ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      if (ageSortOldest) return orderAgeMinutes(b) - orderAgeMinutes(a);
+      return 0;
+    });
+  }, [productFilteredOrders, pinnedOrders, ageSortOldest]);
+
+  // Historial: pedidos finalizados (entregado + cancelado) con sus propios
+  // filtros de estado, rango de fechas y búsqueda. Ordenados del más reciente.
+  const finalizedOrders = useMemo(
+    () => orders.filter((o) => o.status === 'entregado' || o.status === 'cancelado'),
+    [orders]
+  );
+  const orderDateVal = (o) => {
+    const d = parseOrderDate(o);
+    return isNaN(d) ? 0 : d.getTime();
+  };
+  const histFiltered = useMemo(() => {
+    const q = histSearch.trim().toLowerCase();
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOf7 = startOfToday - 6 * 86400000;
+    return finalizedOrders
+      .filter((o) => histStatus === 'todos' || o.status === histStatus)
+      .filter((o) => {
+        if (histRange === 'todo') return true;
+        const t = orderDateVal(o);
+        return t >= (histRange === 'hoy' ? startOfToday : startOf7);
+      })
+      .filter((o) => {
+        if (!q) return true;
+        return `${o.id} ${o.customerName || ''} ${o.phone || ''}`.toLowerCase().includes(q);
+      })
+      .sort((a, b) => orderDateVal(b) - orderDateVal(a));
+  }, [finalizedOrders, histStatus, histSearch, histRange]);
+  const histEntregados = histFiltered.filter((o) => o.status === 'entregado');
+  const histCancelados = histFiltered.filter((o) => o.status === 'cancelado');
+  const histRevenue = histEntregados.reduce((acc, o) => acc + (o.total || 0), 0);
+
+  // Productos presentes en los pedidos del filtro de estado actual (para el
+  // filtro rápido por producto).
+  const productFilterOptions = useMemo(() => {
+    const map = {};
+    statusFiltered.forEach((o) =>
+      o.items.forEach((it) => {
+        if (!map[it.id]) map[it.id] = { id: it.id, name: it.name, count: 0 };
+        map[it.id].count += 1;
+      })
+    );
+    return Object.values(map).sort((a, b) => b.count - a.count).slice(0, 12);
+  }, [statusFiltered]);
+
+  // "Despacho vs Caja": separa lo que hay que alistar/despachar de lo que hay
+  // que validar en caja (pagos digitales en revisión o rechazados).
+  // Lógica por tipo:
+  //  • Retiro en tienda: Iniciar → Marcar listo → Retirado (final = entregado).
+  //  • Delivery: Iniciar → Marcar listo y desaparece de despacho para aparecer
+  //    en Entregas (cuando queda "listo" se mueve a la pestaña Entregas).
+  const isPaymentBlocked = (o) =>
+    o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'pendiente' && !o.credit;
+  const despachoOrders = useMemo(
+    () =>
+      orders
+        .filter((o) => !isPaymentBlocked(o) && o.paymentStatus !== 'rechazado')
+        .filter((o) =>
+          o.type === 'delivery'
+            ? ['pendiente', 'en_preparacion'].includes(o.status)
+            : ['pendiente', 'en_preparacion', 'listo'].includes(o.status)
+        )
+        .sort((a, b) => orderAgeMinutes(b) - orderAgeMinutes(a)),
+    [orders]
+  );
+  const cajaOrders = useMemo(
+    () =>
+      orders
+        .filter((o) => o.paymentMethod && o.paymentMethod !== 'efectivo')
+        .filter((o) => o.paymentStatus === 'pendiente' || o.paymentStatus === 'rechazado')
+        .sort((a, b) => orderAgeMinutes(b) - orderAgeMinutes(a)),
+    [orders]
+  );
+  // Entregas del día: pedidos a domicilio listos para salir o ya en camino,
+  // con su ruta sugerida (orden por cercanía desde el comercio).
+  const activeDeliveries = useMemo(() => {
+    const list = orders
+      .filter((o) => o.type === 'delivery')
+      .filter((o) => o.status === 'listo' || o.status === 'en_camino');
+    const withCoords = list.filter((o) => o.lat != null && o.lng != null);
+    const withoutCoords = list.filter((o) => o.lat == null || o.lng == null);
+    const store = storeLocation;
+    const start =
+      store && store.lat != null && store.lng != null
+        ? { lat: Number(store.lat), lng: Number(store.lng) }
+        : null;
+    const ordered = [];
+    const remaining = [...withCoords];
+    let cur = start;
+    while (remaining.length > 0) {
+      let bestIdx = 0;
+      if (cur) {
+        let bestDist = Infinity;
+        remaining.forEach((o, i) => {
+          const d = haversineKm(cur.lat, cur.lng, Number(o.lat), Number(o.lng));
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = i;
+          }
+        });
+      }
+      const pick = remaining.splice(bestIdx, 1)[0];
+      const routeKm =
+        cur != null ? haversineKm(cur.lat, cur.lng, Number(pick.lat), Number(pick.lng)) : null;
+      ordered.push({ ...pick, routeNumber: ordered.length + 1, routeKm });
+      cur = { lat: Number(pick.lat), lng: Number(pick.lng) };
+    }
+    return { ordered, withoutCoords };
+  }, [orders, storeLocation]);
 
   // Calculated Analytics
   const lowStockProducts = products.filter((p) => p.stock <= 5);
   const completedOrders = orders.filter((o) => o.status === 'entregado');
   const totalRevenue = completedOrders.reduce((acc, o) => acc + o.total, 0);
-  const pendingOrders = orders.filter((o) => o.status === 'pendiente' || o.status === 'en_preparacion');
+  const pendingOrders = orders.filter((o) => ['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(o.status));
 
   const openNewPromo = () => {
     setPromoDraft({ id: `promo-${Date.now()}`, title: '', subtitle: '', image: '', active: true });
@@ -5600,6 +6797,366 @@ function AdminView({
       .filter(Boolean)
       .slice(0, 4);
   }, [orders, products]);
+
+  // Tendencia de ventas por día (últimos 7 días): cantidad de pedidos y ventas en $.
+  const salesByDay = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      days.push({
+        key: d.toISOString().slice(0, 10),
+        label: d.toLocaleDateString('es-ES', { weekday: 'short' }),
+        orders: 0,
+        revenue: 0
+      });
+    }
+    const map = {};
+    days.forEach((d) => (map[d.key] = d));
+    orders.forEach((o) => {
+      const ts = o.timestamp ? new Date(o.timestamp) : null;
+      const key = ts && !isNaN(ts) ? new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).toISOString().slice(0, 10) : null;
+      if (key && map[key]) {
+        map[key].orders += 1;
+        if (o.status === 'entregado') map[key].revenue += o.total || 0;
+      }
+    });
+    return days;
+  }, [orders]);
+
+  // Clientes con mayor volumen de pedidos (segmentación por actividad).
+  const topCustomers = useMemo(() => {
+    const counts = {};
+    orders.forEach((o) => {
+      const key = (o.phone || 'desconocido').trim();
+      counts[key] = counts[key] || { phone: key, orders: 0, revenue: 0 };
+      counts[key].orders += 1;
+      if (o.status === 'entregado') counts[key].revenue += o.total || 0;
+    });
+    return Object.values(counts)
+      .sort((a, b) => b.orders - a.orders)
+      .slice(0, 5);
+  }, [orders]);
+
+  const lowStockMessage = useMemo(() => {
+    if (lowStockProducts.length === 0) return '';
+    const lines = lowStockProducts.slice(0, 10).map((p) => `• ${p.name}: ${p.stock} un.`);
+    return `⚠️ *ALERTA DE STOCK BAJO* en Kiosko 247\n\nProductos con pocas unidades:\n${lines.join('\n')}\n\nRevisa el inventario y repón lo antes posible.`;
+  }, [lowStockProducts]);
+
+
+  const renderOrderCard = (order, { inFicha = false } = {}) => {
+    const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
+    const wa = formatPhoneWhatsApp(order.phone);
+    const sem = semaforoOf(order);
+    const missingStock = lowStockInOrder(order);
+    const isPinned = pinnedOrders.includes(order.id);
+    return (
+      <div
+        key={order.id}
+        className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${st.ring}`}
+      >
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
+              {['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
+                <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 shrink-0 ${SEM_TONES[sem.tone]}`}>
+                  <Icon name="clock" className="w-3 h-3" />
+                  {sem.text}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              <span
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
+                {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
+              </span>
+              {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+                <span
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold ${
+                    order.paymentStatus === 'confirmado'
+                      ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
+                      : order.paymentStatus === 'rechazado'
+                        ? 'border-rose-400/40 bg-rose-500/15 text-rose-300'
+                        : 'border-amber-400/40 bg-amber-500/15 text-amber-300'
+                  }`}
+                >
+                  <Icon name="creditCard" className="w-3 h-3" />
+                  {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago'} ·{' '}
+                  {({ pendiente: 'En revisión', confirmado: 'Confirmado', rechazado: 'Rechazado' })[order.paymentStatus] || 'Pendiente'}
+                </span>
+              )}
+              {order.credit && (
+                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
+                  <Icon name="creditCard" className="w-3 h-3" />
+                  A cuenta
+                </span>
+              )}
+              <button
+                onClick={() => togglePin(order.id)}
+                className={`p-1.5 rounded-lg border transition-all ${
+                  isPinned
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                    : 'bg-slate-900/60 text-slate-500 border-slate-700 hover:text-amber-300'
+                }`}
+                title={isPinned ? 'Quitar de fijados' : 'Fijar pedido arriba'}
+              >
+                <Icon name="pin" className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-bold text-white text-base">{order.customerName}</h4>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-xs text-slate-300 flex items-center gap-1">
+                <Icon name="phone" className="w-3.5 h-3.5 text-slate-400" />
+                {order.phone}
+              </p>
+              {wa && (
+                <a
+                  href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${order.customerName}, sobre tu pedido ${order.id} en Kiosko 247`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+                >
+                  <Icon name="whatsapp" className="w-3.5 h-3.5" />
+                  WhatsApp
+                </a>
+              )}
+            </div>
+            {order.type === 'delivery' ? (
+              inFicha ? (
+                <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
+                  🚚 Entrega a Domicilio
+                </span>
+              ) : (
+                <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
+                  <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Entrega: {order.address}</span>
+                  {order.lat != null && order.lng != null && (
+                    <a
+                      href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
+                    >
+                      <Icon name="mapPin" className="w-3 h-3" />
+                      Abrir en Maps
+                    </a>
+                  )}
+                  {order.courier_lat != null && order.courier_lng != null && (
+                    <span className="text-[10px] font-bold text-emerald-300 ml-auto">
+                      Repartidor en vivo
+                    </span>
+                  )}
+                </p>
+              )
+            ) : (
+              <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
+                🛍️ Retiro por Mostrador
+              </span>
+            )}
+          </div>
+
+          {/* Order Line Items */}
+          <div className="p-3 rounded-2xl bg-slate-900/80 space-y-1.5 text-xs text-slate-300">
+            {order.items.map((it, idx) => (
+              <div key={idx} className="flex justify-between">
+                <span>{it.quantity}x {it.name}</span>
+                <span className="font-bold text-white">
+                  {formatUsd(it.price * it.quantity)}
+                  {rate?.rate > 0 && (
+                    <span className="block text-[10px] text-slate-500 text-right">
+                      {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
+            <div className="pt-2 border-t border-slate-800 flex justify-between font-bold text-white text-sm">
+              <span>Total</span>
+              <span className="text-teal-400 text-right">
+                {formatUsd(order.total)}
+                {rate?.rate > 0 && (
+                  <span className="block text-[10px] text-teal-300/90">
+                    {formatBs(usdToBs(order.total, rate.rate))}
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+
+          {missingStock.length > 0 && (
+            <div className="flex items-start gap-1.5 p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] font-semibold">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>
+                Sin stock suficiente: {missingStock.map((m) => `${m.name} (${m.have}/${m.need})`).join(', ')}
+              </span>
+            </div>
+          )}
+          {sem.tone === 'rose' && sem.label === 'Supera lo estimado' && (
+            <div className="flex items-center gap-1.5 p-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px] font-bold">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5 shrink-0" />
+              Lleva más del tiempo estimado
+            </div>
+          )}
+
+          {order.notes && (
+            <p className="text-xs text-slate-400 italic bg-slate-900/40 p-2 rounded-xl">
+              "{order.notes}"
+            </p>
+          )}
+
+          {/* Pago digital: comprobante y estado */}
+          {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+            <div className="space-y-2">
+              {order.paymentReference && (
+                <p className="text-xs text-slate-300 bg-slate-900/40 p-2 rounded-xl">
+                  Ref: <span className="font-mono font-bold text-white">{order.paymentReference}</span>
+                </p>
+              )}
+              {order.paymentProof ? (
+                <button
+                  onClick={() => setProofOrder(order)}
+                  className="w-full flex items-center gap-3 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
+                >
+                  <img
+                    src={order.paymentProof}
+                    alt="Comprobante de pago"
+                    className="w-14 h-14 rounded-lg object-cover border border-slate-700"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold text-white">Ver comprobante</span>
+                    <span className="block text-[11px] text-slate-400">Toca para ampliar</span>
+                  </span>
+                  <Icon name="eye" className="w-4 h-4 text-teal-400 ml-auto shrink-0" />
+                </button>
+              ) : (
+                <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
+                  <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+                  Pago digital sin comprobante adjunto
+                </p>
+              )}
+              {order.paymentStatus === 'rechazado' && (
+                <p className="text-xs text-rose-300/90 bg-rose-500/10 border border-rose-500/30 p-2 rounded-xl flex items-start gap-1.5">
+                  <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  Pago rechazado: el cliente debe subir otro comprobante o
+                  pasar el pedido a cuenta (si es beneficiado) antes de avanzar.
+                </p>
+              )}
+              {order.paymentStatus === 'pendiente' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => onUpdateOrderPayment(order.id, 'confirmado')}
+                    className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Icon name="check" className="w-3.5 h-3.5" />
+                    Confirmar pago
+                  </button>
+                  <button
+                    onClick={() => onUpdateOrderPayment(order.id, 'rechazado')}
+                    className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Icon name="x" className="w-3.5 h-3.5" />
+                    Rechazar pago
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Chat con el cliente */}
+          <OrderChat order={order} />
+        </div>
+
+        {/* Status Update Controls */}
+        <div className="pt-3 border-t border-slate-700/60 space-y-2">
+          <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { key: 'pendiente', label: 'Pendiente' },
+              { key: 'en_preparacion', label: 'En Prep.' },
+              { key: 'listo', label: 'Listo' },
+              ...(order.type === 'delivery' ? [{ key: 'en_camino', label: 'En Camino' }] : []),
+              { key: 'entregado', label: 'Entregado' },
+              { key: 'cancelado', label: 'Cancelado' }
+            ].map((stBtn) => (
+              <button
+                key={stBtn.key}
+                onClick={() => onUpdateOrderStatus(order.id, stBtn.key)}
+                className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
+                  order.status === stBtn.key
+                    ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
+                    : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
+                }`}
+              >
+                {stBtn.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Modo Repartidor: comparte el GPS mientras el pedido va en camino */}
+          {order.type === 'delivery' && order.status === 'en_camino' && (
+            <div className="pt-1">
+              {courierOrderId === order.id && courierActive ? (
+                <button
+                  onClick={stopCourierTracking}
+                  className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="mapPin" className="w-3.5 h-3.5" />
+                  Detener rastreo en vivo
+                </button>
+              ) : (
+                <button
+                  onClick={() => startCourierTracking(order.id)}
+                  className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="mapPin" className="w-3.5 h-3.5" />
+                  Comenzar entrega (GPS en vivo)
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Aprobar / Rechazar pedido a crédito (solo pendiente) */}
+          {order.credit && order.status === 'pendiente' && (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => onUpdateOrderStatus(order.id, 'en_preparacion')}
+                className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Icon name="check" className="w-3.5 h-3.5" />
+                Aceptar y preparar
+              </button>
+              <button
+                onClick={() => onUpdateOrderStatus(order.id, 'cancelado')}
+                className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Icon name="x" className="w-3.5 h-3.5" />
+                Rechazar
+              </button>
+            </div>
+          )}
+
+          {/* Eliminar pedido cancelado (para no acumular en la lista) */}
+          {order.status === 'cancelado' && (
+            <button
+              onClick={() => onDeleteOrder(order)}
+              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+            >
+              <Icon name="trash" className="w-3.5 h-3.5" />
+              Eliminar pedido
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-5 sm:space-y-8 animate-fade-in">
@@ -5725,6 +7282,11 @@ function AdminView({
             <Icon name={tab.icon} className="w-4 h-4" />
             <span className="sm:hidden">{tab.label}</span>
             <span className="hidden sm:inline">{tab.full}</span>
+            {tab.key === 'orders' && unviewedCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black leading-none shrink-0">
+                {unviewedCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -5732,65 +7294,90 @@ function AdminView({
       {/* Tab 1: Inventory Management */}
       {adminTab === 'inventory' && (
         <div className="space-y-4">
+          {/* Filtros: búsqueda en tiempo real + categoría + agrupación por marca */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <div className="relative flex-1">
+                <Icon name="search" className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <input
+                  value={invSearch}
+                  onChange={(e) => setInvSearch(e.target.value)}
+                  placeholder="Buscar por nombre, código o marca…"
+                  className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-slate-900/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500/60 transition-all"
+                />
+                {invSearch && (
+                  <button
+                    onClick={() => setInvSearch('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                    title="Limpiar búsqueda"
+                  >
+                    <Icon name="x" className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => setInvGroupByBrand((v) => !v)}
+                className={`shrink-0 px-3.5 py-2.5 rounded-2xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                  invGroupByBrand
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                }`}
+                title="Agrupar la lista por marca"
+              >
+                <Icon name="layers" className="w-4 h-4" />
+                {invGroupByBrand ? 'Agrupado por marca' : 'Agrupar por marca'}
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
+              {inventoryCategories.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setInvCategory(c)}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                    invCategory === c
+                      ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                >
+                  {c === 'todas' ? 'Todas' : c}
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{catCount(c)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredProducts.length === 0 && (
+            <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+              <Icon name="search" className="w-10 h-10 text-slate-700 mx-auto" />
+              <p className="font-bold text-slate-400">No hay productos con este filtro</p>
+              <button
+                onClick={clearInvFilters}
+                className="text-[11px] font-semibold text-teal-400 hover:text-teal-300"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+          )}
+
           {/* Mobile: card list */}
           <div className="grid grid-cols-1 gap-3 sm:hidden">
-            {products.map((p) => {
-              const isLow = p.stock <= 5;
-              const isOut = p.stock === 0;
-              return (
-                <div
-                  key={p.id}
-                  className="flex items-center gap-3 p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60"
-                >
-                  <img
-                    src={p.image}
-                    alt={p.name}
-                    className="w-14 h-14 rounded-xl object-cover bg-slate-900 border border-slate-700 shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-100 text-sm truncate">{p.name}</p>
-                    <p className="text-[11px] text-slate-400 truncate">{p.code} · {p.category}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="font-bold text-white text-xs">{formatUsd(p.price)}</span>
-                      {rate?.rate > 0 && (
-                        <span className="text-[10px] text-slate-400 font-semibold">
-                          {formatBs(usdToBs(p.price, rate.rate))}
-                        </span>
-                      )}
+            {invGroupByBrand
+              ? groupedByBrand.map((g) => (
+                  <div key={g.brand}>
+                    <div className="flex items-center gap-2 px-1 pt-1 pb-1.5">
+                      <span className="px-2.5 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+                        {g.brand}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        {g.items.length} producto{g.items.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {g.items.map((p) => renderMobileCard(p))}
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-2 shrink-0">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                        isOut
-                          ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                          : isLow
-                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                          : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                      }`}
-                    >
-                      {isOut ? 'Agotado' : `${p.stock} un.`}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => onEditProduct(p)}
-                        className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
-                        title="Editar producto"
-                      >
-                        <Icon name="edit" className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => onDeleteProduct(p)}
-                        className="p-2 rounded-xl bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
-                        title="Eliminar producto"
-                      >
-                        <Icon name="trash" className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                ))
+              : filteredProducts.map((p) => renderMobileCard(p))}
           </div>
 
           {/* Desktop: table */}
@@ -5808,71 +7395,23 @@ function AdminView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/50 text-sm">
-                  {products.map((p) => {
-                    const isLow = p.stock <= 5;
-                    const isOut = p.stock === 0;
-
-                    return (
-                      <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
-                        <td className="p-4 flex items-center gap-3">
-                          <img
-                            src={p.image}
-                            alt={p.name}
-                            className="w-12 h-12 rounded-xl object-cover bg-slate-900 border border-slate-700"
-                          />
-                          <div>
-                            <p className="font-bold text-slate-100">{p.name}</p>
-                            <p className="text-xs text-slate-400 line-clamp-1 max-w-xs">
-                              {[formatSize(p), p.description].filter(Boolean).join(' · ')}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="p-4 font-mono text-xs text-slate-400">{p.code}</td>
-                        <td className="p-4">
-                          <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-300">
-                            {p.category}
-                          </span>
-                        </td>
-                        <td className="p-4 font-bold text-white">
-                          {formatUsd(p.price)}
-                          {rate?.rate > 0 && (
-                            <span className="block text-[10px] text-slate-400 font-semibold">
-                              {formatBs(usdToBs(p.price, rate.rate))}
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-4">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              isOut
-                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                : isLow
-                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                            }`}
-                          >
-                            {p.stock} unidades
-                          </span>
-                        </td>
-                        <td className="p-4 text-right space-x-2">
-                          <button
-                            onClick={() => onEditProduct(p)}
-                            className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
-                            title="Editar producto"
-                          >
-                            <Icon name="edit" className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => onDeleteProduct(p)}
-                            className="p-2 rounded-xl bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
-                            title="Eliminar producto"
-                          >
-                            <Icon name="trash" className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {invGroupByBrand
+                    ? groupedByBrand.map((g) => (
+                        <Fragment key={g.brand}>
+                          <tr className="bg-slate-900/80">
+                            <td colSpan={6} className="p-2.5 pl-4">
+                              <span className="px-2.5 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+                                {g.brand}
+                              </span>
+                              <span className="ml-2 text-[10px] text-slate-500">
+                                {g.items.length} producto{g.items.length !== 1 ? 's' : ''}
+                              </span>
+                            </td>
+                          </tr>
+                          {g.items.map((p) => renderTableRow(p))}
+                        </Fragment>
+                      ))
+                    : filteredProducts.map((p) => renderTableRow(p))}
                 </tbody>
               </table>
             </div>
@@ -5883,22 +7422,55 @@ function AdminView({
       {/* Tab 2: Orders */}
       {adminTab === 'orders' && (
         <div className="space-y-4">
-          {/* Status Quick Filters */}
+          {/* Vista operativa: Activos / Despacho·Caja / Entregas / Historial */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
             {[
-              { key: 'todos', label: 'Todos', count: orders.length },
+              { key: 'lista', label: 'Activos', icon: 'clock' },
+              { key: 'despacho', label: 'Despacho / Caja', icon: 'package' },
+              { key: 'entregas', label: 'Entregas (ruta)', icon: 'mapPin' },
+              { key: 'historial', label: 'Historial', icon: 'list' }
+            ].map((v) => (
+              <button
+                key={v.key}
+                onClick={() => {
+                  if (v.key === 'lista' && (statusFilter === 'entregado' || statusFilter === 'cancelado')) {
+                    setStatusFilter('todos');
+                  }
+                  setOrdersView(v.key);
+                }}
+                className={`px-3.5 sm:px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap border transition-all shrink-0 flex items-center gap-1.5 ${
+                  ordersView === v.key
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                }`}
+              >
+                <Icon name={v.icon} className="w-4 h-4" />
+                {v.label}
+                {v.key === 'historial' && (
+                  <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-slate-700/80 text-[10px] font-black leading-none">
+                    {finalizedOrders.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {ordersView === 'lista' && (
+          <>
+          {/* Status Quick Filters (solo estados activos; los finalizados van a Historial) */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
+            {[
+              { key: 'todos', label: 'Todos', count: orders.filter((o) => ACTIVE_ORDER_STATUSES.includes(o.status)).length },
               { key: 'pendiente', label: 'Pendientes', count: orders.filter((o) => o.status === 'pendiente').length },
               { key: 'en_preparacion', label: 'Preparación', count: orders.filter((o) => o.status === 'en_preparacion').length },
               { key: 'listo', label: 'Listos', count: orders.filter((o) => o.status === 'listo').length },
-              { key: 'en_camino', label: 'En Camino', count: orders.filter((o) => o.status === 'en_camino').length },
-              { key: 'entregado', label: 'Entregados', count: orders.filter((o) => o.status === 'entregado').length },
-              { key: 'cancelado', label: 'Cancelados', count: orders.filter((o) => o.status === 'cancelado').length }
+              { key: 'en_camino', label: 'En Camino', count: orders.filter((o) => o.status === 'en_camino').length }
             ].map((f) => (
               <button
                 key={f.key}
                 onClick={() => setStatusFilter(f.key)}
                 className={`px-3.5 sm:px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap border transition-all shrink-0 ${
-                  statusFilter === f.key
+                  activeStatus === f.key
                     ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
                     : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
                 }`}
@@ -5909,6 +7481,63 @@ function AdminView({
             ))}
           </div>
 
+          {/* Filtro rápido por producto + alerta de stock + orden por antigüedad */}
+          <div className="space-y-2.5">
+            {lowStockOrdersCount > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold">
+                <Icon name="alertTriangle" className="w-4 h-4" />
+                {lowStockOrdersCount} pedido(s) incluyen productos sin stock suficiente
+              </div>
+            )}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0 flex-1">
+                <span className="px-2 py-1 rounded-lg bg-slate-800/80 text-slate-500 text-[10px] font-black uppercase tracking-wider shrink-0">
+                  Producto
+                </span>
+                <button
+                  onClick={() => setProductFilter(null)}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                    productFilter === null
+                      ? 'bg-teal-500 text-slate-950 border-teal-400'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                >
+                  Todos
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{statusFiltered.length}</span>
+                </button>
+                {productFilterOptions.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setProductFilter(productFilter === p.id ? null : p.id)}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                      productFilter === p.id
+                        ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                        : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                    }`}
+                    title={p.name}
+                  >
+                    {p.name.split(' ').slice(0, 3).join(' ')}
+                    <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{p.count}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setAgeSortOldest((v) => !v)}
+                  className={`px-3.5 py-2 rounded-2xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                    ageSortOldest
+                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title="Ordenar por el más antiguo primero (semáforo de espera)"
+                >
+                  <Icon name="clock" className="w-4 h-4" />
+                  {ageSortOldest ? 'Más antiguos primero' : 'Antigüedad'}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {filteredOrders.length === 0 ? (
               <div className="col-span-full py-16 text-center text-slate-500 space-y-2">
@@ -5916,198 +7545,559 @@ function AdminView({
                 <p className="font-bold text-slate-400">No hay pedidos con este estado</p>
               </div>
             ) : (
-              filteredOrders.map((order) => {
-                const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
-                const wa = formatPhoneWhatsApp(order.phone);
-                return (
-                  <div
-                    key={order.id}
-                    className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${st.ring}`}
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
-                        <span
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
-                          {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
-                        </span>
-                        {order.credit && (
-                          <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
-                            <Icon name="creditCard" className="w-3 h-3" />
-                            A cuenta
-                          </span>
-                        )}
-                      </div>
-
-                      <div>
-                        <h4 className="font-bold text-white text-base">{order.customerName}</h4>
-                        <div className="flex items-center gap-2 mt-1">
-                          <p className="text-xs text-slate-300 flex items-center gap-1">
-                            <Icon name="phone" className="w-3.5 h-3.5 text-slate-400" />
-                            {order.phone}
-                          </p>
-                          {wa && (
-                            <a
-                              href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${order.customerName}, sobre tu pedido ${order.id} en Kiosko 247`)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
-                            >
-                              <Icon name="whatsapp" className="w-3.5 h-3.5" />
-                              WhatsApp
-                            </a>
-                          )}
-                        </div>
-                        {order.type === 'delivery' ? (
-                          <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
-                            <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span>Entrega: {order.address}</span>
-                            {order.lat != null && order.lng != null && (
-                              <a
-                                href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
-                              >
-                                <Icon name="mapPin" className="w-3 h-3" />
-                                Abrir en Maps
-                              </a>
-                            )}
-                            {order.courier_lat != null && order.courier_lng != null && (
-                              <span className="text-[10px] font-bold text-emerald-300 ml-auto">
-                                Repartidor en vivo
-                              </span>
-                            )}
-                          </p>
-                        ) : (
-                          <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
-                            🛍️ Retiro por Mostrador
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Order Line Items */}
-                      <div className="p-3 rounded-2xl bg-slate-900/80 space-y-1.5 text-xs text-slate-300">
-                        {order.items.map((it, idx) => (
-                          <div key={idx} className="flex justify-between">
-                            <span>{it.quantity}x {it.name}</span>
-                            <span className="font-bold text-white">
-                              {formatUsd(it.price * it.quantity)}
-                              {rate?.rate > 0 && (
-                                <span className="block text-[10px] text-slate-500 text-right">
-                                  {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                        ))}
-                        <div className="pt-2 border-t border-slate-800 flex justify-between font-bold text-white text-sm">
-                          <span>Total</span>
-                          <span className="text-teal-400 text-right">
-                            {formatUsd(order.total)}
-                            {rate?.rate > 0 && (
-                              <span className="block text-[10px] text-teal-300/90">
-                                {formatBs(usdToBs(order.total, rate.rate))}
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-
-                      {order.notes && (
-                        <p className="text-xs text-slate-400 italic bg-slate-900/40 p-2 rounded-xl">
-                          "{order.notes}"
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Status Update Controls */}
-                    <div className="pt-3 border-t border-slate-700/60 space-y-2">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { key: 'pendiente', label: 'Pendiente' },
-                          { key: 'en_preparacion', label: 'En Prep.' },
-                          { key: 'listo', label: 'Listo' },
-                          ...(order.type === 'delivery' ? [{ key: 'en_camino', label: 'En Camino' }] : []),
-                          { key: 'entregado', label: 'Entregado' },
-                          { key: 'cancelado', label: 'Cancelado' }
-                        ].map((stBtn) => (
-                          <button
-                            key={stBtn.key}
-                            onClick={() => onUpdateOrderStatus(order.id, stBtn.key)}
-                            className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
-                              order.status === stBtn.key
-                                ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
-                                : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
-                            }`}
-                          >
-                            {stBtn.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Modo Repartidor: comparte el GPS mientras el pedido va en camino */}
-                      {order.type === 'delivery' && order.status === 'en_camino' && (
-                        <div className="pt-1">
-                          {courierOrderId === order.id && courierActive ? (
-                            <button
-                              onClick={stopCourierTracking}
-                              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
-                            >
-                              <Icon name="mapPin" className="w-3.5 h-3.5" />
-                              Detener rastreo en vivo
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => startCourierTracking(order.id)}
-                              className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                            >
-                              <Icon name="mapPin" className="w-3.5 h-3.5" />
-                              Comenzar entrega (GPS en vivo)
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Aprobar / Rechazar pedido a crédito (solo pendiente) */}
-                      {order.credit && order.status === 'pendiente' && (
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => onUpdateOrderStatus(order.id, 'en_preparacion')}
-                            className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                          >
-                            <Icon name="check" className="w-3.5 h-3.5" />
-                            Aceptar y preparar
-                          </button>
-                          <button
-                            onClick={() => onUpdateOrderStatus(order.id, 'cancelado')}
-                            className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
-                          >
-                            <Icon name="x" className="w-3.5 h-3.5" />
-                            Rechazar
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Eliminar pedido cancelado (para no acumular en la lista) */}
-                      {order.status === 'cancelado' && (
-                        <button
-                          onClick={() => onDeleteOrder(order)}
-                          className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
-                        >
-                          <Icon name="trash" className="w-3.5 h-3.5" />
-                          Eliminar pedido
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
+              filteredOrders.map((order) => renderOrderCard(order))
             )}
           </div>
+          </>
+          )}
+
+          {/* Vista Despacho / Caja: separa lo que hay que alistar de lo que hay que validar */}
+          {ordersView === 'despacho' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-200 flex items-center gap-2">
+                    <Icon name="package" className="w-4 h-4 text-cyan-400" />
+                    Por alistar
+                  </h3>
+                  <span className="text-[11px] text-slate-500">{despachoOrders.length} pedido(s)</span>
+                </div>
+                {despachoOrders.length === 0 ? (
+                  <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+                    <Icon name="checkCircle" className="w-10 h-10 text-slate-700 mx-auto" />
+                    <p className="font-bold text-slate-400">Nada por alistar</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {despachoOrders.map((o) => {
+                      const sem = semaforoOf(o);
+                      const missing = lowStockInOrder(o);
+                      const wa = formatPhoneWhatsApp(o.phone);
+                      const isPickup = o.type !== 'delivery';
+                      const nxt =
+                        o.status === 'pendiente'
+                          ? 'en_preparacion'
+                          : o.status === 'en_preparacion'
+                            ? 'listo'
+                            : isPickup && o.status === 'listo'
+                              ? 'entregado'
+                              : null;
+                      const nxtLabel =
+                        nxt === 'en_preparacion' ? 'Iniciar ▸' : nxt === 'listo' ? 'Marcar listo ✓' : nxt === 'entregado' ? 'Retirado ✓' : null;
+                      const nxtTone =
+                        nxt === 'en_preparacion'
+                          ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/25'
+                          : nxt === 'listo'
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                            : nxt === 'entregado'
+                              ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/25'
+                              : 'bg-slate-700/40 border-slate-600 text-slate-300';
+                      return (
+                        <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 ${SEM_TONES[sem.tone]}`}>
+                                <Icon name="clock" className="w-3 h-3" />
+                                {sem.text}
+                              </span>
+                              <button
+                                onClick={() => openFicha(o)}
+                                title="Ver ficha del pedido"
+                                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-700/40 border border-slate-600 text-slate-200 text-[10px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all"
+                              >
+                                <Icon name="eye" className="w-3 h-3" />
+                                Ficha
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-sm font-bold text-white">{o.customerName}</p>
+                          <p className="text-[11px] text-slate-400 line-clamp-2">
+                            {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
+                          </p>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-black text-teal-400">{formatUsd(o.total)}</span>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                                o.type === 'delivery'
+                                  ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+                                  : 'text-teal-300 border-teal-500/40 bg-teal-500/10'
+                              }`}
+                            >
+                              {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
+                            </span>
+                          </div>
+                          <OrderStepsTimeline order={o} />
+                          {missing.length > 0 && (
+                            <p className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2 py-1.5">
+                              ⚠️ Sin stock suficiente: {missing.map((m) => m.name).join(', ')}
+                            </p>
+                          )}
+                          <div className="flex gap-2">
+                            {nxt && nxtLabel ? (
+                              <button
+                                onClick={() => onUpdateOrderStatus(o.id, nxt)}
+                                className={`flex-1 py-2 rounded-xl border text-xs font-bold transition-all ${nxtTone}`}
+                              >
+                                {nxtLabel}
+                              </button>
+                            ) : (
+                              <div className="flex-1 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-xs font-bold text-center">
+                                {isPickup ? 'Esperando retiro' : 'Pasa a Entregas'}
+                              </div>
+                            )}
+                            {wa && (
+                              <a
+                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, sobre tu pedido ${o.id} en Kiosko 247`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 inline-flex items-center gap-1 px-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition-all"
+                              >
+                                <Icon name="whatsapp" className="w-3.5 h-3.5" /> WA
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-200 flex items-center gap-2">
+                    <Icon name="creditCard" className="w-4 h-4 text-amber-400" />
+                    Por validar (caja)
+                  </h3>
+                  <span className="text-[11px] text-slate-500">{cajaOrders.length} pago(s)</span>
+                </div>
+                {cajaOrders.length === 0 ? (
+                  <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+                    <Icon name="checkCircle" className="w-10 h-10 text-slate-700 mx-auto" />
+                    <p className="font-bold text-slate-400">Sin pagos por validar</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {cajaOrders.map((o) => {
+                      const wa = formatPhoneWhatsApp(o.phone);
+                      return (
+                        <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                                o.paymentStatus === 'rechazado'
+                                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                                  : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                              }`}
+                            >
+                              {o.paymentStatus === 'rechazado' ? 'Rechazado' : 'En revisión'}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-white">{o.customerName}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {(o.paymentMethod === 'pago_movil' ? 'Pago Móvil' : 'Transferencia')} · Ref:{' '}
+                            <span className="font-mono text-white">{o.paymentReference || '—'}</span>
+                          </p>
+                          {o.paymentProof ? (
+                            <button
+                              onClick={() => setProofOrder(o)}
+                              className="w-full flex items-center gap-2 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
+                            >
+                              <img src={o.paymentProof} alt="Comprobante de pago" className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
+                              <span className="text-xs font-bold text-white flex-1">Ver comprobante</span>
+                              <Icon name="eye" className="w-4 h-4 text-teal-400" />
+                            </button>
+                          ) : (
+                            <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1.5">
+                              Sin comprobante adjunto
+                            </p>
+                          )}
+                          {o.paymentStatus === 'rechazado' && (
+                            <p className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2 py-1.5">
+                              El cliente debe subir otro comprobante o pasar el pedido a cuenta.
+                            </p>
+                          )}
+                          <div className="flex gap-2 flex-wrap">
+                            {o.paymentStatus === 'pendiente' && (
+                              <>
+                                <button
+                                  onClick={() => onUpdateOrderPayment(o.id, 'confirmado')}
+                                  className="flex-1 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all"
+                                >
+                                  Confirmar ✓
+                                </button>
+                                <button
+                                  onClick={() => onUpdateOrderPayment(o.id, 'rechazado')}
+                                  className="flex-1 py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all"
+                                >
+                                  Rechazar
+                                </button>
+                              </>
+                            )}
+                            {wa && (
+                              <a
+                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, sobre el pago de tu pedido ${o.id} en Kiosko 247`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 inline-flex items-center gap-1 px-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition-all"
+                              >
+                                <Icon name="whatsapp" className="w-3.5 h-3.5" /> WA
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Vista Entregas: ruta del día ordenada por cercanía */}
+          {ordersView === 'entregas' && (
+            <div className="space-y-4">
+              <DeliveriesRouteMap storeLocation={storeLocation} deliveries={activeDeliveries.ordered} />
+              {activeDeliveries.ordered.length === 0 && activeDeliveries.withoutCoords.length === 0 ? (
+                <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+                  <Icon name="mapPin" className="w-10 h-10 text-slate-700 mx-auto" />
+                  <p className="font-bold text-slate-400">No hay entregas activas</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {activeDeliveries.ordered.map((o) => {
+                    const wa = formatPhoneWhatsApp(o.phone);
+                    const isTracking = courierActive && courierOrderId === o.id;
+                    return (
+                      <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2.5">
+                        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+                          <span
+                            className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black ${
+                              o.status === 'en_camino'
+                                ? 'bg-emerald-500 text-slate-950'
+                                : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                            }`}
+                          >
+                            {o.routeNumber}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                              <span className="text-xs font-bold text-white truncate">{o.customerName}</span>
+                              {isTracking && (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  GPS en vivo
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 truncate">{o.address}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                            <button
+                              onClick={() => openFicha(o)}
+                              title="Ver ficha del pedido"
+                              className="px-2.5 py-1.5 rounded-xl bg-slate-700/40 border border-slate-600 text-slate-200 text-[11px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all inline-flex items-center gap-1"
+                            >
+                              <Icon name="eye" className="w-3 h-3" /> Ficha
+                            </button>
+                            {o.lat != null && o.lng != null && (
+                              <a
+                                href={`https://www.google.com/maps?q=${o.lat},${o.lng}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1.5 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[11px] font-bold hover:bg-sky-500/25 transition-all inline-flex items-center gap-1"
+                              >
+                                <Icon name="mapPin" className="w-3 h-3" /> Maps
+                              </a>
+                            )}
+                            {wa && (
+                              <a
+                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, tu pedido ${o.id} en Kiosko 247 está en camino`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/25 transition-all inline-flex items-center gap-1"
+                              >
+                                <Icon name="whatsapp" className="w-3 h-3" /> WA
+                              </a>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Acción principal: ocupa todo el ancho del contenedor del pedido */}
+                        {o.status === 'listo' && (
+                          <button
+                            onClick={() => {
+                              onUpdateOrderStatus(o.id, 'en_camino');
+                              startCourierTracking(o.id);
+                            }}
+                            className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <Icon name="mapPin" className="w-4 h-4" /> Iniciar entrega (rastreo GPS en vivo)
+                          </button>
+                        )}
+                        {o.status === 'en_camino' && (
+                          <div className="space-y-2">
+                            {isTracking ? (
+                              <button
+                                onClick={stopCourierTracking}
+                                className="w-full py-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                              >
+                                <Icon name="mapPin" className="w-4 h-4" /> Detener rastreo en vivo
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => startCourierTracking(o.id)}
+                                className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                              >
+                                <Icon name="mapPin" className="w-4 h-4" /> Compartir GPS en vivo
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onUpdateOrderStatus(o.id, 'entregado')}
+                              className="w-full py-2.5 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold hover:bg-sky-500/25 transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Icon name="check" className="w-4 h-4" /> Marcar entregado
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {activeDeliveries.withoutCoords.length > 0 && (
+                    <div className="px-3 py-2 rounded-2xl bg-slate-800/40 border border-slate-700/50 text-[11px] text-slate-400">
+                      {activeDeliveries.withoutCoords.length} entrega(s) sin coordenadas (no aparecen en el mapa):{' '}
+                      {activeDeliveries.withoutCoords.map((o) => o.id).join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Vista Historial: pedidos finalizados (entregado + cancelado) */}
+          {ordersView === 'historial' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60">
+                  <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Finalizados</span>
+                  <span className="text-xl sm:text-2xl font-black text-white">{histFiltered.length}</span>
+                </div>
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60">
+                  <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Entregados</span>
+                  <span className="text-xl sm:text-2xl font-black text-emerald-400">{histEntregados.length}</span>
+                </div>
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60">
+                  <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Cancelados</span>
+                  <span className="text-xl sm:text-2xl font-black text-rose-400">{histCancelados.length}</span>
+                </div>
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60">
+                  <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Ingresos (entregados)</span>
+                  <span className="text-lg sm:text-xl font-black text-teal-400 truncate">
+                    {formatUsd(histRevenue)}
+                    {rate?.rate > 0 && (
+                      <span className="hidden sm:block text-[10px] text-slate-400 font-semibold">
+                        {formatBs(usdToBs(histRevenue, rate.rate))}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
+                  {[
+                    { key: 'todos', label: 'Todos', count: finalizedOrders.length },
+                    { key: 'entregado', label: 'Entregados', count: finalizedOrders.filter((o) => o.status === 'entregado').length },
+                    { key: 'cancelado', label: 'Cancelados', count: finalizedOrders.filter((o) => o.status === 'cancelado').length }
+                  ].map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setHistStatus(f.key)}
+                      className={`px-3.5 sm:px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap border transition-all shrink-0 ${
+                        histStatus === f.key
+                          ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                          : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                      }`}
+                    >
+                      {f.label}
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{f.count}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2.5">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0 flex-1">
+                    {[
+                      { key: 'hoy', label: 'Hoy' },
+                      { key: '7d', label: 'Últimos 7 días' },
+                      { key: 'todo', label: 'Todo' }
+                    ].map((r) => (
+                      <button
+                        key={r.key}
+                        onClick={() => setHistRange(r.key)}
+                        className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                          histRange === r.key
+                            ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                            : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="relative flex-1 sm:max-w-xs">
+                    <Icon name="search" className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <input
+                      value={histSearch}
+                      onChange={(e) => setHistSearch(e.target.value)}
+                      placeholder="Buscar por pedido, cliente o teléfono…"
+                      className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-slate-900/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500/60 transition-all"
+                    />
+                    {histSearch && (
+                      <button
+                        onClick={() => setHistSearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                        title="Limpiar búsqueda"
+                      >
+                        <Icon name="x" className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {histFiltered.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
+                  <Icon name="list" className="w-10 h-10 text-slate-700 mx-auto" />
+                  <p className="font-bold text-slate-400">No hay pedidos finalizados con este filtro</p>
+                  <button
+                    onClick={() => { setHistStatus('todos'); setHistSearch(''); setHistRange('7d'); }}
+                    className="text-[11px] font-semibold text-teal-400 hover:text-teal-300"
+                  >
+                    Limpiar filtros
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Desktop: tabla */}
+                  <div className="hidden sm:block rounded-2xl overflow-hidden border border-slate-700/60 bg-slate-900/40">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-700/80 bg-slate-900/60 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                          <th className="p-3">Pedido</th>
+                          <th className="p-3">Cliente</th>
+                          <th className="p-3">Fecha</th>
+                          <th className="p-3">Tipo</th>
+                          <th className="p-3">Ítems</th>
+                          <th className="p-3">Total</th>
+                          <th className="p-3">Estado</th>
+                          <th className="p-3 text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-700/50 text-sm">
+                        {histFiltered.map((o) => {
+                          const st = STATUS_STYLES[o.status] || STATUS_STYLES.entregado;
+                          const d = parseOrderDate(o);
+                          return (
+                            <tr key={o.id} className="hover:bg-slate-700/30 transition-colors">
+                              <td className="p-3 font-mono text-xs font-bold text-teal-400">{o.id}</td>
+                              <td className="p-3">
+                                <p className="font-bold text-slate-100 text-xs">{o.customerName}</p>
+                                <p className="text-[11px] text-slate-400">{o.phone}</p>
+                              </td>
+                              <td className="p-3 text-xs text-slate-400 whitespace-nowrap">
+                                {isNaN(d) ? '—' : `${d.toLocaleDateString('es-VE')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                              </td>
+                              <td className="p-3 text-xs text-slate-300">{o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}</td>
+                              <td className="p-3 text-xs text-slate-400 line-clamp-1 max-w-xs">
+                                {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
+                              </td>
+                              <td className="p-3 font-bold text-white text-xs whitespace-nowrap">{formatUsd(o.total)}</td>
+                              <td className="p-3">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                                  {({ entregado: 'Entregado', cancelado: 'Cancelado' })[o.status]}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  <button
+                                    onClick={() => openFicha(o)}
+                                    title="Ver ficha del pedido"
+                                    className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-300 hover:bg-teal-500/25 transition-all inline-flex items-center gap-1.5 text-[11px] font-bold"
+                                  >
+                                    <Icon name="eye" className="w-3.5 h-3.5" /> Ficha
+                                  </button>
+                                  {o.status === 'cancelado' && (
+                                    <button
+                                      onClick={() => onDeleteOrder(o)}
+                                      className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 transition-all inline-flex items-center gap-1.5 text-[11px] font-bold"
+                                    >
+                                      <Icon name="trash" className="w-3.5 h-3.5" /> Eliminar
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Mobile: cards */}
+                  <div className="grid grid-cols-1 gap-3 sm:hidden">
+                    {histFiltered.map((o) => {
+                      const st = STATUS_STYLES[o.status] || STATUS_STYLES.entregado;
+                      const d = parseOrderDate(o);
+                      return (
+                        <div key={o.id} className={`p-3 rounded-2xl bg-slate-800/60 border ${st.ring} space-y-1.5`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${st.badge}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                              {({ entregado: 'Entregado', cancelado: 'Cancelado' })[o.status]}
+                            </span>
+                          </div>
+                          <p className="font-bold text-white text-sm">{o.customerName}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {isNaN(d) ? '—' : `${d.toLocaleDateString('es-VE')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                            {' · '}{o.type === 'delivery' ? 'Entrega' : 'Retiro'}
+                          </p>
+                          <p className="text-[11px] text-slate-400 line-clamp-2">
+                            {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
+                          </p>
+                          <div className="flex items-center justify-between gap-2 pt-1">
+                            <span className="text-sm font-black text-teal-400">{formatUsd(o.total)}</span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => openFicha(o)}
+                                className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-300 hover:bg-teal-500/25 transition-all"
+                                title="Ver ficha del pedido"
+                              >
+                                <Icon name="eye" className="w-3.5 h-3.5" />
+                              </button>
+                              {o.status === 'cancelado' && (
+                                <button
+                                  onClick={() => onDeleteOrder(o)}
+                                  className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 transition-all"
+                                  title="Eliminar pedido"
+                                >
+                                  <Icon name="trash" className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -6184,6 +8174,78 @@ function AdminView({
               ))}
             </div>
           )}
+
+          {/* Notificaciones Push */}
+          <div className="p-4 sm:p-6 rounded-3xl bg-slate-800/60 border border-slate-700 space-y-4">
+            <div className="flex items-center gap-2">
+              <Icon name="bell" className="w-5 h-5 text-teal-400" />
+              <div>
+                <h4 className="font-bold text-white text-sm">Notificaciones Push</h4>
+                <p className="text-[11px] text-slate-400">
+                  Envía avisos directos al teléfono de los clientes que activaron las notificaciones.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2.5">
+                <span className="text-xs font-bold text-slate-200 block">Notificación a todos</span>
+                <input
+                  type="text"
+                  value={broadcastTitle}
+                  onChange={(e) => setBroadcastTitle(e.target.value)}
+                  placeholder="Título (ej: ¡Nuevas promos!)"
+                  maxLength={80}
+                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+                />
+                <input
+                  type="text"
+                  value={broadcastBody}
+                  onChange={(e) => setBroadcastBody(e.target.value)}
+                  placeholder="Mensaje (ej: Visita la tienda y aprovecha 2x1 esta semana)"
+                  maxLength={200}
+                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+                />
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={() => handlePushBroadcast()}
+                    disabled={!broadcastTitle.trim()}
+                    className="py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-50 disabled:pointer-events-none transition-all active:scale-95"
+                  >
+                    Enviar a todos
+                  </button>
+                  <button
+                    onClick={() => handlePushTest()}
+                    className="py-2.5 rounded-xl bg-slate-700 text-slate-200 font-bold text-xs hover:bg-slate-600 transition-all active:scale-95"
+                  >
+                    Enviar prueba
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2.5">
+                <span className="text-xs font-bold text-slate-200 block">Recordatorio de deuda</span>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={reminderPhone}
+                  onChange={(e) => setReminderPhone(e.target.value)}
+                  placeholder="Teléfono del cliente (0412 1234567)"
+                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+                />
+                <button
+                  onClick={() => handlePushReminder()}
+                  disabled={!reminderPhone.trim()}
+                  className="w-full py-2.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-xs hover:bg-amber-500/30 transition-all disabled:opacity-50 disabled:pointer-events-none active:scale-95"
+                >
+                  Enviar recordatorio
+                </button>
+                <p className="text-[10px] text-slate-500">
+                  El cliente recibe: "Recordatorio de deuda" con el saldo pendiente.
+                </p>
+              </div>
+            </div>
+          </div>
 
           {/* Promo Editor Modal */}
           {isPromoModalOpen && promoDraft && (
@@ -6401,10 +8463,23 @@ function AdminView({
       {/* Tab 6: Analytics */}
       {adminTab === 'analytics' && (
         <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl space-y-5 sm:space-y-6 backdrop-blur-md">
-          <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-            <Icon name="trendingUp" className="w-5 h-5 text-teal-400" />
-            Resumen de Métricas del Negocio
-          </h3>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+              <Icon name="trendingUp" className="w-5 h-5 text-teal-400" />
+              Resumen de Métricas del Negocio
+            </h3>
+            {lowStockMessage && (
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(lowStockMessage)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all text-xs font-bold w-fit"
+              >
+                <Icon name="whatsapp" className="w-4 h-4" />
+                Enviar alerta de stock bajo por WhatsApp
+              </a>
+            )}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
             <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
@@ -6438,6 +8513,55 @@ function AdminView({
                 )}
               </ul>
             </div>
+
+            {/* Tendencia de ventas por día */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm">Ventas por Día (últimos 7 días)</h4>
+              <div className="flex items-end gap-2 h-32">
+                {salesByDay.map((d) => {
+                  const max = Math.max(...salesByDay.map((x) => x.orders), 1);
+                  const h = Math.round((d.orders / max) * 100);
+                  return (
+                    <div key={d.key} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                      <span className="text-[10px] font-bold text-slate-300">{d.orders}</span>
+                      <div
+                        className={`w-full rounded-t-lg ${d.orders > 0 ? 'bg-gradient-to-t from-teal-600 to-emerald-400' : 'bg-slate-700/50'}`}
+                        style={{ height: `${Math.max(d.orders > 0 ? h : 4, 4)}%` }}
+                      />
+                      <span className="text-[9px] text-slate-500 capitalize truncate">{d.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {salesByDay.some((d) => d.revenue > 0) && (
+                <p className="text-[11px] text-slate-400">
+                  Ingresos (entregados) 7 días:{' '}
+                  <span className="font-bold text-teal-300">{formatUsd(salesByDay.reduce((a, d) => a + d.revenue, 0))}</span>
+                </p>
+              )}
+            </div>
+
+            {/* Segmentación de clientes */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm">Clientes con Mayor Actividad</h4>
+              {topCustomers.length === 0 ? (
+                <p className="text-xs text-slate-400">Aún no hay pedidos registrados.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {topCustomers.map((c, idx) => (
+                    <li key={c.phone} className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-slate-300 font-medium truncate">
+                        #{idx + 1} {c.phone}
+                      </span>
+                      <span className="text-teal-400 font-bold shrink-0">{c.orders} pedidos</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-[11px] text-slate-500">
+                Total clientes registrados: <span className="font-bold text-white">{allCustomers.length}</span>
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -6455,12 +8579,206 @@ function AdminView({
           onDismiss={handleDismissOverdue}
         />
       )}
+
+      {proofOrder && (
+        <PaymentProofModal
+          order={proofOrder}
+          onClose={() => setProofOrder(null)}
+          onUpdateOrderPayment={onUpdateOrderPayment}
+        />
+      )}
+
+      {fichaOrder && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-[70] overflow-y-auto animate-fade-in"
+          style={{ top: headerHeight }}
+          role="dialog"
+          aria-label={`Ficha del pedido ${fichaOrder.id}`}
+        >
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={closeFicha} />
+          <div className="relative min-h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
+            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col">
+              <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">
+                <div>
+                  <h3 className="font-black text-white text-sm flex items-center gap-2">
+                    <Icon name="eye" className="w-4 h-4 text-teal-400" />
+                    Ficha del pedido
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Diseño original — {fichaOrder.id}</p>
+                </div>
+                <button
+                  onClick={closeFicha}
+                  className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-all shrink-0"
+                  aria-label="Cerrar ficha"
+                >
+                  <Icon name="x" className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-4 sm:p-5">
+                <OrderStepsTimeline order={fichaOrder} />
+                <div className="mt-4">
+                  {renderOrderCard(fichaOrder, { inFicha: true })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Modal para que el admin revise el comprobante de pago a pantalla completa
+// y confirme o rechace el pago digital.
+function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up">
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm sm:text-base font-black text-white">
+              Comprobante #{order.id}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago digital'} ·{' '}
+              {order.customerName}
+              {order.paymentReference ? ` · Ref ${order.paymentReference}` : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-4 sm:p-5 space-y-4">
+          {order.paymentProof ? (
+            <img
+              src={order.paymentProof}
+              alt="Comprobante de pago"
+              className="w-full rounded-2xl border border-slate-700 object-contain max-h-[55vh]"
+            />
+          ) : (
+            <p className="text-xs text-slate-400 bg-slate-800/60 p-4 rounded-2xl text-center">
+              Este pedido no tiene comprobante adjunto.
+            </p>
+          )}
+          {order.paymentStatus === 'pendiente' && (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => onUpdateOrderPayment(order.id, 'confirmado')}
+                className="py-3 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Icon name="check" className="w-4 h-4" />
+                Confirmar pago
+              </button>
+              <button
+                onClick={() => onUpdateOrderPayment(order.id, 'rechazado')}
+                className="py-3 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Icon name="x" className="w-4 h-4" />
+                Rechazar pago
+              </button>
+            </div>
+          )}
+          {order.paymentStatus === 'confirmado' && (
+            <p className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-xl text-center font-bold">
+              Pago confirmado
+            </p>
+          )}
+          {order.paymentStatus === 'rechazado' && (
+            <div className="space-y-2">
+              <p className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 p-3 rounded-xl text-center font-bold">
+                Pago rechazado
+              </p>
+              <p className="text-[11px] text-slate-400 text-center">
+                El cliente verá la opción de subir otro comprobante o pasar el pedido
+                a cuenta (si es beneficiado).
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Chat interno de un pedido para el admin: consulta y envía mensajes con el
+// cliente (el cliente responde desde el rastreo del pedido). Se actualiza cada 5s.
+function OrderChat({ order }) {
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const listRef = useRef(null);
+
+  const load = async () => {
+    const res = await api.getOrderMessages(order.id, order.phone);
+    if (res.ok && Array.isArray(res.data.messages)) setMessages(res.data.messages);
+  };
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, [order.id]);
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages]);
+
+  const send = async () => {
+    const value = text.trim();
+    if (!value || sending) return;
+    setSending(true);
+    const res = await api.sendOrderMessage(order.id, order.phone, value);
+    setSending(false);
+    if (res.ok) {
+      setText('');
+      load();
+    }
+  };
+
+  return (
+    <div className="rounded-2xl bg-slate-900/60 border border-slate-700 overflow-hidden">
+      <div className="p-2.5 border-b border-slate-700/70 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
+          <Icon name="whatsapp" className="w-3.5 h-3.5 text-emerald-400" />
+          Chat con el cliente
+        </span>
+        <span className="text-[9px] text-slate-500">se actualiza solo</span>
+      </div>
+      <div ref={listRef} className="p-2.5 space-y-2 max-h-44 overflow-y-auto">
+        {messages.length === 0 && (
+          <p className="text-[11px] text-slate-500 text-center py-2">Sin mensajes aún.</p>
+        )}
+        {messages.map((m, idx) => (
+          <ChatBubble key={m.id || idx} m={m} order={order} perspective="admin" />
+        ))}
+      </div>
+      <div className="p-2.5 border-t border-slate-700/70 flex gap-2">
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') send();
+          }}
+          placeholder="Responder al cliente…"
+          maxLength={300}
+          className="flex-1 min-w-0 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+        />
+        <button
+          onClick={send}
+          disabled={sending || !text.trim()}
+          className="shrink-0 px-3 py-2 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-50 disabled:pointer-events-none transition-all active:scale-95"
+        >
+          Enviar
+        </button>
+      </div>
     </div>
   );
 }
 
 const BEAUTY_CATEGORIES = ['higiene', 'limpieza', 'perfum', 'cosmetic', 'belleza', 'farmacia', 'salud', 'cuidado'];
-
 // Toast persistente de cobro vencido. No se quita solo; el admin debe pulsar
 // "Enviar cobro" (abre WhatsApp) o "✕" (descartar en esta sesión).
 function OverdueCollectionToast({ collection, onSend, onDismiss }) {
@@ -7921,7 +10239,166 @@ function DeleteOrderModal({ order, onClose, onConfirm }) {
   );
 }
 
-function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder }) {
+// Burbuja de chat compartida por cliente y admin: separa los mensajes a lados
+// opuestos según quién los envió, con avatar (inicial del nombre), nombre y hora.
+function ChatBubble({ m, order, perspective = 'customer' }) {
+  const mine = m.sender === perspective;
+  const isCustomerMsg = m.sender === 'customer';
+  const name = isCustomerMsg ? order.customerName || 'Cliente' : m.senderName || 'Tienda';
+  const initial = (name || 'T').trim().charAt(0).toUpperCase() || 'T';
+  const time = m.at
+    ? new Date(m.at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  return (
+    <div className={`flex items-end gap-1.5 ${mine ? 'justify-end' : 'justify-start'}`}>
+      {!mine && (
+        <span className="w-6 h-6 rounded-full bg-slate-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">
+          {initial}
+        </span>
+      )}
+      <div className={`max-w-[80%] min-w-0 flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+        <span className={`text-[9px] font-bold px-1 ${mine ? 'text-teal-300/80' : 'text-slate-400'}`}>{name}</span>
+        <div
+          className={`px-3 py-2 rounded-2xl text-xs leading-snug ${
+            mine ? 'bg-teal-500/20 text-teal-100 rounded-br-md' : 'bg-slate-700/70 text-slate-200 rounded-bl-md'
+          }`}
+        >
+          <p className="break-words">{m.text}</p>
+        </div>
+        {time && <span className="text-[9px] mt-0.5 px-1 opacity-70 text-slate-500">{time}</span>}
+      </div>
+      {mine && (
+        <span className="w-6 h-6 rounded-full bg-teal-500 text-slate-950 flex items-center justify-center text-[10px] font-black shrink-0">
+          {initial}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Tarjeta de estado del pago digital visible para el cliente: si fue rechazado
+// ofrece subir otro comprobante o, para beneficiados, pasar el pedido a cuenta.
+// Si fue confirmado, lo avisa.
+function PaymentStatusCard({ order, isBenefited, onOrderUpdated, addToast }) {
+  const [uploading, setUploading] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const fileRef = useRef(null);
+
+  const applyUpdated = (res) => {
+    if (res.ok && res.data?.state?.orders) {
+      const updated = res.data.state.orders.find((o) => o.id === order.id);
+      if (updated) onOrderUpdated?.(updated);
+    }
+  };
+
+  const handlePick = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      addToast('La imagen supera 8 MB. Elige una más liviana.', 'error');
+      return;
+    }
+    setUploading(true);
+    try {
+      const proof = await compressImage(file);
+      const res = await api.attachPaymentProof(order.id, order.phone, proof, order.paymentReference || '');
+      if (res.ok) {
+        applyUpdated(res);
+        addToast('Comprobante enviado. Tu pago está en revisión.', 'success');
+      } else {
+        addToast(res.data?.error || 'No se pudo adjuntar el comprobante', 'error');
+      }
+    } catch {
+      addToast('No se pudo procesar la imagen. Prueba con otra.', 'error');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleToAccount = async () => {
+    if (converting) return;
+    setConverting(true);
+    try {
+      const res = await api.convertOrderToCredit(order.id, order.phone);
+      if (res.ok) {
+        applyUpdated(res);
+        addToast('Pedido enviado a tu cuenta.', 'success');
+      } else {
+        addToast(res.data?.error || 'No se pudo pasar el pedido a cuenta', 'error');
+      }
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  if (!order.paymentMethod || order.paymentMethod === 'efectivo') return null;
+
+  const status = order.paymentStatus || 'pendiente';
+
+  if (status === 'confirmado') {
+    return (
+      <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/40 p-3 flex items-center gap-2.5">
+        <Icon name="check" className="w-5 h-5 text-emerald-400 shrink-0" />
+        <div>
+          <p className="text-sm font-bold text-emerald-300">Pago confirmado</p>
+          <p className="text-[11px] text-emerald-200/70">¡Gracias! Tu pago fue aceptado.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === 'rechazado') {
+    return (
+      <div className="rounded-xl bg-rose-500/10 border border-rose-500/40 p-3 space-y-3">
+        <div className="flex items-center gap-2.5">
+          <Icon name="alertTriangle" className="w-5 h-5 text-rose-400 shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-rose-300">Tu pago fue rechazado</p>
+            <p className="text-[11px] text-rose-200/70">
+              {isBenefited
+                ? 'Puedes subir otro comprobante o pasar el pedido a tu cuenta.'
+                : 'Sube otro comprobante para que lo revisemos de nuevo.'}
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-2">
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="py-2.5 px-3 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-xs font-bold hover:bg-teal-500/25 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+          >
+            <Icon name="upload" className="w-4 h-4" />
+            {uploading ? 'Subiendo…' : 'Subir otro comprobante'}
+          </button>
+          {isBenefited && (
+            <button
+              onClick={handleToAccount}
+              disabled={converting}
+              className="py-2.5 px-3 rounded-xl bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 text-xs font-bold hover:bg-indigo-500/25 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+            >
+              <Icon name="creditCard" className="w-4 h-4" />
+              {converting ? 'Enviando…' : 'Añadir a mi cuenta'}
+            </button>
+          )}
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePick} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-amber-500/10 border border-amber-500/40 p-3 flex items-center gap-2.5">
+      <Icon name="clock" className="w-5 h-5 text-amber-400 shrink-0" />
+      <div>
+        <p className="text-sm font-bold text-amber-300">Pago en revisión</p>
+        <p className="text-[11px] text-amber-200/70">Estamos verificando tu comprobante.</p>
+      </div>
+    </div>
+  );
+}
+
+function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast }) {
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
   const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
@@ -7981,6 +10458,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
               <span className="text-teal-300 font-bold">Retiro por mostrador</span>
             )}
           </div>
+
+          {/* Estado del pago digital (confirmado / en revisión / rechazado con acciones) */}
+          <PaymentStatusCard order={order} isBenefited={isBenefited} onOrderUpdated={onOrderUpdated} addToast={addToast} />
 
           {/* Mapa de entrega a domicilio */}
           <DeliveryMap order={order} />

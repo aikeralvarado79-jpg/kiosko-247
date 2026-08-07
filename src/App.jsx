@@ -577,6 +577,44 @@ function RateBanner({ rate }) {
   );
 }
 
+};
+
+const useAction = (action, { 
+  message = 'Procesando...', 
+  onSuccess, 
+  onError,
+  idempotencyKey 
+} = {}) => {
+  const [loading, setLoading] = useState(false);
+  const pendingRef = useRef(new Set());
+  
+  const execute = useCallback(async (...args) => {
+    const key = idempotencyKey ? idempotencyKey(...args) : JSON.stringify(args);
+    if (pendingRef.current.has(key)) return;
+    if (loading) return;
+    
+    pendingRef.current.add(key);
+    setLoading(true);
+    addToast(message, 'info');
+    
+    try {
+      const result = await action(...args);
+      addToast('Listo', 'success');
+      onSuccess?.(result);
+      return result;
+    } catch (e) {
+      addToast(e.message || 'Error', 'error');
+      onError?.(e);
+      throw e;
+    } finally {
+      setLoading(false);
+      pendingRef.current.delete(key);
+    }
+  }, [action, loading, message, onSuccess, onError, idempotencyKey]);
+  
+  return { execute, loading };
+};
+
 export default function App() {
   // App views: 'customer' | 'admin'
   const [activeView, setActiveView] = useState('customer');

@@ -6028,6 +6028,7 @@ function AdminView({
   const [histRange, setHistRange] = useState('7d'); // hoy | 7d | todo
   const [showStorePicker, setShowStorePicker] = useState(false);
   const [proofOrder, setProofOrder] = useState(null);
+  const [fichaOrder, setFichaOrder] = useState(null);
   const [broadcastTitle, setBroadcastTitle] = useState('');
   const [broadcastBody, setBroadcastBody] = useState('');
   const [reminderPhone, setReminderPhone] = useState('');
@@ -6652,6 +6653,313 @@ function AdminView({
     return `⚠️ *ALERTA DE STOCK BAJO* en Kiosko 247\n\nProductos con pocas unidades:\n${lines.join('\n')}\n\nRevisa el inventario y repón lo antes posible.`;
   }, [lowStockProducts]);
 
+
+  const renderOrderCard = (order) => {
+    const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
+    const wa = formatPhoneWhatsApp(order.phone);
+    const sem = semaforoOf(order);
+    const missingStock = lowStockInOrder(order);
+    const isPinned = pinnedOrders.includes(order.id);
+    return (
+      <div
+        key={order.id}
+        className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${st.ring}`}
+      >
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
+              {['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
+                <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 shrink-0 ${SEM_TONES[sem.tone]}`}>
+                  <Icon name="clock" className="w-3 h-3" />
+                  {sem.text}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              <span
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
+                {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
+              </span>
+              {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+                <span
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold ${
+                    order.paymentStatus === 'confirmado'
+                      ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
+                      : order.paymentStatus === 'rechazado'
+                        ? 'border-rose-400/40 bg-rose-500/15 text-rose-300'
+                        : 'border-amber-400/40 bg-amber-500/15 text-amber-300'
+                  }`}
+                >
+                  <Icon name="creditCard" className="w-3 h-3" />
+                  {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago'} ·{' '}
+                  {({ pendiente: 'En revisión', confirmado: 'Confirmado', rechazado: 'Rechazado' })[order.paymentStatus] || 'Pendiente'}
+                </span>
+              )}
+              {order.credit && (
+                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
+                  <Icon name="creditCard" className="w-3 h-3" />
+                  A cuenta
+                </span>
+              )}
+              <button
+                onClick={() => togglePin(order.id)}
+                className={`p-1.5 rounded-lg border transition-all ${
+                  isPinned
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                    : 'bg-slate-900/60 text-slate-500 border-slate-700 hover:text-amber-300'
+                }`}
+                title={isPinned ? 'Quitar de fijados' : 'Fijar pedido arriba'}
+              >
+                <Icon name="pin" className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-bold text-white text-base">{order.customerName}</h4>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-xs text-slate-300 flex items-center gap-1">
+                <Icon name="phone" className="w-3.5 h-3.5 text-slate-400" />
+                {order.phone}
+              </p>
+              {wa && (
+                <a
+                  href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${order.customerName}, sobre tu pedido ${order.id} en Kiosko 247`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+                >
+                  <Icon name="whatsapp" className="w-3.5 h-3.5" />
+                  WhatsApp
+                </a>
+              )}
+            </div>
+            {order.type === 'delivery' ? (
+              <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
+                <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Entrega: {order.address}</span>
+                {order.lat != null && order.lng != null && (
+                  <a
+                    href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
+                  >
+                    <Icon name="mapPin" className="w-3 h-3" />
+                    Abrir en Maps
+                  </a>
+                )}
+                {order.courier_lat != null && order.courier_lng != null && (
+                  <span className="text-[10px] font-bold text-emerald-300 ml-auto">
+                    Repartidor en vivo
+                  </span>
+                )}
+              </p>
+            ) : (
+              <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
+                🛍️ Retiro por Mostrador
+              </span>
+            )}
+          </div>
+
+          {/* Order Line Items */}
+          <div className="p-3 rounded-2xl bg-slate-900/80 space-y-1.5 text-xs text-slate-300">
+            {order.items.map((it, idx) => (
+              <div key={idx} className="flex justify-between">
+                <span>{it.quantity}x {it.name}</span>
+                <span className="font-bold text-white">
+                  {formatUsd(it.price * it.quantity)}
+                  {rate?.rate > 0 && (
+                    <span className="block text-[10px] text-slate-500 text-right">
+                      {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
+            <div className="pt-2 border-t border-slate-800 flex justify-between font-bold text-white text-sm">
+              <span>Total</span>
+              <span className="text-teal-400 text-right">
+                {formatUsd(order.total)}
+                {rate?.rate > 0 && (
+                  <span className="block text-[10px] text-teal-300/90">
+                    {formatBs(usdToBs(order.total, rate.rate))}
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+
+          {missingStock.length > 0 && (
+            <div className="flex items-start gap-1.5 p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] font-semibold">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>
+                Sin stock suficiente: {missingStock.map((m) => `${m.name} (${m.have}/${m.need})`).join(', ')}
+              </span>
+            </div>
+          )}
+          {sem.tone === 'rose' && sem.label === 'Supera lo estimado' && (
+            <div className="flex items-center gap-1.5 p-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px] font-bold">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5 shrink-0" />
+              Lleva más del tiempo estimado
+            </div>
+          )}
+
+          {order.notes && (
+            <p className="text-xs text-slate-400 italic bg-slate-900/40 p-2 rounded-xl">
+              "{order.notes}"
+            </p>
+          )}
+
+          {/* Pago digital: comprobante y estado */}
+          {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+            <div className="space-y-2">
+              {order.paymentReference && (
+                <p className="text-xs text-slate-300 bg-slate-900/40 p-2 rounded-xl">
+                  Ref: <span className="font-mono font-bold text-white">{order.paymentReference}</span>
+                </p>
+              )}
+              {order.paymentProof ? (
+                <button
+                  onClick={() => setProofOrder(order)}
+                  className="w-full flex items-center gap-3 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
+                >
+                  <img
+                    src={order.paymentProof}
+                    alt="Comprobante de pago"
+                    className="w-14 h-14 rounded-lg object-cover border border-slate-700"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold text-white">Ver comprobante</span>
+                    <span className="block text-[11px] text-slate-400">Toca para ampliar</span>
+                  </span>
+                  <Icon name="eye" className="w-4 h-4 text-teal-400 ml-auto shrink-0" />
+                </button>
+              ) : (
+                <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
+                  <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+                  Pago digital sin comprobante adjunto
+                </p>
+              )}
+              {order.paymentStatus === 'rechazado' && (
+                <p className="text-xs text-rose-300/90 bg-rose-500/10 border border-rose-500/30 p-2 rounded-xl flex items-start gap-1.5">
+                  <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  Pago rechazado: el cliente debe subir otro comprobante o
+                  pasar el pedido a cuenta (si es beneficiado) antes de avanzar.
+                </p>
+              )}
+              {order.paymentStatus === 'pendiente' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => onUpdateOrderPayment(order.id, 'confirmado')}
+                    className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Icon name="check" className="w-3.5 h-3.5" />
+                    Confirmar pago
+                  </button>
+                  <button
+                    onClick={() => onUpdateOrderPayment(order.id, 'rechazado')}
+                    className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Icon name="x" className="w-3.5 h-3.5" />
+                    Rechazar pago
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Chat con el cliente */}
+          <OrderChat order={order} />
+        </div>
+
+        {/* Status Update Controls */}
+        <div className="pt-3 border-t border-slate-700/60 space-y-2">
+          <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { key: 'pendiente', label: 'Pendiente' },
+              { key: 'en_preparacion', label: 'En Prep.' },
+              { key: 'listo', label: 'Listo' },
+              ...(order.type === 'delivery' ? [{ key: 'en_camino', label: 'En Camino' }] : []),
+              { key: 'entregado', label: 'Entregado' },
+              { key: 'cancelado', label: 'Cancelado' }
+            ].map((stBtn) => (
+              <button
+                key={stBtn.key}
+                onClick={() => onUpdateOrderStatus(order.id, stBtn.key)}
+                className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
+                  order.status === stBtn.key
+                    ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
+                    : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
+                }`}
+              >
+                {stBtn.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Modo Repartidor: comparte el GPS mientras el pedido va en camino */}
+          {order.type === 'delivery' && order.status === 'en_camino' && (
+            <div className="pt-1">
+              {courierOrderId === order.id && courierActive ? (
+                <button
+                  onClick={stopCourierTracking}
+                  className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="mapPin" className="w-3.5 h-3.5" />
+                  Detener rastreo en vivo
+                </button>
+              ) : (
+                <button
+                  onClick={() => startCourierTracking(order.id)}
+                  className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="mapPin" className="w-3.5 h-3.5" />
+                  Comenzar entrega (GPS en vivo)
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Aprobar / Rechazar pedido a crédito (solo pendiente) */}
+          {order.credit && order.status === 'pendiente' && (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => onUpdateOrderStatus(order.id, 'en_preparacion')}
+                className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Icon name="check" className="w-3.5 h-3.5" />
+                Aceptar y preparar
+              </button>
+              <button
+                onClick={() => onUpdateOrderStatus(order.id, 'cancelado')}
+                className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Icon name="x" className="w-3.5 h-3.5" />
+                Rechazar
+              </button>
+            </div>
+          )}
+
+          {/* Eliminar pedido cancelado (para no acumular en la lista) */}
+          {order.status === 'cancelado' && (
+            <button
+              onClick={() => onDeleteOrder(order)}
+              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+            >
+              <Icon name="trash" className="w-3.5 h-3.5" />
+              Eliminar pedido
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-5 sm:space-y-8 animate-fade-in">
       {/* Admin Top Dashboard Header */}
@@ -7040,311 +7348,7 @@ function AdminView({
                 <p className="font-bold text-slate-400">No hay pedidos con este estado</p>
               </div>
             ) : (
-              filteredOrders.map((order) => {
-                const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
-                const wa = formatPhoneWhatsApp(order.phone);
-                const sem = semaforoOf(order);
-                const missingStock = lowStockInOrder(order);
-                const isPinned = pinnedOrders.includes(order.id);
-                return (
-                  <div
-                    key={order.id}
-                    className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${st.ring}`}
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
-                          {['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
-                            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 shrink-0 ${SEM_TONES[sem.tone]}`}>
-                              <Icon name="clock" className="w-3 h-3" />
-                              {sem.text}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                          <span
-                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
-                            {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
-                          </span>
-                          {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
-                            <span
-                              className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold ${
-                                order.paymentStatus === 'confirmado'
-                                  ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
-                                  : order.paymentStatus === 'rechazado'
-                                    ? 'border-rose-400/40 bg-rose-500/15 text-rose-300'
-                                    : 'border-amber-400/40 bg-amber-500/15 text-amber-300'
-                              }`}
-                            >
-                              <Icon name="creditCard" className="w-3 h-3" />
-                              {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago'} ·{' '}
-                              {({ pendiente: 'En revisión', confirmado: 'Confirmado', rechazado: 'Rechazado' })[order.paymentStatus] || 'Pendiente'}
-                            </span>
-                          )}
-                          {order.credit && (
-                            <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
-                              <Icon name="creditCard" className="w-3 h-3" />
-                              A cuenta
-                            </span>
-                          )}
-                          <button
-                            onClick={() => togglePin(order.id)}
-                            className={`p-1.5 rounded-lg border transition-all ${
-                              isPinned
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                                : 'bg-slate-900/60 text-slate-500 border-slate-700 hover:text-amber-300'
-                            }`}
-                            title={isPinned ? 'Quitar de fijados' : 'Fijar pedido arriba'}
-                          >
-                            <Icon name="pin" className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 className="font-bold text-white text-base">{order.customerName}</h4>
-                        <div className="flex items-center gap-2 mt-1">
-                          <p className="text-xs text-slate-300 flex items-center gap-1">
-                            <Icon name="phone" className="w-3.5 h-3.5 text-slate-400" />
-                            {order.phone}
-                          </p>
-                          {wa && (
-                            <a
-                              href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${order.customerName}, sobre tu pedido ${order.id} en Kiosko 247`)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
-                            >
-                              <Icon name="whatsapp" className="w-3.5 h-3.5" />
-                              WhatsApp
-                            </a>
-                          )}
-                        </div>
-                        {order.type === 'delivery' ? (
-                          <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
-                            <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span>Entrega: {order.address}</span>
-                            {order.lat != null && order.lng != null && (
-                              <a
-                                href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
-                              >
-                                <Icon name="mapPin" className="w-3 h-3" />
-                                Abrir en Maps
-                              </a>
-                            )}
-                            {order.courier_lat != null && order.courier_lng != null && (
-                              <span className="text-[10px] font-bold text-emerald-300 ml-auto">
-                                Repartidor en vivo
-                              </span>
-                            )}
-                          </p>
-                        ) : (
-                          <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
-                            🛍️ Retiro por Mostrador
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Order Line Items */}
-                      <div className="p-3 rounded-2xl bg-slate-900/80 space-y-1.5 text-xs text-slate-300">
-                        {order.items.map((it, idx) => (
-                          <div key={idx} className="flex justify-between">
-                            <span>{it.quantity}x {it.name}</span>
-                            <span className="font-bold text-white">
-                              {formatUsd(it.price * it.quantity)}
-                              {rate?.rate > 0 && (
-                                <span className="block text-[10px] text-slate-500 text-right">
-                                  {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                        ))}
-                        <div className="pt-2 border-t border-slate-800 flex justify-between font-bold text-white text-sm">
-                          <span>Total</span>
-                          <span className="text-teal-400 text-right">
-                            {formatUsd(order.total)}
-                            {rate?.rate > 0 && (
-                              <span className="block text-[10px] text-teal-300/90">
-                                {formatBs(usdToBs(order.total, rate.rate))}
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-
-                      {missingStock.length > 0 && (
-                        <div className="flex items-start gap-1.5 p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] font-semibold">
-                          <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                          <span>
-                            Sin stock suficiente: {missingStock.map((m) => `${m.name} (${m.have}/${m.need})`).join(', ')}
-                          </span>
-                        </div>
-                      )}
-                      {sem.tone === 'rose' && sem.label === 'Supera lo estimado' && (
-                        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px] font-bold">
-                          <Icon name="alertTriangle" className="w-3.5 h-3.5 shrink-0" />
-                          Lleva más del tiempo estimado
-                        </div>
-                      )}
-
-                      {order.notes && (
-                        <p className="text-xs text-slate-400 italic bg-slate-900/40 p-2 rounded-xl">
-                          "{order.notes}"
-                        </p>
-                      )}
-
-                      {/* Pago digital: comprobante y estado */}
-                      {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
-                        <div className="space-y-2">
-                          {order.paymentReference && (
-                            <p className="text-xs text-slate-300 bg-slate-900/40 p-2 rounded-xl">
-                              Ref: <span className="font-mono font-bold text-white">{order.paymentReference}</span>
-                            </p>
-                          )}
-                          {order.paymentProof ? (
-                            <button
-                              onClick={() => setProofOrder(order)}
-                              className="w-full flex items-center gap-3 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
-                            >
-                              <img
-                                src={order.paymentProof}
-                                alt="Comprobante de pago"
-                                className="w-14 h-14 rounded-lg object-cover border border-slate-700"
-                              />
-                              <span className="min-w-0">
-                                <span className="block text-xs font-bold text-white">Ver comprobante</span>
-                                <span className="block text-[11px] text-slate-400">Toca para ampliar</span>
-                              </span>
-                              <Icon name="eye" className="w-4 h-4 text-teal-400 ml-auto shrink-0" />
-                            </button>
-                          ) : (
-                            <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
-                              <Icon name="alertTriangle" className="w-3.5 h-3.5" />
-                              Pago digital sin comprobante adjunto
-                            </p>
-                          )}
-                          {order.paymentStatus === 'rechazado' && (
-                            <p className="text-xs text-rose-300/90 bg-rose-500/10 border border-rose-500/30 p-2 rounded-xl flex items-start gap-1.5">
-                              <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                              Pago rechazado: el cliente debe subir otro comprobante o
-                              pasar el pedido a cuenta (si es beneficiado) antes de avanzar.
-                            </p>
-                          )}
-                          {order.paymentStatus === 'pendiente' && (
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                onClick={() => onUpdateOrderPayment(order.id, 'confirmado')}
-                                className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                              >
-                                <Icon name="check" className="w-3.5 h-3.5" />
-                                Confirmar pago
-                              </button>
-                              <button
-                                onClick={() => onUpdateOrderPayment(order.id, 'rechazado')}
-                                className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
-                              >
-                                <Icon name="x" className="w-3.5 h-3.5" />
-                                Rechazar pago
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Chat con el cliente */}
-                      <OrderChat order={order} />
-                    </div>
-
-                    {/* Status Update Controls */}
-                    <div className="pt-3 border-t border-slate-700/60 space-y-2">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { key: 'pendiente', label: 'Pendiente' },
-                          { key: 'en_preparacion', label: 'En Prep.' },
-                          { key: 'listo', label: 'Listo' },
-                          ...(order.type === 'delivery' ? [{ key: 'en_camino', label: 'En Camino' }] : []),
-                          { key: 'entregado', label: 'Entregado' },
-                          { key: 'cancelado', label: 'Cancelado' }
-                        ].map((stBtn) => (
-                          <button
-                            key={stBtn.key}
-                            onClick={() => onUpdateOrderStatus(order.id, stBtn.key)}
-                            className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
-                              order.status === stBtn.key
-                                ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
-                                : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
-                            }`}
-                          >
-                            {stBtn.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Modo Repartidor: comparte el GPS mientras el pedido va en camino */}
-                      {order.type === 'delivery' && order.status === 'en_camino' && (
-                        <div className="pt-1">
-                          {courierOrderId === order.id && courierActive ? (
-                            <button
-                              onClick={stopCourierTracking}
-                              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
-                            >
-                              <Icon name="mapPin" className="w-3.5 h-3.5" />
-                              Detener rastreo en vivo
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => startCourierTracking(order.id)}
-                              className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                            >
-                              <Icon name="mapPin" className="w-3.5 h-3.5" />
-                              Comenzar entrega (GPS en vivo)
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Aprobar / Rechazar pedido a crédito (solo pendiente) */}
-                      {order.credit && order.status === 'pendiente' && (
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => onUpdateOrderStatus(order.id, 'en_preparacion')}
-                            className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                          >
-                            <Icon name="check" className="w-3.5 h-3.5" />
-                            Aceptar y preparar
-                          </button>
-                          <button
-                            onClick={() => onUpdateOrderStatus(order.id, 'cancelado')}
-                            className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
-                          >
-                            <Icon name="x" className="w-3.5 h-3.5" />
-                            Rechazar
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Eliminar pedido cancelado (para no acumular en la lista) */}
-                      {order.status === 'cancelado' && (
-                        <button
-                          onClick={() => onDeleteOrder(order)}
-                          className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
-                        >
-                          <Icon name="trash" className="w-3.5 h-3.5" />
-                          Eliminar pedido
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
+              filteredOrders.map((order) => renderOrderCard(order))
             )}
           </div>
           </>
@@ -7377,10 +7381,20 @@ function AdminView({
                         <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
-                            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 ${SEM_TONES[sem.tone]}`}>
-                              <Icon name="clock" className="w-3 h-3" />
-                              {sem.text}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 ${SEM_TONES[sem.tone]}`}>
+                                <Icon name="clock" className="w-3 h-3" />
+                                {sem.text}
+                              </span>
+                              <button
+                                onClick={() => setFichaOrder(o)}
+                                title="Ver ficha del pedido"
+                                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-700/40 border border-slate-600 text-slate-200 text-[10px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all"
+                              >
+                                <Icon name="eye" className="w-3 h-3" />
+                                Ficha
+                              </button>
+                            </div>
                           </div>
                           <p className="text-sm font-bold text-white">{o.customerName}</p>
                           <p className="text-[11px] text-slate-400 line-clamp-2">
@@ -7561,6 +7575,13 @@ function AdminView({
                           <p className="text-[11px] text-slate-400 truncate">{o.address}</p>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                          <button
+                            onClick={() => setFichaOrder(o)}
+                            title="Ver ficha del pedido"
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-700/40 border border-slate-600 text-slate-200 text-[11px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all inline-flex items-center gap-1"
+                          >
+                            <Icon name="eye" className="w-3 h-3" /> Ficha
+                          </button>
                           {o.status === 'listo' && (
                             <button
                               onClick={() => onUpdateOrderStatus(o.id, 'en_camino')}
@@ -7636,15 +7657,25 @@ function AdminView({
                         <div className="space-y-2">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${
-                                o.type === 'delivery'
-                                  ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
-                                  : 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                              }`}
-                            >
-                              {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                                  o.type === 'delivery'
+                                    ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+                                    : 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                                }`}
+                              >
+                                {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
+                              </span>
+                              <button
+                                onClick={() => setFichaOrder(o)}
+                                title="Ver ficha del pedido"
+                                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-700/40 border border-slate-600 text-slate-200 text-[10px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all"
+                              >
+                                <Icon name="eye" className="w-3 h-3" />
+                                Ficha
+                              </button>
+                            </div>
                           </div>
                           <p className="font-bold text-white text-sm">{o.customerName}</p>
                           <p className="text-[11px] text-slate-400 line-clamp-2">
@@ -8393,6 +8424,33 @@ function AdminView({
           onClose={() => setProofOrder(null)}
           onUpdateOrderPayment={onUpdateOrderPayment}
         />
+      )}
+
+      {fichaOrder && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-md animate-fade-in" role="dialog" aria-label={`Ficha del pedido ${fichaOrder.id}`}>
+          <div className="absolute inset-0" onClick={() => setFichaOrder(null)} />
+          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col max-h-[92vh]">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+              <div>
+                <h3 className="font-black text-white text-sm flex items-center gap-2">
+                  <Icon name="eye" className="w-4 h-4 text-teal-400" />
+                  Ficha del pedido
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">Diseño original — {fichaOrder.id}</p>
+              </div>
+              <button
+                onClick={() => setFichaOrder(null)}
+                className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-all shrink-0"
+                aria-label="Cerrar ficha"
+              >
+                <Icon name="x" className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 sm:p-5 overflow-y-auto">
+              {renderOrderCard(fichaOrder)}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -2,7 +2,7 @@
 // Service Worker: caché del app shell para que la app funcione instalada y
 // offline en el móvil. Solo cachea estáticos (nunca /api, para no servir datos
 // viejos). Al actualizar el versionado, reemplaza la caché vieja.
-const CACHE = 'kiosko-app-shell-v3';
+const CACHE = 'kiosko-app-shell-v4';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -28,7 +28,7 @@ self.addEventListener('fetch', (event) => {
   // Para navegaciones: red primero, caché como respaldo (offline).
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-cache' })
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((cache) => cache.put(event.request, copy)).catch(() => {});

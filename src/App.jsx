@@ -4794,7 +4794,7 @@ const makePinIcon = (color, label) =>
 // Mapa interactivo (Leaflet + OpenStreetMap, sin API key) para la entrega a
 // domicilio. Muestra el comercio (origen), el destino del cliente, la posición
 // en vivo del repartidor y el camino sugerido repartidor → destino (OSRM).
-function DeliveryMap({ order, storeLocation, fill = false }) {
+function DeliveryMap({ order, storeLocation }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const layerGroupRef = useRef(null);
@@ -4816,17 +4816,7 @@ function DeliveryMap({ order, storeLocation, fill = false }) {
     }).addTo(map);
     mapRef.current = map;
     layerGroupRef.current = L.layerGroup().addTo(map);
-    // Al redimensionar el contenedor (GPS flotante con resize) Leaflet necesita
-    // invalidateSize para recalcular el viewport.
-    const ro =
-      typeof ResizeObserver !== 'undefined'
-        ? new ResizeObserver(() => {
-            if (mapRef.current) mapRef.current.invalidateSize();
-          })
-        : null;
-    if (ro) ro.observe(containerRef.current);
     return () => {
-      if (ro) ro.disconnect();
       map.remove();
       mapRef.current = null;
       layerGroupRef.current = null;
@@ -4928,11 +4918,10 @@ function DeliveryMap({ order, storeLocation, fill = false }) {
   if (!showMap) return null;
 
   return (
-    <div className={`space-y-2 ${fill ? 'h-full' : ''}`}>
-      <div className={`rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 ${fill ? 'h-full w-full rounded-none border-0' : ''}`}>
-        <div ref={containerRef} className={`w-full ${fill ? 'h-full' : 'h-44 sm:h-52'}`} />
+    <div className="space-y-2">
+      <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+        <div ref={containerRef} className="w-full h-44 sm:h-52" />
       </div>
-      {!fill && (
       <div className="flex flex-wrap gap-2">
         {store && storeUrl && (
           <a
@@ -4968,144 +4957,6 @@ function DeliveryMap({ order, storeLocation, fill = false }) {
           </a>
         )}
       </div>
-      )}
-    </div>
-  );
-}
-
-// GPS flotante que se superpone a la ficha del pedido: se puede arrastrar,
-// redimensionar desde los bordes/esquinas y minimizar con el botón "_" para
-// no estorbar mientras se revisa la ficha.
-function FloatingGpsPanel({ order, storeLocation, onClose }) {
-  const containerRef = useRef(null);
-  const [minimized, setMinimized] = useState(false);
-  const [box, setBox] = useState(() => ({
-    left: 12,
-    top: 76,
-    width: 300,
-    height: 260
-  }));
-
-  const drag = useRef(null);
-
-  const onPointerDown = (e, mode) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const start = { mode, x: e.clientX, y: e.clientY, box: box };
-    drag.current = start;
-    const rect = containerRef.current.getBoundingClientRect();
-    start.w = rect.width;
-    start.h = rect.height;
-    const onMove = (ev) => {
-      const d = drag.current;
-      if (!d) return;
-      const dx = ev.clientX - d.x;
-      const dy = ev.clientY - d.y;
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      if (d.mode === 'move') {
-        setBox((b) => ({
-          ...b,
-          left: Math.max(4, Math.min(vw - b.width - 4, b.left + dx)),
-          top: Math.max(4, Math.min(vh - b.height - 4, b.top + dy))
-        }));
-      } else {
-        const mw = 200;
-        const mh = 140;
-        let next = { ...d.box };
-        if (d.mode.includes('e')) next.width = Math.max(mw, Math.min(vw - d.box.left - 4, d.box.width + dx));
-        if (d.mode.includes('s')) next.height = Math.max(mh, Math.min(vh - d.box.top - 4, d.box.height + dy));
-        if (d.mode.includes('w')) {
-          const w = Math.max(mw, d.box.width - dx);
-          next.left = d.box.left + (d.box.width - w);
-          next.width = w;
-        }
-        if (d.mode.includes('n')) {
-          const h = Math.max(mh, d.box.height - dy);
-          next.top = d.box.top + (d.box.height - h);
-          next.height = h;
-        }
-        setBox(next);
-      }
-    };
-    const onUp = () => {
-      drag.current = null;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  };
-
-  if (!order) return null;
-
-  const handleClass = 'absolute z-20 touch-none select-none';
-
-  return (
-    <div
-      ref={containerRef}
-      className="fixed z-[75] flex flex-col overflow-hidden rounded-2xl border-2 border-emerald-500/70 bg-slate-900 shadow-[0_0_30px_rgba(16,185,129,0.25)]"
-      style={{ left: box.left, top: box.top, width: box.width, height: minimized ? 40 : box.height }}
-    >
-      <div
-        className={`flex items-center gap-2 px-2.5 py-1.5 cursor-move bg-slate-800/95 border-b border-slate-700 ${handleClass}`}
-        style={{ touchAction: 'none' }}
-        onPointerDown={(e) => onPointerDown(e, 'move')}
-      >
-        <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-        </span>
-        <span className="text-[10px] font-black tracking-wider text-emerald-300 uppercase flex-1 truncate">
-          GPS en vivo
-        </span>
-        <button
-          onClick={() => setMinimized((m) => !m)}
-          className="w-6 h-6 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-black flex items-center justify-center transition-colors"
-          title={minimized ? 'Expandir GPS' : 'Minimizar GPS'}
-        >
-          {minimized ? '+' : '_'}
-        </button>
-        <button
-          onClick={onClose}
-          className="w-6 h-6 rounded-md bg-slate-700 hover:bg-red-600 text-slate-200 text-[11px] font-black flex items-center justify-center transition-colors"
-          title="Cerrar GPS"
-        >
-          ✕
-        </button>
-      </div>
-      {!minimized && (
-        <>
-          <div className="relative flex-1 min-h-0">
-            <DeliveryMap order={order} storeLocation={storeLocation} fill />
-          </div>
-          <div
-            className="absolute bottom-0 right-0 w-4 h-4 z-30 cursor-se-resize"
-            style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(16,185,129,0.8) 50%)' }}
-            onPointerDown={(e) => onPointerDown(e, 'se')}
-          />
-          <div
-            className="absolute bottom-0 left-0 w-4 h-4 z-30 cursor-sw-resize"
-            style={{ background: 'linear-gradient(45deg, transparent 50%, rgba(16,185,129,0.8) 50%)' }}
-            onPointerDown={(e) => onPointerDown(e, 'sw')}
-          />
-          <div
-            className="absolute top-0 right-0 w-4 h-4 z-30 cursor-ne-resize"
-            style={{ background: 'linear-gradient(-45deg, transparent 50%, rgba(16,185,129,0.8) 50%)' }}
-            onPointerDown={(e) => onPointerDown(e, 'ne')}
-          />
-          <div
-            className="absolute top-0 left-0 w-4 h-4 z-30 cursor-nw-resize"
-            style={{ background: 'linear-gradient(225deg, transparent 50%, rgba(16,185,129,0.8) 50%)' }}
-            onPointerDown={(e) => onPointerDown(e, 'nw')}
-          />
-          <div className="absolute top-0 left-5 right-5 h-1.5 z-30 cursor-n-resize" onPointerDown={(e) => onPointerDown(e, 'n')} />
-          <div className="absolute bottom-0 left-5 right-5 h-1.5 z-30 cursor-s-resize" onPointerDown={(e) => onPointerDown(e, 's')} />
-          <div className="absolute top-5 bottom-5 left-0 w-1.5 z-30 cursor-w-resize" onPointerDown={(e) => onPointerDown(e, 'w')} />
-          <div className="absolute top-5 bottom-5 right-0 w-1.5 z-30 cursor-e-resize" onPointerDown={(e) => onPointerDown(e, 'e')} />
-        </>
-      )}
     </div>
   );
 }
@@ -6235,14 +6086,11 @@ function AdminView({
   const [showStorePicker, setShowStorePicker] = useState(false);
   const [proofOrder, setProofOrder] = useState(null);
   const [fichaOrder, setFichaOrder] = useState(null);
-  const [fichaGpsVisible, setFichaGpsVisible] = useState(false);
   const openFicha = (o) => {
     setFichaOrder(o);
-    setFichaGpsVisible(!!(o && o.type === 'delivery'));
   };
   const closeFicha = () => {
     setFichaOrder(null);
-    setFichaGpsVisible(false);
   };
   const [broadcastTitle, setBroadcastTitle] = useState('');
   const [broadcastBody, setBroadcastBody] = useState('');
@@ -6869,7 +6717,7 @@ function AdminView({
   }, [lowStockProducts]);
 
 
-  const renderOrderCard = (order) => {
+  const renderOrderCard = (order, { inFicha = false } = {}) => {
     const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
     const wa = formatPhoneWhatsApp(order.phone);
     const sem = semaforoOf(order);
@@ -6953,26 +6801,32 @@ function AdminView({
               )}
             </div>
             {order.type === 'delivery' ? (
-              <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
-                <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Entrega: {order.address}</span>
-                {order.lat != null && order.lng != null && (
-                  <a
-                    href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
-                  >
-                    <Icon name="mapPin" className="w-3 h-3" />
-                    Abrir en Maps
-                  </a>
-                )}
-                {order.courier_lat != null && order.courier_lng != null && (
-                  <span className="text-[10px] font-bold text-emerald-300 ml-auto">
-                    Repartidor en vivo
-                  </span>
-                )}
-              </p>
+              inFicha ? (
+                <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
+                  🚚 Entrega a Domicilio
+                </span>
+              ) : (
+                <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
+                  <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Entrega: {order.address}</span>
+                  {order.lat != null && order.lng != null && (
+                    <a
+                      href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
+                    >
+                      <Icon name="mapPin" className="w-3 h-3" />
+                      Abrir en Maps
+                    </a>
+                  )}
+                  {order.courier_lat != null && order.courier_lng != null && (
+                    <span className="text-[10px] font-bold text-emerald-300 ml-auto">
+                      Repartidor en vivo
+                    </span>
+                  )}
+                </p>
+              )
             ) : (
               <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
                 🛍️ Retiro por Mostrador
@@ -8606,41 +8460,35 @@ function AdminView({
       )}
 
       {fichaOrder && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-md animate-fade-in" role="dialog" aria-label={`Ficha del pedido ${fichaOrder.id}`}>
+        <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/90 backdrop-blur-md animate-fade-in" role="dialog" aria-label={`Ficha del pedido ${fichaOrder.id}`}>
           <div className="absolute inset-0" onClick={closeFicha} />
-          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col max-h-[92vh]">
-            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95 backdrop-blur sticky top-0 z-30">
-              <div>
-                <h3 className="font-black text-white text-sm flex items-center gap-2">
-                  <Icon name="eye" className="w-4 h-4 text-teal-400" />
-                  Ficha del pedido
-                </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">Diseño original — {fichaOrder.id}</p>
+          <div className="relative min-h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
+            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col">
+              <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">
+                <div>
+                  <h3 className="font-black text-white text-sm flex items-center gap-2">
+                    <Icon name="eye" className="w-4 h-4 text-teal-400" />
+                    Ficha del pedido
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Diseño original — {fichaOrder.id}</p>
+                </div>
+                <button
+                  onClick={closeFicha}
+                  className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-all shrink-0"
+                  aria-label="Cerrar ficha"
+                >
+                  <Icon name="x" className="w-4 h-4" />
+                </button>
               </div>
-              <button
-                onClick={closeFicha}
-                className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-all shrink-0"
-                aria-label="Cerrar ficha"
-              >
-                <Icon name="x" className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 sm:p-5 overflow-y-auto">
-              <OrderStepsTimeline order={fichaOrder} />
-              <div className="mt-4">
-                {renderOrderCard(fichaOrder)}
+              <div className="p-4 sm:p-5">
+                <OrderStepsTimeline order={fichaOrder} />
+                <div className="mt-4">
+                  {renderOrderCard(fichaOrder, { inFicha: true })}
+                </div>
               </div>
             </div>
           </div>
         </div>
-      )}
-      {fichaGpsVisible && fichaOrder && (
-        <FloatingGpsPanel
-          key={fichaOrder.id}
-          order={fichaOrder}
-          storeLocation={storeLocation}
-          onClose={() => setFichaGpsVisible(false)}
-        />
       )}
     </div>
   );

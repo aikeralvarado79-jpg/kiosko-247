@@ -15,9 +15,21 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => {
+        const stale = keys.filter((k) => k !== CACHE);
+        return Promise.all(stale.map((k) => caches.delete(k))).then(() => {
+          self.clients.claim();
+          // Si había una versión de caché anterior, las pestañas abiertas pueden
+          // estar mostrando el app shell viejo (que apunta a bundles ya borrados
+          // del servidor). Se recargan una vez para que tomen el build actual.
+          if (stale.length > 0) {
+            return self.clients.matchAll({ type: 'window' }).then((clients) => {
+              clients.forEach((c) => c.navigate(c.url).catch(() => {}));
+            });
+          }
+        });
+      })
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {

@@ -333,13 +333,16 @@ export async function refreshMirror() {
       // staging (pruebas). En vez de reemplazar la tabla entera, se sincroniza
       // producción → staging conservando lo que solo existe en calidad: se
       // eliminan y reinsertan únicamente los pedidos que vienen de producción.
-      if (t === 'orders') {
+      // Clientes: mismo criterio, y además se conservan balance e isBenefited
+      // marcados en calidad (el espejo NO pisa esos flags con los de producción).
+      if (t === 'orders' || t === 'customers') {
+        const pk = t === 'orders' ? 'id' : 'phone';
         const targetExists = await client.query('SELECT to_regclass($1) AS r', [`${MIRROR_TARGET_SCHEMA}.${t}`]);
         if (!targetExists.rows[0].r) {
           await client.query(`CREATE TABLE ${MIRROR_TARGET_SCHEMA}.${t} (LIKE ${MIRROR_SOURCE_SCHEMA}.${t} INCLUDING ALL)`);
         }
-        // Asegurar columnas propias de staging (crédito / pago / rastreo) que el
-        // schema origen aún no tenga.
+        // Asegurar columnas propias de staging (crédito / pago / rastreo / deuda /
+        // beneficiados) que el schema origen aún no tenga.
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS lat NUMERIC`);
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS lng NUMERIC`);
@@ -351,6 +354,8 @@ export async function refreshMirror() {
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "paymentProof" TEXT`);
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS "paymentReference" TEXT`);
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
         // Columnas de producción que le falten al destino (evita error en INSERT).
         const srcCols = await client.query(
           `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position`,
@@ -369,13 +374,29 @@ export async function refreshMirror() {
           }
         }
         const colList = srcCols.rows.map((r) => `"${r.column_name}"`).join(', ');
-        // Reemplazar SOLO los pedidos que existen en producción; los pedidos
-        // creados en staging (pruebas) se conservan.
-        await client.query(`DELETE FROM ${MIRROR_TARGET_SCHEMA}.${t} WHERE id IN (SELECT id FROM ${MIRROR_SOURCE_SCHEMA}.${t})`);
-        const ins = await client.query(
-          `INSERT INTO ${MIRROR_TARGET_SCHEMA}.${t} (${colList}) SELECT ${colList} FROM ${MIRROR_SOURCE_SCHEMA}.${t} ON CONFLICT (id) DO NOTHING`
-        );
-        tables[t] = ins.rowCount;
+        if (t === 'orders') {
+          // Reemplazar SOLO los pedidos que existen en producción; los pedidos
+          // creados en staging (pruebas) se conservan.
+          await client.query(`DELETE FROM ${MIRROR_TARGET_SCHEMA}.${t} WHERE id IN (SELECT id FROM ${MIRROR_SOURCE_SCHEMA}.${t})`);
+          const ins = await client.query(
+            `INSERT INTO ${MIRROR_TARGET_SCHEMA}.${t} (${colList}) SELECT ${colList} FROM ${MIRROR_SOURCE_SCHEMA}.${t} ON CONFLICT (id) DO NOTHING`
+          );
+          tables[t] = ins.rowCount;
+        } else {
+          // Clientes: agrega/actualiza desde producción pero conserva los que solo
+          // existen en staging y NO pisa balance/isBenefited locales de calidad.
+          const kept = ['balance', 'isBenefited'];
+          const updateSet = srcCols.rows
+            .map((c) => c.column_name)
+            .filter((col) => col !== pk && !kept.includes(col))
+            .map((col) => `"${col}" = EXCLUDED."${col}"`)
+            .join(', ');
+          const ins = await client.query(
+            `INSERT INTO ${MIRROR_TARGET_SCHEMA}.${t} (${colList}) SELECT ${colList} FROM ${MIRROR_SOURCE_SCHEMA}.${t} ` +
+              `ON CONFLICT (${pk}) DO UPDATE SET ${updateSet}`
+          );
+          tables[t] = ins.rowCount;
+        }
         continue;
       }
 
@@ -383,13 +404,6 @@ export async function refreshMirror() {
       await client.query(`DROP TABLE IF EXISTS ${MIRROR_TARGET_SCHEMA}.${t}`);
       await client.query(`CREATE TABLE ${MIRROR_TARGET_SCHEMA}.${t} (LIKE ${MIRROR_SOURCE_SCHEMA}.${t} INCLUDING ALL)`);
       const ins = await client.query(`INSERT INTO ${MIRROR_TARGET_SCHEMA}.${t} SELECT * FROM ${MIRROR_SOURCE_SCHEMA}.${t}`);
-      // El espejo copia el esquema de producción; re-agrega las columnas propias
-      // de staging (deuda / beneficiados / crédito) por si el schema origen aún
-      // no las tiene (CREATE TABLE ... LIKE no las trae).
-      if (t === 'customers') {
-        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
-        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
-      }
       tables[t] = ins.rowCount;
     }
 

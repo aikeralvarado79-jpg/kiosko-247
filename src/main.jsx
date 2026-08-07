@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.jsx';
 
+// Marca que el módulo JS se ejecutó: index.html usa esto para mostrar un botón
+// de recuperación si la app no logra montarse (caché rota del service worker).
+window.__APP_MOUNTED__ = true;
+
 // Error boundary: si algo falla al renderizar, muestra una pantalla de
 // recuperación en vez de dejar la app en blanco.
 class ErrorBoundary extends Component {

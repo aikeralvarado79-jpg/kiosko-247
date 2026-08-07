@@ -1767,6 +1767,7 @@ export default function App() {
             storeLocation={storeLocation}
             onSaveStoreLocation={handleSaveStoreLocation}
             adminPhone={savedCustomer ? `${savedCustomer.phoneCode || ''} ${savedCustomer.phoneNumber || ''}`.trim() : ''}
+            headerHeight={headerHeight}
           />
         ) : (
           <AdminLoginView
@@ -6043,7 +6044,8 @@ function AdminView({
   addToast,
   storeLocation,
   onSaveStoreLocation,
-  adminPhone
+  adminPhone,
+  headerHeight
 }) {
   // Order status filter state + preferencias recordadas (filtro, vista, orden
   // por antigüedad y pedidos fijados se persisten en localStorage).
@@ -8460,8 +8462,13 @@ function AdminView({
       )}
 
       {fichaOrder && (
-        <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/90 backdrop-blur-md animate-fade-in" role="dialog" aria-label={`Ficha del pedido ${fichaOrder.id}`}>
-          <div className="absolute inset-0" onClick={closeFicha} />
+        <div
+          className="fixed inset-x-0 bottom-0 z-[70] overflow-y-auto animate-fade-in"
+          style={{ top: headerHeight }}
+          role="dialog"
+          aria-label={`Ficha del pedido ${fichaOrder.id}`}
+        >
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={closeFicha} />
           <div className="relative min-h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
             <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col">
               <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">

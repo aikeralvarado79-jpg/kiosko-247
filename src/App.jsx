@@ -4920,7 +4920,7 @@ function DeliveryMap({ order, storeLocation }) {
 
   return (
     <div className="space-y-2">
-      <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+      <div className="relative z-0 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
         <div ref={containerRef} className="w-full h-44 sm:h-52" />
       </div>
       <div className="flex flex-wrap gap-2">
@@ -5028,7 +5028,7 @@ function DeliveriesRouteMap({ storeLocation, deliveries, storeLabel = 'KIOSKO' }
 
   if (!hasStore && !hasDeliveries) return null;
   return (
-    <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 w-full">
+    <div className="relative z-0 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 w-full">
       <div ref={containerRef} className="w-full h-72 sm:h-96" />
     </div>
   );

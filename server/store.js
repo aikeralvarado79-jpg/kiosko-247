@@ -1142,9 +1142,18 @@ const pgStore = {
           [Number(it.quantity) || 0, it.id]
         );
       }
-      return { ok: true };
+      return { ok: true, cancelledItems: existing.items || [] };
     });
     if (result.error) return result;
+    // Limpiar holds de los items cancelados: stock restaurado, reservas previas inválidas
+    if (result.cancelledItems) {
+      for (const it of result.cancelledItems) {
+        for (const [clientId, items] of holds) {
+          if (items.has(it.id)) items.delete(it.id);
+          if (items.size === 0) holds.delete(clientId);
+        }
+      }
+    }
     return { state: await this.getState() };
   },
 
@@ -1192,6 +1201,11 @@ const pgStore = {
     );
     if (p.category) {
       await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [p.category]);
+    }
+    // Limpiar holds de este producto: el stock cambió, reservas previas son inválidas
+    for (const [clientId, items] of holds) {
+      if (items.has(id)) items.delete(id);
+      if (items.size === 0) holds.delete(clientId);
     }
     return { state: await this.getState() };
   },
@@ -1414,6 +1428,12 @@ export const updateProduct = async (id, data) => {
   await store.saveProducts(products);
   await store.saveCategories(categories);
 
+  // Limpiar holds de este producto: el stock cambió, reservas previas son inválidas
+  for (const [clientId, items] of holds) {
+    if (items.has(id)) items.delete(id);
+    if (items.size === 0) holds.delete(clientId);
+  }
+
   const newState = await store.getState();
   return { state: newState };
 };
@@ -1525,6 +1545,16 @@ export const cancelOrder = async (id, phone) => {
 
   await store.saveProducts(products);
   await store.saveOrders(orders);
+
+  // Limpiar holds de los items cancelados: stock restaurado, reservas previas inválidas
+  if (existing.items) {
+    for (const it of existing.items) {
+      for (const [clientId, items] of holds) {
+        if (items.has(it.id)) items.delete(it.id);
+        if (items.size === 0) holds.delete(clientId);
+      }
+    }
+  }
 
   const newState = await store.getState();
   return { state: newState };

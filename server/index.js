@@ -8,6 +8,7 @@ import * as store from './store.js';
 import * as webauthn from './webauthn.js';
 import * as push from './push.js';
 import { getBcvRate } from './rate.js';
+import { isStorageConfigured, uploadProof } from './storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -219,7 +220,7 @@ app.post('/api/auth/admin/biometric-register', async (req, res) => {
 app.get('/api/state', async (req, res) => {
   try {
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId : undefined;
-    const [state, rate] = await Promise.all([store.getState(clientId), getBcvRate()]);
+    const [state, rate] = await Promise.all([store.getPublicState(clientId), getBcvRate()]);
     const payload = { ...state, rate };
     const body = JSON.stringify(payload);
     const etag = `"${crypto.createHash('sha1').update(body).digest('hex')}"`;
@@ -368,7 +369,7 @@ app.post('/api/customers/blacklist/debt', requireAdmin, async (req, res) => {
     const order = await store.addDebtToCustomer({ phone: key, customerName: name, items });
     if (!order) return res.status(400).json({ error: 'No se pudo registrar la deuda' });
     if (name) await store.upsertCustomer({ phone: key, customerName: name });
-    res.json({ order, customer: await store.getCustomerByPhone(key), state: await store.getState() });
+    res.json({ order, customer: await store.getCustomerByPhone(key), state: await store.getPublicState() });
   } catch (err) {
     fail(res, err, 'No se pudo registrar la deuda. Intenta de nuevo.');
   }
@@ -587,8 +588,19 @@ app.post('/api/orders/:id/payment-proof', async (req, res) => {
     if (proof.length > 3000000) {
       return res.status(400).json({ error: 'La imagen es demasiado grande' });
     }
+    // Nivel B: si hay Supabase configurado, subimos el comprobante al bucket y
+    // guardamos la URL (liviana) en vez del base64. Si no está configurado o el
+    // upload falla, se guarda el base64 en la BD (comportamiento actual).
+    let storedProof = proof;
+    if (isStorageConfigured()) {
+      const url = await uploadProof(req.params.id, proof);
+      if (url) {
+        storedProof = url;
+        console.log(`[kiosko] payment-proof id=${req.params.id} subido a Supabase Storage`);
+      }
+    }
     const result = await store.updateOrderPayment(req.params.id, {
-      paymentProof: proof,
+      paymentProof: storedProof,
       paymentReference: String(reference || '').slice(0, 120),
       paymentStatus: 'pendiente'
     });
@@ -597,6 +609,25 @@ app.post('/api/orders/:id/payment-proof', async (req, res) => {
     res.json(result);
   } catch (err) {
     fail(res, err, 'No se pudo guardar el comprobante.');
+  }
+});
+
+// Sirve el comprobante de pago de un pedido bajo demanda. No se envía en el
+// estado público (/api/state) porque es pesado y sensible; aquí solo accede el
+// admin (Bearer token) o el dueño del pedido (mismo teléfono).
+app.get('/api/orders/:id/proof', async (req, res) => {
+  try {
+    const order = await store.getOrderById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    const authHeader = req.headers.authorization || '';
+    const isAdmin = authHeader.startsWith('Bearer ') && verifyToken(authHeader.slice(7));
+    const phoneOk =
+      String(order.phone || '').replace(/\D/g, '').slice(-11) === String(req.query.phone || '').replace(/\D/g, '').slice(-11);
+    if (!isAdmin && !phoneOk) return res.status(403).json({ error: 'No autorizado para este pedido' });
+    if (!order.paymentProof) return res.status(404).json({ error: 'Este pedido no tiene comprobante' });
+    res.json({ proof: order.paymentProof });
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar el comprobante.');
   }
 });
 
@@ -756,7 +787,7 @@ app.delete('/api/orders/:id', requireAdmin, async (req, res) => {
 app.put('/api/settings', requireAdmin, async (req, res) => {
   try {
     await store.saveSettings(req.body || {});
-    res.json(await store.getState());
+    res.json(await store.getPublicState());
   } catch (err) {
     fail(res, err, 'No se pudieron guardar los ajustes.');
   }

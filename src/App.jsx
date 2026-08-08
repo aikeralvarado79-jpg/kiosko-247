@@ -7425,16 +7425,14 @@ function AdminView({
                   Ref: <span className="font-mono font-bold text-white">{order.paymentReference}</span>
                 </p>
               )}
-              {order.paymentProof ? (
+              {order.hasProof ? (
                 <button
                   onClick={() => setProofOrder(order)}
                   className="w-full flex items-center gap-3 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
                 >
-                  <img
-                    src={order.paymentProof}
-                    alt="Comprobante de pago"
-                    className="w-14 h-14 rounded-lg object-cover border border-slate-700"
-                  />
+                  <span className="w-14 h-14 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                    <Icon name="image" className="w-5 h-5 text-teal-400" />
+                  </span>
                   <span className="min-w-0">
                     <span className="block text-xs font-bold text-white">Ver comprobante</span>
                     <span className="block text-[11px] text-slate-400">Toca para ampliar</span>
@@ -8105,12 +8103,14 @@ function AdminView({
                             {(o.paymentMethod === 'pago_movil' ? 'Pago Móvil' : 'Transferencia')} · Ref:{' '}
                             <span className="font-mono text-white">{o.paymentReference || '—'}</span>
                           </p>
-                          {o.paymentProof ? (
+                          {o.hasProof ? (
                             <button
                               onClick={() => setProofOrder(o)}
                               className="w-full flex items-center gap-2 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
                             >
-                              <img src={o.paymentProof} alt="Comprobante de pago" className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
+                              <span className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                                <Icon name="image" className="w-4 h-4 text-teal-400" />
+                              </span>
                               <span className="text-xs font-bold text-white flex-1">Ver comprobante</span>
                               <Icon name="eye" className="w-4 h-4 text-teal-400" />
                             </button>
@@ -9034,8 +9034,30 @@ function AdminView({
 }
 
 // Modal para que el admin revise el comprobante de pago a pantalla completa
-// y confirme o rechace el pago digital.
+// y confirme o rechace el pago digital. El comprobante no viaja en el estado
+// público: se descarga bajo demanda por el dueño del pedido o el admin.
 function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
+  const [proof, setProof] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await api.getOrderProof(order.id, order.phone);
+        if (active) {
+          setProof(res.ok ? res.data?.proof : null);
+          setLoading(false);
+        }
+      } catch {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [order.id, order.phone]);
+
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
@@ -9056,9 +9078,13 @@ function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
           </button>
         </div>
         <div className="p-4 sm:p-5 space-y-4">
-          {order.paymentProof ? (
+          {loading ? (
+            <div className="w-full h-48 flex items-center justify-center bg-slate-800/60 rounded-2xl border border-slate-700">
+              <Icon name="refresh" className="w-6 h-6 text-teal-400 animate-spin" />
+            </div>
+          ) : proof ? (
             <img
-              src={order.paymentProof}
+              src={proof}
               alt="Comprobante de pago"
               className="w-full rounded-2xl border border-slate-700 object-contain max-h-[55vh]"
             />

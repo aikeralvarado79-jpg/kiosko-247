@@ -74,12 +74,12 @@ export const holdStock = async (clientId, items, ttlMs = HOLD_CART_MS) => {
     for (const it of list) mine.set(it.id, { qty: it.qty, expiresAt: now + ttlMs });
     holds.set(clientId, mine);
   }
-  return { ok: true, available, expiresAt: now + ttlMs, state: await store.getState(clientId) };
+  return { ok: true, available, expiresAt: now + ttlMs, state: await store.getPublicState(clientId) };
 };
 
 export const releaseStock = async (clientId) => {
   if (clientId) holds.delete(clientId);
-  return { ok: true, state: await store.getState(clientId) };
+  return { ok: true, state: await store.getPublicState(clientId) };
 };
 
 // ---------------------------------------------------------------------------
@@ -262,6 +262,18 @@ const fileStore = {
     delete state.settings.adminCredentials;
     const reserved = reservedByProduct(clientId);
     state.products = withForecast(state.products, state.orders).map((p) => ({ ...p, reserved: reserved.get(p.id) || 0 }));
+    return state;
+  },
+
+  // Vista pública del estado: oculta el comprobante (base64 pesado y sensible)
+  // y lo reemplaza por un flag hasProof. El comprobante se sirve bajo demanda
+  // vía GET /api/orders/:id/proof (solo admin o el dueño del pedido).
+  async getPublicState(clientId) {
+    const state = await this.getState(clientId);
+    state.orders = state.orders.map((o) => {
+      const { paymentProof, ...rest } = o;
+      return { ...rest, hasProof: Boolean(paymentProof) };
+    });
     return state;
   },
 
@@ -796,6 +808,16 @@ const pgStore = {
     return { products, categories, orders, settings };
   },
 
+  // Vista pública del estado (ver fileStore.getPublicState).
+  async getPublicState(clientId) {
+    const state = await this.getState(clientId);
+    state.orders = state.orders.map((o) => {
+      const { paymentProof, ...rest } = o;
+      return { ...rest, hasProof: Boolean(paymentProof) };
+    });
+    return state;
+  },
+
   async saveProducts(products) {
     await this.pool.query(`DELETE FROM ${q('products')}`);
     for (const p of products) {
@@ -1155,7 +1177,7 @@ const pgStore = {
 
       await client.query('COMMIT');
       if (orderData.clientId) holds.delete(orderData.clientId);
-      return { state: await this.getState(orderData.clientId), order };
+      return { state: await this.getPublicState(orderData.clientId), order };
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
@@ -1207,7 +1229,7 @@ const pgStore = {
       return { ok: true };
     });
     if (result.error) return result;
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Actualiza los campos de pago de un pedido (confirmar/rechazar, comprobante).
@@ -1230,7 +1252,7 @@ const pgStore = {
       return { ok: true };
     });
     if (result.error) return result;
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Convierte un pedido con pago rechazado/pendiente a "a cuenta" (crédito):
@@ -1251,7 +1273,7 @@ const pgStore = {
       return { ok: true };
     });
     if (result.error) return result;
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Agrega un mensaje de chat al pedido (JSONB, sin tabla extra).
@@ -1266,7 +1288,7 @@ const pgStore = {
       return { ok: true };
     });
     if (result.error) return result;
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Cancela un pedido devolviendo stock, todo en una transacción con lock.
@@ -1302,7 +1324,7 @@ const pgStore = {
         }
       }
     }
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Elimina un pedido solo si está cancelado (DELETE por id).
@@ -1316,7 +1338,7 @@ const pgStore = {
       return { ok: true };
     });
     if (result.error) return result;
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Crea un producto con INSERT puntual (no borra ni reescribe la tabla).
@@ -1335,7 +1357,7 @@ const pgStore = {
     if (product.category) {
       await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [product.category]);
     }
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Actualiza un producto con UPDATE puntual (sin tocar otras filas).
@@ -1355,19 +1377,19 @@ const pgStore = {
       if (items.has(id)) items.delete(id);
       if (items.size === 0) holds.delete(clientId);
     }
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Elimina un producto con DELETE puntual.
   async atomicDeleteProduct(id) {
     await this.pool.query(`DELETE FROM ${q('products')} WHERE id = $1`, [id]);
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   },
 
   // Agrega una categoría con INSERT idempotente.
   async atomicAddCategory(name) {
     await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
-    return { state: await this.getState() };
+    return { state: await this.getPublicState() };
   }
 };
 
@@ -1387,6 +1409,10 @@ export async function initStore() {
 export const isMirrorEnabled = () => Boolean(pgPool);
 
 export const getState = (clientId) => store.getState(clientId);
+
+// Vista pública del estado (sin comprobantes de pago). Para el polling y
+// respuestas que llegan al navegador; los comprobantes se sirven bajo demanda.
+export const getPublicState = (clientId) => store.getPublicState(clientId);
 
 export const saveSettings = (settings) => store.saveSettings(settings);
 
@@ -1541,7 +1567,7 @@ export const createOrder = async (orderData) => {
   }
 
   if (orderData.clientId) holds.delete(orderData.clientId);
-  const newState = await store.getState(orderData.clientId);
+  const newState = await store.getPublicState(orderData.clientId);
   return { state: newState, order };
 };
 
@@ -1560,7 +1586,7 @@ export const createProduct = async (data) => {
   await store.saveProducts(products);
   await store.saveCategories(categories);
 
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 
@@ -1582,7 +1608,7 @@ export const updateProduct = async (id, data) => {
     if (items.size === 0) holds.delete(clientId);
   }
 
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 
@@ -1590,7 +1616,7 @@ export const deleteProduct = async (id) => {
   if (pgPool) return pgStore.atomicDeleteProduct(id);
   const state = await store.getState();
   await store.saveProducts(state.products.filter((p) => p.id !== id));
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 
@@ -1598,7 +1624,7 @@ export const addCategory = async (name) => {
   if (pgPool) return pgStore.atomicAddCategory(name);
   const state = await store.getState();
   await store.saveCategories(maybeAddCategory(state.categories, name));
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 
@@ -1616,7 +1642,7 @@ export const updateOrderStatus = async (id, status) => {
     await store.addOrderToAccount(existing);
   }
 
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 
@@ -1632,7 +1658,7 @@ export const updateOrderPayment = async (id, data) => {
   if (!existing) return { error: 'Pedido no encontrado' };
   const orders = state.orders.map((o) => (o.id === id ? { ...o, ...data } : o));
   await store.saveOrders(orders);
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 
@@ -1649,7 +1675,7 @@ export const convertToCredit = async (id) => {
       : o
   );
   await store.saveOrders(orders);
-  return { state: await store.getState() };
+  return { state: await store.getPublicState() };
 };
 
 export const getOrderMessages = async (id) => {
@@ -1666,7 +1692,7 @@ export const addOrderMessage = async (id, message) => {
   if (!existing) return { error: 'Pedido no encontrado' };
   const orders = state.orders.map((o) => (o.id === id ? { ...o, messages: [...(o.messages || []), message] } : o));
   await store.saveOrders(orders);
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 
@@ -1704,7 +1730,7 @@ export const cancelOrder = async (id, phone) => {
     }
   }
 
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 
@@ -1719,7 +1745,7 @@ export const deleteOrder = async (id) => {
   }
   const orders = state.orders.filter((o) => o.id !== id);
   await store.saveOrders(orders);
-  const newState = await store.getState();
+  const newState = await store.getPublicState();
   return { state: newState };
 };
 

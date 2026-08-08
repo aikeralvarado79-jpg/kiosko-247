@@ -1,7 +1,24 @@
 const TOKEN_KEY = 'kiosko_admin_token';
 
-// ETags por clientId para revalidación condicional de /api/state (ahorra tráfico).
-const stateEtags = {};
+// ETags por clientId para revalidación condicional de /api/state. Se guardan en
+// localStorage para que sobrevivan recargas de página (la primera carga de cada
+// sesión no vuelve a bajar el estado completo).
+const ETAG_STORAGE_KEY = 'kiosko_state_etags';
+const stateEtags = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(ETAG_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+})();
+
+const persistEtags = () => {
+  try {
+    localStorage.setItem(ETAG_STORAGE_KEY, JSON.stringify(stateEtags));
+  } catch {
+    // almacenamiento no disponible: el etag vive solo en memoria
+  }
+};
 
 export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
 export const setToken = (token) => sessionStorage.setItem(TOKEN_KEY, token);
@@ -28,7 +45,10 @@ export const api = {
     const headers = {};
     if (stateEtags[key]) headers['If-None-Match'] = stateEtags[key];
     const res = await request(`/api/state${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`, { headers });
-    if (res.ok && res.etag) stateEtags[key] = res.etag;
+    if (res.ok && res.etag) {
+      stateEtags[key] = res.etag;
+      persistEtags();
+    }
     return res;
   },
   holdStock: (clientId, items, ttlMs) => request('/api/holds', { method: 'POST', body: JSON.stringify({ clientId, items, ttlMs }) }),

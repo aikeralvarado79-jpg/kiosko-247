@@ -56,7 +56,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
      zap: <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />,
      bag: <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0" />,
      apple: <path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.58,7.86 7.09,6.91 8.65,6.88C9.94,6.86 11.17,7.68 12.06,7.68C12.96,7.68 14.42,6.74 15.95,6.88C16.57,6.91 18.23,7.09 19.3,8.68C19.2,8.74 16.79,10.05 16.83,12.9C16.88,16.24 19.88,17.37 19.92,17.39C19.88,17.47 19.25,19.11 18.71,19.5ZM13.3,5.41C13.98,4.57 14.46,3.4 14.32,2.21C13.28,2.26 12.05,2.88 11.34,3.72C10.7,4.48 10.13,5.65 10.28,6.83C11.44,6.94 12.62,6.26 13.3,5.41Z" fill="currentColor" stroke="none" />,
-     faceId: (
+      faceId: (
        <>
          <path d="M3 7V5a2 2 0 0 1 2-2h2" />
          <path d="M17 3h2a2 2 0 0 1 2 2v2" />
@@ -66,7 +66,11 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
          <path d="M9 9h.01" />
          <path d="M15 9h.01" />
        </>
-     ),
+      ),
+      mic: <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />,
+      share2: <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" />,
+      barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
+      star: <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />,
     };
 
   return (
@@ -875,6 +879,34 @@ export default function App() {
   const [currentOrderTracking, setCurrentOrderTracking] = useState(null); // Order id for customer view
   const [liveTrackingOrder, setLiveTrackingOrder] = useState(null); // Order for re-open live tracking from Mis Pedidos
 
+  // Dashboard personal "Mi Kiosko"
+  const [isMyKioskoOpen, setIsMyKioskoOpen] = useState(false);
+
+  // Compra rápida por voz
+  const [isVoiceOpen, setIsVoiceOpen] = useState(false);
+  const [voiceItems, setVoiceItems] = useState([]);
+  const [voiceLoading, setVoiceLoading] = useState(false);
+
+  // Carrito compartido (dueño e invitado)
+  const [myShare, setMyShare] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('kiosko_share');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [guestShare, setGuestShare] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('kiosko_share_guest');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [guestAdded, setGuestAdded] = useState(0);
+
   // Admin Specific States
   const [adminTab, setAdminTab] = useState('inventory'); // 'inventory' | 'orders' | 'analytics'
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
@@ -1398,6 +1430,176 @@ export default function App() {
     );
   };
 
+  // ---- Carrito compartido (dueño) ----
+
+  // Recrea el enlace de compartir con el contenido actual del carrito.
+  const handleOpenShare = async () => {
+    const items = cart.map((item) => ({ id: item.product.id, qty: item.quantity }));
+    const res = await api.createShare({
+      clientId,
+      ownerName: savedCustomer?.customerName || 'Cliente',
+      items
+    });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo crear el carrito compartido', 'error');
+      return;
+    }
+    const next = { ...res.data.share, url: `${window.location.origin}${window.location.pathname}?share=${res.data.share.code}` };
+    setMyShare(next);
+    try { sessionStorage.setItem('kiosko_share', JSON.stringify(next)); } catch {}
+    setIsShareOpen(true);
+    addToast('Carrito compartido creado', 'success');
+  };
+
+  const handleCloseShare = async () => {
+    if (myShare?.code) {
+      api.closeShare(myShare.code, clientId).catch(() => {});
+    }
+    setMyShare(null);
+    try { sessionStorage.removeItem('kiosko_share'); } catch {}
+    setIsShareOpen(false);
+    addToast('Carrito compartido cerrado', 'info');
+  };
+
+  const handleCopyShare = async (link) => {
+    try {
+      await navigator.clipboard.writeText(link);
+      addToast('Enlace copiado', 'success');
+    } catch {
+      addToast('No se pudo copiar el enlace', 'error');
+    }
+  };
+
+  const handleWhatsAppShare = (link) => {
+    const text = encodeURIComponent(`¡Ayudame a completar mi pedido en el Kiosko! Sumá tus antojos en este enlace:\n${link}`);
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+  };
+
+  // ---- Carrito compartido (invitado) ----
+  // Si la app se abre con ?share=CODE, el usuario entra como invitado: sus
+  // artículos se suman al carrito compartido del dueño, no a un carrito propio.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const code = (params.get('share') || '').trim();
+      if (!code) return;
+      api.getShare(code).then((res) => {
+        if (!res.ok) {
+          addToast(res.data.error || 'Carrito compartido no encontrado', 'error');
+          return;
+        }
+        const guest = { code, ownerName: res.data.ownerName || 'tu familia' };
+        setGuestShare(guest);
+        try { sessionStorage.setItem('kiosko_share_guest', JSON.stringify(guest)); } catch {}
+        addToast(`Estás ayudando a armar el pedido de ${guest.ownerName}`, 'info');
+      });
+    } catch {}
+  }, []);
+
+  // Como invitado, agregar un producto lo suma al carrito compartido del dueño.
+  const guestAddToCart = async (product, quantityToAdd = 1) => {
+    if (!guestShare?.code) return addToCart(product, quantityToAdd);
+    const res = await api.addShareItems(guestShare.code, [{ id: product.id, qty: quantityToAdd }]);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo agregar al carrito compartido', 'error');
+      return;
+    }
+    setGuestAdded((n) => n + quantityToAdd);
+    haptic(12);
+    addToast(`Agregado al carrito de ${guestShare.ownerName}: ${product.name} (x${quantityToAdd})`);
+  };
+
+  // Handler unificado: si hay un carrito compartido activo, se usa ese.
+  const handleAddToCart = guestShare ? guestAddToCart : addToCart;
+
+  // ---- Compra rápida por voz ----
+  const [voiceListening, setVoiceListening] = useState(false);
+  const voiceRecRef = useRef(null);
+
+  const stopVoiceRec = () => {
+    try {
+      if (voiceRecRef.current) voiceRecRef.current.stop();
+    } catch {}
+    voiceRecRef.current = null;
+    setVoiceListening(false);
+  };
+
+  const openVoiceOrder = () => {
+    if (!speechRecognitionAvailable()) {
+      addToast('Tu navegador no soporta reconocimiento de voz', 'error');
+      return;
+    }
+    setVoiceItems([]);
+    setIsVoiceOpen(true);
+    setVoiceListening(true);
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    voiceRecRef.current = rec;
+    rec.lang = 'es-ES';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+
+    rec.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript || '';
+      const parsed = parseVoiceOrder(transcript, products);
+      setVoiceItems(parsed);
+      setVoiceListening(false);
+      if (parsed.length === 0) {
+        speakText('No reconocí productos. Inténtalo de nuevo.');
+      }
+    };
+    rec.onerror = () => {
+      setVoiceListening(false);
+      addToast('No se pudo capturar la voz. Acepta el permiso del micrófono.', 'warning');
+    };
+    rec.onend = () => setVoiceListening(false);
+    rec.start();
+  };
+
+  const handleVoiceConfirm = async () => {
+    stopVoiceRec();
+    setVoiceLoading(true);
+    try {
+      // Respeta la disponibilidad real de stock; recorta al máximo disponible.
+      const safe = voiceItems
+        .map((it) => ({ ...it, qty: Math.min(it.qty, Math.max(0, availableStock(it.product))) }))
+        .filter((it) => it.qty > 0);
+      if (safe.length === 0) {
+        addToast('Ninguno de esos productos tiene stock disponible', 'warning');
+        return;
+      }
+      safe.forEach((it) => addToCart(it.product, it.qty));
+      setIsVoiceOpen(false);
+      setVoiceItems([]);
+      speakText(`Listo, agregado ${safe.length} artículos a tu carrito`);
+      haptic([20, 40, 20]);
+      setIsCartOpen(true);
+      addToast(`Compra rápida: ${safe.length} artículos al carrito`, 'success');
+    } finally {
+      setVoiceLoading(false);
+    }
+  };
+
+  // Detiene la escucha al cerrar el modal (si aún está abierta).
+  useEffect(() => {
+    if (!isVoiceOpen) stopVoiceRec();
+    return () => stopVoiceRec();
+  }, [isVoiceOpen]);
+
+  // Polling del carrito compartido del dueño: mantiene en vivo los artículos
+  // que suman los invitados mientras el modal está abierto.
+  useEffect(() => {
+    if (!isShareOpen || !myShare?.code) return undefined;
+    const id = setInterval(async () => {
+      const res = await api.getShare(myShare.code);
+      if (res.ok) {
+        setMyShare((prev) => (prev ? { ...prev, items: res.data.items, ownerName: res.data.ownerName } : prev));
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [isShareOpen, myShare?.code]);
+
   // Guarda una dirección en el perfil del cliente (servidor + local)
   const handleSaveCustomerAddress = async (phone, customerName, address) => {
     if (!phone || !address) return;
@@ -1840,7 +2042,7 @@ export default function App() {
             setSortOption={setSortOption}
             rate={rate}
             promos={promos}
-            onAddToCart={addToCart}
+            onAddToCart={handleAddToCart}
             onOpenProductModal={(product) => setProductDetailModal(product)}
             currentOrderTracking={trackedOrder}
             setCurrentOrderTracking={setCurrentOrderTracking}
@@ -1858,6 +2060,10 @@ export default function App() {
             onToggleFavorite={toggleFavorite}
             focusSection={focusCustomerSection}
             onOpenDebt={() => setIsDebtDrawerOpen(true)}
+            onOpenMyKiosko={() => setIsMyKioskoOpen(true)}
+            onOpenVoice={openVoiceOrder}
+            guestShare={guestShare}
+            guestAdded={guestAdded}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -1923,6 +2129,7 @@ export default function App() {
           setIsCartOpen(false);
           setIsCheckoutOpen(true);
         }}
+        onShare={handleOpenShare}
       />
 
       {/* 1b. Orders Drawer (Mis Pedidos) */}
@@ -1954,6 +2161,49 @@ export default function App() {
             orders={orders}
             rate={rate}
             onClose={() => setIsDebtDrawerOpen(false)}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* 1d. Dashboard Personal "Mi Kiosko" */}
+      {isMyKioskoOpen && customerProfile && (
+        <ErrorBoundary>
+          <MyKioskoModal
+            customer={customerProfile}
+            customerName={savedCustomer?.customerName || customerProfile.customerName}
+            orders={orders}
+            products={products}
+            rate={rate}
+            onClose={() => setIsMyKioskoOpen(false)}
+            onRepeatLastOrder={handleRepeatLastOrder}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* 1e. Compra rápida por voz */}
+      {isVoiceOpen && (
+        <ErrorBoundary>
+          <VoiceOrderModal
+            items={voiceItems}
+            loading={voiceLoading}
+            listening={voiceListening}
+            onConfirm={handleVoiceConfirm}
+            onClose={() => setIsVoiceOpen(false)}
+            onRetry={openVoiceOrder}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* 1f. Carrito compartido (dueño) */}
+      {isShareOpen && myShare && (
+        <ErrorBoundary>
+          <ShareCartModal
+            share={myShare}
+            products={products}
+            onClose={() => setIsShareOpen(false)}
+            onCopy={handleCopyShare}
+            onWhatsApp={handleWhatsAppShare}
+            onCloseShare={handleCloseShare}
           />
         </ErrorBoundary>
       )}
@@ -2908,7 +3158,11 @@ function CustomerView({
   favorites,
   onToggleFavorite,
   focusSection,
-  onOpenDebt
+  onOpenDebt,
+  onOpenMyKiosko,
+  onOpenVoice,
+  guestShare,
+  guestAdded
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
@@ -2962,6 +3216,30 @@ function CustomerView({
   const pagedOrders = filteredOrders.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   useEffect(() => { setMyOrdersPage(1); }, [orderDateFilter]);
+
+  // Producto habitual del cliente que esté por agotarse: alerta proactiva para
+  // reponerlo antes de que se acabe. Basado en su historial de pedidos.
+  const runOutAlertProduct = useMemo(() => {
+    if (!savedCustomer?.customerName || !customerOrders.length) return null;
+    const freq = {};
+    customerOrders.forEach((o) =>
+      (o.items || []).forEach((it) => {
+        freq[it.id] = (freq[it.id] || 0) + (Number(it.quantity) || 0);
+      })
+    );
+    const candidates = Object.entries(freq)
+      .map(([id, qty]) => {
+        const p = (allProducts || []).find((x) => x.id === id);
+        return p ? { product: p, qty } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.qty - a.qty);
+    return (
+      candidates.find(
+        (c) => c.product.runOutDays != null && c.product.runOutDays > 0 && c.product.runOutDays <= 2
+      )?.product || null
+    );
+  }, [customerOrders, allProducts, savedCustomer?.customerName]);
 
   // La barra inferior (móvil) pide expandir y scrollear a Mis Pedidos o Mi Cuenta
   useEffect(() => {
@@ -3078,6 +3356,35 @@ function CustomerView({
         </div>
       )}
 
+      {/* Alerta proactiva "Se acaba pronto": producto habitual del cliente */}
+      {runOutAlertProduct && (
+        <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-rose-500/15 via-orange-500/10 to-amber-500/15 border border-rose-500/30 flex items-center gap-3 sm:gap-4">
+          <img
+            src={runOutAlertProduct.image}
+            alt={runOutAlertProduct.name}
+            className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl object-cover border border-rose-500/30 shrink-0"
+          />
+          <div className="flex-1 min-w-0">
+            <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-rose-300">
+              <Icon name="zap" className="w-3 h-3" /> Se acaba pronto
+            </span>
+            <p className="text-sm sm:text-base font-bold text-white truncate mt-0.5">
+              Tu {runOutAlertProduct.name.toLowerCase()} se agota en ~{Math.ceil(runOutAlertProduct.runOutDays)} día{Math.ceil(runOutAlertProduct.runOutDays) === 1 ? '' : 's'}
+            </p>
+            <p className="text-[11px] sm:text-xs text-slate-400">
+              Te quedan {Math.max(0, Number(runOutAlertProduct.stock) - Number(runOutAlertProduct.reserved || 0))} unidades. ¿Lo agregamos?
+            </p>
+          </div>
+          <button
+            onClick={(e) => onAddToCart(runOutAlertProduct, 1, e.currentTarget.getBoundingClientRect())}
+            className="shrink-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-orange-500 text-slate-950 text-xs font-bold hover:from-rose-400 hover:to-orange-400 shadow-lg shadow-rose-500/20 transition-all active:scale-95 flex items-center gap-1.5"
+          >
+            <Icon name="plus" className="w-3.5 h-3.5" />
+            <span className="hidden min-[360px]:inline">Agregar</span>
+          </button>
+        </div>
+      )}
+
       {/* Mi Cuenta: saldo pendiente del cliente reconocido */}
       {savedCustomer?.customerName && customerProfile && (
         <div id="cuenta-seccion" className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
@@ -3108,6 +3415,20 @@ function CustomerView({
               <span className="flex items-center gap-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                 Ver saldo <Icon name="chevronRight" className="w-3 h-3" />
               </span>
+            </button>
+          </div>
+          <div className="px-3 sm:px-4 pb-3 sm:pb-4 grid grid-cols-2 gap-2">
+            <button
+              onClick={onOpenMyKiosko}
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-xs font-bold hover:bg-teal-500/25 transition-all"
+            >
+              <Icon name="zap" className="w-3.5 h-3.5" /> Mi Kiosko
+            </button>
+            <button
+              onClick={onOpenDebt}
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-700/40 border border-slate-700 text-slate-200 text-xs font-bold hover:bg-slate-700/60 transition-all"
+            >
+              <Icon name="creditCard" className="w-3.5 h-3.5" /> Mi saldo
             </button>
           </div>
         </div>
@@ -3362,6 +3683,23 @@ function CustomerView({
         className="sticky z-20 -mx-3 sm:-mx-6 lg:-mx-8 px-3 sm:px-6 lg:px-8 py-2 sm:py-3 bg-slate-900/95 backdrop-blur-lg border-b border-slate-800/60 space-y-4"
         style={{ top: stickyTop }}
       >
+        {/* Banner de invitado: el usuario está sumando al carrito compartido de un dueño */}
+        {guestShare && (
+          <div className="flex items-center gap-2 p-3 rounded-2xl bg-indigo-500/15 border border-indigo-500/40">
+            <span className="p-1.5 rounded-xl bg-indigo-500/20 text-indigo-300 shrink-0">
+              <Icon name="users" className="w-4 h-4" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <span className="block text-xs font-bold text-white truncate">
+                Modo compartido: sumando al pedido de {guestShare.ownerName}
+              </span>
+              <span className="block text-[11px] text-indigo-200/80">
+                {guestAdded > 0 ? `Has agregado ${guestAdded} artículos` : 'Agregá tus antojos y el dueño paga todo junto'}
+              </span>
+            </div>
+          </div>
+        )}
+
         <div className="relative">
           <Icon name="search" className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
           <input
@@ -3374,16 +3712,24 @@ function CustomerView({
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
             placeholder="Buscar productos, marcas..."
-            className="w-full pl-12 pr-10 py-3.5 bg-slate-800/80 border border-slate-700/80 rounded-2xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all text-sm backdrop-blur-md"
+            className="w-full pl-12 pr-24 py-3.5 bg-slate-800/80 border border-slate-700/80 rounded-2xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all text-sm backdrop-blur-md"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              className="absolute right-16 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
             >
               <Icon name="x" className="w-4 h-4" />
             </button>
           )}
+          <button
+            onClick={onOpenVoice}
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-teal-500/15 text-teal-300 border border-teal-500/30 hover:bg-teal-500/25 transition-all"
+            title="Compra rápida por voz"
+            aria-label="Compra rápida por voz"
+          >
+            <Icon name="mic" className="w-4 h-4" />
+          </button>
 
           {/* Autocomplete suggestions */}
           {showSuggestions && suggestions.length > 0 && (
@@ -3473,6 +3819,8 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
   const isOut = avail <= 0;
   const isLow = avail > 0 && avail <= 5;
+  // Predicción "Se acaba pronto": el stock durará <= 2 días al ritmo de venta actual.
+  const runOutSoon = !isOut && product.runOutDays != null && product.runOutDays > 0 && product.runOutDays <= 2;
   const [justAdded, setJustAdded] = useState(false);
 
   const handleAdd = (e) => {
@@ -3536,6 +3884,14 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
             ¡Últimas {avail} un.!
           </span>
         ) : null}
+
+        {/* Predicción "Se acaba pronto" (por velocidad de venta) */}
+        {runOutSoon && !isOut && (
+          <span className="absolute bottom-2 left-2 sm:bottom-3 sm:left-3 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-rose-500/90 text-white font-extrabold text-[10px] sm:text-[11px] shadow-lg flex items-center gap-1">
+            <Icon name="zap" className="w-3 h-3" />
+            Se acaba pronto (~{Math.ceil(product.runOutDays)} d)
+          </span>
+        )}
       </div>
 
       <div className="p-2.5 sm:p-5 flex-1 flex flex-col justify-between space-y-2 sm:space-y-4">
@@ -4373,7 +4729,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
   );
 }
 
-function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout, holdDeadline }) {
+function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout, holdDeadline, onShare }) {
   const [nowMs, setNowMs] = useState(Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -4521,6 +4877,14 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
             >
               <span>Confirmar y Elegir Forma de Pago</span>
               <Icon name="check" className="w-5 h-5" />
+            </button>
+
+            <button
+              onClick={onShare}
+              className="w-full py-3 rounded-2xl bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 font-bold text-xs hover:bg-indigo-500/25 transition-all flex items-center justify-center gap-2"
+            >
+              <Icon name="share2" className="w-4 h-4" />
+              <span>Compartir carrito</span>
             </button>
           </div>
         )}
@@ -10586,6 +10950,420 @@ function CancelOrderModal({ order, onClose, onConfirm }) {
             Sí, Cancelar
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Compra Rápida por Voz: helpers de normalización y parsing.
+// ---------------------------------------------------------------------------
+const normalizeText = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const SPEECH_NUMBER_WORDS = {
+  un: 1, uno: 1, una: 1,
+  dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
+  diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15,
+  veinte: 20, veintiuno: 21, veintidos: 22, veintitres: 23, veinticuatro: 24,
+  treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90,
+  cien: 100, ciento: 100
+};
+
+// Parsea un texto como "2 leche y 1 pan" o "agrega dos jugos" y lo convierte en
+// [{ productId, qty }] haciendo match contra el catálogo por nombre normalizado.
+const parseVoiceOrder = (transcript, products) => {
+  const text = normalizeText(transcript);
+  if (!text) return [];
+  const segments = text.split(/\s+(?:y|coma|con)\s+|\s*,\s*/).filter(Boolean);
+  const catalog = (products || []).map((p) => ({
+    product: p,
+    norm: normalizeText(p.name)
+  }));
+
+  const results = [];
+  for (const seg of segments) {
+    // Liderar palabras de activación irrelevantes al inicio del primer segmento.
+    const cleaned = seg.replace(/^(hey|hola|kiosko|kiosco|agrega|agregar|agregame|agregame|anade|pon|pone|quiero|necesito|comprame|dame|por favor|porfavor|quiero pedir|pedido)\s+/g, '');
+    let qty = 1;
+    let namePart = cleaned;
+
+    // Cantidad al inicio: "2 leche" | "dos leche" | "una empanada".
+    const qtyMatch = namePart.match(/^(\d+|[a-z]+)\s+(.+)$/);
+    if (qtyMatch) {
+      const n = Number(qtyMatch[1]);
+      if (!isNaN(n) && n > 0) {
+        qty = n;
+        namePart = qtyMatch[2];
+      } else if (SPEECH_NUMBER_WORDS[qtyMatch[1]]) {
+        qty = SPEECH_NUMBER_WORDS[qtyMatch[1]];
+        namePart = qtyMatch[2];
+      }
+    }
+
+    if (!namePart.trim()) continue;
+    const segNorm = normalizeText(namePart);
+
+    // Mejor coincidencia: el nombre del producto normalizado está contenido en
+    // el segmento, o el segmento está contenido en el nombre del producto.
+    let best = null;
+    let bestScore = 0;
+    for (const c of catalog) {
+      let score = 0;
+      if (segNorm && c.norm && (c.norm.includes(segNorm) || segNorm.includes(c.norm))) {
+        score = 1 + (segNorm.length >= 4 ? 1 : 0);
+      } else {
+        const segWords = segNorm.split(' ');
+        const nameWords = c.norm.split(' ');
+        const hit = segWords.filter((w) => w.length >= 3 && nameWords.includes(w)).length;
+        score = hit / Math.max(1, nameWords.length);
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = c.product;
+      }
+    }
+    if (best && bestScore >= 0.5) {
+      const existing = results.find((r) => r.product.id === best.id);
+      if (existing) existing.qty += qty;
+      else results.push({ product: best, qty });
+    }
+  }
+  return results;
+};
+
+const speakText = (text) => {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'es-ES';
+    u.rate = 1;
+    window.speechSynthesis.speak(u);
+  } catch {}
+};
+
+const speechRecognitionAvailable = () =>
+  typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+// Modal de confirmación de la compra rápida por voz: muestra los artículos
+// reconocidos y permite confirmar (agrega al carrito) o reintentar.
+function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listening }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-scale-up">
+        <div className="flex items-center gap-3">
+          <span className={`p-2.5 rounded-2xl shrink-0 ${listening ? 'bg-rose-500/20 text-rose-400 animate-pulse' : 'bg-teal-500/20 text-teal-400'}`}>
+            <Icon name="mic" className="w-5 h-5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-base font-bold text-white">Compra rápida por voz</h3>
+            <p className="text-xs text-slate-400">
+              {listening
+                ? 'Escuchando… Decí por ejemplo: "2 leche y 1 pan"'
+                : items.length > 0
+                  ? 'Reconocimos estos artículos. ¿Los agregamos?'
+                  : 'No escuchamos claro. Tocá "Escuchar de nuevo".'}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        {listening && (
+          <div className="flex items-center justify-center gap-2 py-4">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping" />
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping" style={{ animationDelay: '150ms' }} />
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping" style={{ animationDelay: '300ms' }} />
+          </div>
+        )}
+
+        {!listening && items.length === 0 ? (
+          <p className="text-sm text-slate-400 bg-slate-800/60 border border-slate-700 rounded-2xl p-4">
+            No reconocimos productos claros. Prueba con frases como: <b>"2 leche y 1 pan"</b>.
+          </p>
+        ) : (
+          items.length > 0 && (
+            <div className="space-y-2">
+              {items.map((it) => (
+                <div key={it.product.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-800/60 border border-slate-700">
+                  <img src={it.product.image} alt={it.product.name} className="w-10 h-10 rounded-lg object-cover bg-slate-900 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-xs font-semibold text-slate-200 truncate">{it.product.name}</span>
+                    <span className="text-[11px] text-teal-400 font-bold">{formatUsd(it.product.price)} c/u</span>
+                  </div>
+                  <span className="shrink-0 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-sm font-black text-white">x{it.qty}</span>
+                </div>
+              ))}
+              <div className="flex justify-between text-sm font-black pt-1">
+                <span className="text-slate-300">Total</span>
+                <span className="text-teal-400">
+                  {formatUsd(items.reduce((acc, it) => acc + it.product.price * it.qty, 0))}
+                </span>
+              </div>
+            </div>
+          )
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={onRetry}
+            disabled={listening}
+            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            <Icon name="refresh" className="w-3.5 h-3.5" /> Escuchar de nuevo
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading || items.length === 0 || listening}
+            className="py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-xs hover:from-teal-400 hover:to-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-teal-500/20 flex items-center justify-center gap-1.5"
+          >
+            {loading ? 'Agregando...' : 'Agregar al carrito'} <Icon name="check" className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Dashboard personal "Mi Kiosko": resumen del cliente con gasto, pedidos,
+// productos favoritos, rachas y próximos pedidos activos.
+function MyKioskoModal({ customer, customerName, orders, products, rate, onClose, onRepeatLastOrder }) {
+  const customerOrders = useMemo(() => {
+    if (!customer?.phone) return [];
+    const key = normalizePhoneDigits(customer.phone);
+    return (orders || []).filter((o) => normalizePhoneDigits(o.phone) === key);
+  }, [customer, orders]);
+
+  const stats = useMemo(() => {
+    const totalOrders = customerOrders.length;
+    const totalSpent = customerOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+    const now = new Date();
+    const thisMonth = customerOrders.filter((o) => {
+      const d = new Date(o.createdAt || o.timestamp);
+      return !isNaN(d) && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    });
+    const monthSpent = thisMonth.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+    const activeOrders = customerOrders.filter((o) => !['entregado', 'cancelado'].includes(o.status));
+
+    const byProduct = {};
+    customerOrders.forEach((o) => {
+      (o.items || []).forEach((it) => {
+        byProduct[it.id] = (byProduct[it.id] || 0) + (Number(it.quantity) || 0);
+      });
+    });
+    const topProducts = Object.entries(byProduct)
+      .map(([id, qty]) => ({ product: (products || []).find((p) => p.id === id), qty }))
+      .filter((t) => t.product)
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 3);
+
+    const totalItems = customerOrders.reduce((acc, o) => acc + (o.items || []).reduce((a, it) => a + (Number(it.quantity) || 0), 0), 0);
+
+    return { totalOrders, totalSpent, monthSpent, activeOrders, topProducts, totalItems };
+  }, [customerOrders, products]);
+
+  const balance = Number(customer?.balance) || 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="zap" className="w-5 h-5 text-teal-400" />
+              Mi Kiosko
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Hola {customerName?.split(' ')[0] || 'cliente'} · Tu resumen personal
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+          {/* Métricas principales */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Gasto total</span>
+              <span className="block text-lg font-black text-white mt-0.5">{formatUsd(stats.totalSpent)}</span>
+              {rate?.rate > 0 && <span className="text-[10px] text-slate-500">{formatBs(usdToBs(stats.totalSpent, rate.rate))}</span>}
+            </div>
+            <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Este mes</span>
+              <span className="block text-lg font-black text-teal-400 mt-0.5">{formatUsd(stats.monthSpent)}</span>
+              <span className="text-[10px] text-slate-500">{stats.totalOrders} pedidos en total</span>
+            </div>
+          </div>
+
+          {/* Rachas / actividad */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Artículos comprados</span>
+              <span className="block text-lg font-black text-white mt-0.5">{stats.totalItems}</span>
+            </div>
+            <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Pedidos activos</span>
+              <span className="block text-lg font-black text-white mt-0.5">{stats.activeOrders.length}</span>
+              <span className="text-[10px] text-slate-500">en preparación / en camino</span>
+            </div>
+          </div>
+
+          {/* Saldo / beneficio */}
+          <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700 flex items-center justify-between">
+            <div>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Saldo pendiente</span>
+              <span className={`block text-lg font-black mt-0.5 ${balance > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {formatUsd(balance)}
+              </span>
+            </div>
+            {customer?.isBenefited ? (
+              <span className="px-2.5 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] font-bold">
+                ✓ Beneficiado
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-full bg-slate-700/40 text-slate-300 text-[10px] font-bold">Pago a la entrega</span>
+            )}
+          </div>
+
+          {/* Productos favoritos */}
+          <div>
+            <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Tus favoritos</span>
+            {stats.topProducts.length === 0 ? (
+              <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl mt-1.5">
+                Aún no tienes pedidos. ¡Tu primer antojo aparecerá aquí!
+              </p>
+            ) : (
+              <div className="space-y-2 mt-1.5">
+                {stats.topProducts.map((t) => (
+                  <div key={t.product.id} className="flex items-center gap-3 p-2 rounded-xl bg-slate-800/50 border border-slate-700/60">
+                    <img src={t.product.image} alt={t.product.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
+                    <span className="flex-1 min-w-0 text-xs font-semibold text-slate-200 truncate">{t.product.name}</span>
+                    <span className="text-[11px] font-black text-teal-400">{t.qty}x</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Repetir último pedido */}
+          {customerOrders.length > 0 && (
+            <button
+              onClick={() => {
+                onClose();
+                onRepeatLastOrder?.();
+              }}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 flex items-center justify-center gap-1.5"
+            >
+              <Icon name="refresh" className="w-3.5 h-3.5" /> Repetir mi último pedido
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal "Compartir Carrito": el dueño genera un enlace para que familia/amigos
+// sumen artículos y vea el carrito unificado en tiempo real.
+function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, products }) {
+  const link = share?.url || '';
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    onCopy(link);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+
+  const sharedItems = (share?.items || []).map((it) => {
+    const live = (products || []).find((p) => p.id === it.id);
+    return { ...it, name: it.name || live?.name || it.id, price: it.price || live?.price || 0, image: it.image || live?.image || '' };
+  });
+  const sharedTotal = sharedItems.reduce((acc, it) => acc + Number(it.price) * Number(it.qty), 0);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-scale-up max-h-[92vh] flex flex-col">
+        <div className="flex items-center gap-3">
+          <span className="p-2.5 rounded-2xl bg-indigo-500/20 text-indigo-400 shrink-0">
+            <Icon name="users" className="w-5 h-5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-base font-bold text-white">Carrito compartido</h3>
+            <p className="text-xs text-slate-400">Compartí el enlace y todos suman al mismo carrito.</p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700 space-y-2">
+          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Enlace de tu carrito</span>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={link}
+              onFocus={(e) => e.target.select()}
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-[11px] text-teal-300 font-mono focus:outline-none"
+            />
+            <button
+              onClick={copy}
+              className="shrink-0 px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold"
+            >
+              {copied ? '✓ Copiado' : 'Copiar'}
+            </button>
+          </div>
+          <button
+            onClick={() => onWhatsApp(link)}
+            className="w-full py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-600/30 flex items-center justify-center gap-1.5"
+          >
+            <Icon name="whatsapp" className="w-4 h-4" /> Compartir por WhatsApp
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-2">
+          <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
+            Artículos en el carrito ({sharedItems.length})
+          </span>
+          {sharedItems.length === 0 ? (
+            <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl">
+              Tu carrito está vacío por ahora. Los artículos que agreguen tus invitados aparecerán aquí en vivo.
+            </p>
+          ) : (
+            sharedItems.map((it) => (
+              <div key={it.id} className="flex items-center gap-3 p-2 rounded-xl bg-slate-800/50 border border-slate-700/60">
+                <img src={it.image} alt={it.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
+                <span className="flex-1 min-w-0 text-xs font-semibold text-slate-200 truncate">{it.name}</span>
+                <span className="text-[11px] font-black text-white">{it.qty}x</span>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="flex justify-between text-sm font-black border-t border-slate-800 pt-3">
+          <span className="text-slate-300">Total del carrito</span>
+          <span className="text-teal-400">{formatUsd(sharedTotal)}</span>
+        </div>
+
+        <button
+          onClick={onCloseShare}
+          className="w-full py-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25"
+        >
+          Cerrar carrito compartido
+        </button>
       </div>
     </div>
   );

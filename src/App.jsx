@@ -939,6 +939,43 @@ export default function App() {
     }, 3800);
   };
 
+  // Hook para acciones idempotentes con feedback inmediato y prevención de doble click
+  const useAction = (action, { 
+    message = 'Procesando...', 
+    onSuccess, 
+    onError,
+    idempotencyKey 
+  } = {}) => {
+    const [loading, setLoading] = useState(false);
+    const pendingRef = useRef(new Set());
+    
+    const execute = useCallback(async (...args) => {
+      const key = idempotencyKey ? idempotencyKey(...args) : JSON.stringify(args);
+      if (pendingRef.current.has(key)) return;
+      if (loading) return;
+      
+      pendingRef.current.add(key);
+      setLoading(true);
+      addToast(message, 'info');
+      
+      try {
+        const result = await action(...args);
+        addToast('Listo', 'success');
+        onSuccess?.(result);
+        return result;
+      } catch (e) {
+        addToast(e.message || 'Error', 'error');
+        onError?.(e);
+        throw e;
+      } finally {
+        setLoading(false);
+        pendingRef.current.delete(key);
+      }
+    }, [action, loading, message, onSuccess, onError, idempotencyKey]);
+    
+    return { execute, loading };
+  };
+
   const handleAdminLogin = async (phone, password) => {
     try {
       const res = await api.login(phone, password);

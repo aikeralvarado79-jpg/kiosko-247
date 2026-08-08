@@ -644,6 +644,10 @@ export default function App() {
       setLoadError('');
     }
     const res = await api.getState(clientId);
+    if (res.notModified) {
+      setIsLoading(false);
+      return;
+    }
     if (!res.ok) {
       if (!silent) {
         setLoadError('No se pudo conectar con el servidor. Verifica tu conexión a internet e intenta de nuevo.');

@@ -11170,18 +11170,18 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
   const customerOrders = useMemo(() => {
     if (!customer?.phone) return [];
     const key = normalizePhoneDigits(customer.phone);
-    return (orders || []).filter((o) => normalizePhoneDigits(o.phone) === key);
+    const now = new Date();
+    // Solo el mes calendario en curso: evita arrastrar todo el historial.
+    return (orders || []).filter((o) => {
+      if (normalizePhoneDigits(o.phone) !== key) return false;
+      const d = new Date(o.createdAt || o.timestamp);
+      return !isNaN(d) && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    });
   }, [customer, orders]);
 
   const stats = useMemo(() => {
     const totalOrders = customerOrders.length;
     const totalSpent = customerOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
-    const now = new Date();
-    const thisMonth = customerOrders.filter((o) => {
-      const d = new Date(o.createdAt || o.timestamp);
-      return !isNaN(d) && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    });
-    const monthSpent = thisMonth.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
     const activeOrders = customerOrders.filter((o) => !['entregado', 'cancelado'].includes(o.status));
 
     const byProduct = {};
@@ -11198,7 +11198,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
 
     const totalItems = customerOrders.reduce((acc, o) => acc + (o.items || []).reduce((a, it) => a + (Number(it.quantity) || 0), 0), 0);
 
-    return { totalOrders, totalSpent, monthSpent, activeOrders, topProducts, totalItems };
+    return { totalOrders, totalSpent, activeOrders, topProducts, totalItems };
   }, [customerOrders, products]);
 
   const balance = Number(customer?.balance) || 0;
@@ -11214,7 +11214,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
               Mi historial
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Hola {customerName?.split(' ')[0] || 'cliente'} · Tu resumen personal
+              Hola {customerName?.split(' ')[0] || 'cliente'} · Tu resumen del mes
             </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
@@ -11226,21 +11226,21 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
           {/* Métricas principales */}
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Gasto total</span>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Gasto del mes</span>
               <span className="block text-lg font-black text-white mt-0.5">{formatUsd(stats.totalSpent)}</span>
               {rate?.rate > 0 && <span className="text-[10px] text-slate-500">{formatBs(usdToBs(stats.totalSpent, rate.rate))}</span>}
             </div>
             <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Este mes</span>
-              <span className="block text-lg font-black text-teal-400 mt-0.5">{formatUsd(stats.monthSpent)}</span>
-              <span className="text-[10px] text-slate-500">{stats.totalOrders} pedidos en total</span>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Pedidos del mes</span>
+              <span className="block text-lg font-black text-teal-400 mt-0.5">{stats.totalOrders}</span>
+              <span className="text-[10px] text-slate-500">en lo que va del mes</span>
             </div>
           </div>
 
           {/* Rachas / actividad */}
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Artículos comprados</span>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Artículos del mes</span>
               <span className="block text-lg font-black text-white mt-0.5">{stats.totalItems}</span>
             </div>
             <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
@@ -11267,12 +11267,12 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
             )}
           </div>
 
-          {/* Productos favoritos */}
+          {/* Productos favoritos del mes */}
           <div>
-            <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Tus favoritos</span>
+            <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Tus favoritos del mes</span>
             {stats.topProducts.length === 0 ? (
               <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl mt-1.5">
-                Aún no tienes pedidos. ¡Tu primer antojo aparecerá aquí!
+                Aún no tienes pedidos este mes. ¡Tu primer antojo aparecerá aquí!
               </p>
             ) : (
               <div className="space-y-2 mt-1.5">

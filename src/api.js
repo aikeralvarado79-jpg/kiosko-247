@@ -94,6 +94,7 @@ export const api = {
   pushReminder: (phone, amount) => request('/api/push/reminder', { method: 'POST', body: JSON.stringify({ phone, amount }) }),
   updateOrderPayment: (id, status) => request(`/api/orders/${id}/payment`, { method: 'POST', body: JSON.stringify({ status }) }),
   attachPaymentProof: (id, phone, proof, reference) => request(`/api/orders/${id}/payment-proof`, { method: 'POST', body: JSON.stringify({ phone, proof, reference }) }),
+  getOrderProof: (id, phone) => request(`/api/orders/${id}/proof?phone=${encodeURIComponent(phone || '')}`),
   convertOrderToCredit: (id, phone) => request(`/api/orders/${id}/payment/credit`, { method: 'POST', body: JSON.stringify({ phone }) }),
   getOrderMessages: (id, phone) => request(`/api/orders/${id}/messages?phone=${encodeURIComponent(phone || '')}`),
   sendOrderMessage: (id, phone, text) => request(`/api/orders/${id}/messages`, { method: 'POST', body: JSON.stringify({ phone, text }) })

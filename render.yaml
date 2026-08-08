@@ -22,15 +22,20 @@ services:
       - key: SUPABASE_URL
         sync: false
         # URL del proyecto Supabase (https://xxxx.supabase.co). Si se define junto
-        # a SUPABASE_ANON_KEY, los comprobantes se suben a Storage en vez de
+        # a SUPABASE_SERVICE_KEY, los comprobantes se suben a Storage en vez de
         # guardarse como base64 en la BD (mucho menos ancho de banda).
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+        # Secret key de Supabase (sb_secret_...). Preferida para el server:
+        # sube los comprobantes al bucket con permisos de service_role.
       - key: SUPABASE_ANON_KEY
         sync: false
         # Publishable key de Supabase (sb_publishable_... o anon key).
+        # Fallback de subida si no hay SUPABASE_SERVICE_KEY.
       - key: SUPABASE_STORAGE_BUCKET
         sync: false
         # Bucket de Storage para los comprobantes (default: comprobantes).
-        # Debe existir y permitir inserciones del rol anon.
+        # Debe existir y ser público (lectura).
 
   # Ambiente de pruebas: se despliega automáticamente con la rama develop.
   # URL esperada: https://kiosko-247-staging.onrender.com
@@ -57,6 +62,8 @@ services:
         # Solo probá UI/navegación; NO crees pedidos ni modifiques stock desde
         # staging, o ensuciarás los datos reales del kiosko.
       - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false

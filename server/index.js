@@ -218,7 +218,17 @@ app.get('/api/state', async (req, res) => {
   try {
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId : undefined;
     const [state, rate] = await Promise.all([store.getState(clientId), getBcvRate()]);
-    res.json({ ...state, rate });
+    const payload = { ...state, rate };
+    const body = JSON.stringify(payload);
+    const etag = `"${crypto.createHash('sha1').update(body).digest('hex')}"`;
+    // Revalidación condicional: si el cliente ya tiene este estado, no
+    // reenviamos el cuerpo. Ahorra ~90% del tráfico del polling.
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    res.set('ETag', etag);
+    res.set('Cache-Control', 'no-cache');
+    res.json(payload);
   } catch (err) {
     fail(res, err, 'No se pudo cargar la tienda. Intenta de nuevo en unos segundos.');
   }
@@ -263,6 +273,54 @@ app.delete('/api/holds', async (req, res) => {
     res.json(await store.releaseStock(clientId));
   } catch (err) {
     fail(res, err, 'No se pudo liberar el stock. Intenta de nuevo.');
+  }
+});
+
+// ---- Carritos compartidos ("Compartir Carrito") ----
+
+// Crea el carrito compartido del dueño (base = su carrito actual).
+app.post('/api/share', async (req, res) => {
+  try {
+    const { clientId, ownerName, items } = req.body || {};
+    const result = await store.createShare({ clientId, ownerName, items });
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    fail(res, err, 'No se pudo crear el carrito compartido. Intenta de nuevo.');
+  }
+});
+
+// Consulta pública de un carrito compartido por su código.
+app.get('/api/share/:code', async (req, res) => {
+  try {
+    const share = await store.getShare(req.params.code);
+    if (!share) return res.status(404).json({ error: 'Carrito compartido no encontrado o expirado' });
+    res.json(share);
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar el carrito compartido.');
+  }
+});
+
+// El invitado suma artículos al carrito compartido.
+app.post('/api/share/:code/items', async (req, res) => {
+  try {
+    const { items } = req.body || {};
+    const result = await store.addToShare({ code: req.params.code, items });
+    if (result.error) return res.status(404).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    fail(res, err, 'No se pudo agregar al carrito compartido.');
+  }
+});
+
+// Cierra el carrito compartido (solo el dueño).
+app.delete('/api/share/:code', async (req, res) => {
+  try {
+    const result = await store.deleteShare({ code: req.params.code, clientId: (req.body || {}).clientId });
+    if (result.error) return res.status(403).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    fail(res, err, 'No se pudo cerrar el carrito compartido.');
   }
 });
 

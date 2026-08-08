@@ -1,5 +1,8 @@
 const TOKEN_KEY = 'kiosko_admin_token';
 
+// ETags por clientId para revalidación condicional de /api/state (ahorra tráfico).
+const stateEtags = {};
+
 export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
 export const setToken = (token) => sessionStorage.setItem(TOKEN_KEY, token);
 export const clearToken = () => sessionStorage.removeItem(TOKEN_KEY);
@@ -11,15 +14,29 @@ async function request(path, options = {}) {
 
   const res = await fetch(path, { ...options, headers });
   if (res.status === 401) clearToken();
+  if (res.status === 304) {
+    return { ok: true, status: 304, notModified: true, data: null, etag: res.headers.get('etag') };
+  }
 
   const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, data };
+  return { ok: res.ok, status: res.status, data, etag: res.headers.get('etag') };
 }
 
 export const api = {
-  getState: (clientId) => request(`/api/state${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`),
+  getState: async (clientId) => {
+    const key = clientId ? `c:${clientId}` : 'default';
+    const headers = {};
+    if (stateEtags[key]) headers['If-None-Match'] = stateEtags[key];
+    const res = await request(`/api/state${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`, { headers });
+    if (res.ok && res.etag) stateEtags[key] = res.etag;
+    return res;
+  },
   holdStock: (clientId, items, ttlMs) => request('/api/holds', { method: 'POST', body: JSON.stringify({ clientId, items, ttlMs }) }),
   releaseHold: (clientId) => request('/api/holds', { method: 'DELETE', body: JSON.stringify({ clientId }) }),
+  createShare: (data) => request('/api/share', { method: 'POST', body: JSON.stringify(data) }),
+  getShare: (code) => request(`/api/share/${encodeURIComponent(code)}`),
+  addShareItems: (code, items) => request(`/api/share/${encodeURIComponent(code)}/items`, { method: 'POST', body: JSON.stringify({ items }) }),
+  closeShare: (code, clientId) => request(`/api/share/${encodeURIComponent(code)}`, { method: 'DELETE', body: JSON.stringify({ clientId }) }),
   login: (phone, password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ phone, password }) }),
   createOrder: (order) => request('/api/orders', { method: 'POST', body: JSON.stringify(order) }),
   createProduct: (product) => request('/api/products', { method: 'POST', body: JSON.stringify(product) }),

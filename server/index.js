@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import compression from 'compression';
 import { fileURLToPath } from 'url';
 import * as store from './store.js';
 import * as webauthn from './webauthn.js';
@@ -12,6 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.use(express.json({ limit: '8mb' }));
+app.use(compression());
 
 let config = {};
 try {

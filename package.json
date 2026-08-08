@@ -21,6 +21,7 @@
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.2",
+    "compression": "^1.8.1",
     "express": "^4.22.2",
     "leaflet": "^1.9.4",
     "pg": "^8.22.0",

@@ -3426,7 +3426,7 @@ function CustomerView({
               onClick={onOpenMyKiosko}
               className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-xs font-bold hover:bg-teal-500/25 transition-all"
             >
-              <Icon name="zap" className="w-3.5 h-3.5" /> Mi Kiosko
+              <Icon name="zap" className="w-3.5 h-3.5" /> Mi historial
             </button>
             <button
               onClick={onOpenDebt}
@@ -11185,7 +11185,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <Icon name="zap" className="w-5 h-5 text-teal-400" />
-              Mi Kiosko
+              Mi historial
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Hola {customerName?.split(' ')[0] || 'cliente'} · Tu resumen personal

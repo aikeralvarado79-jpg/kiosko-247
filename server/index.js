@@ -266,6 +266,54 @@ app.delete('/api/holds', async (req, res) => {
   }
 });
 
+// ---- Carritos compartidos ("Compartir Carrito") ----
+
+// Crea el carrito compartido del dueño (base = su carrito actual).
+app.post('/api/share', async (req, res) => {
+  try {
+    const { clientId, ownerName, items } = req.body || {};
+    const result = await store.createShare({ clientId, ownerName, items });
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    fail(res, err, 'No se pudo crear el carrito compartido. Intenta de nuevo.');
+  }
+});
+
+// Consulta pública de un carrito compartido por su código.
+app.get('/api/share/:code', async (req, res) => {
+  try {
+    const share = await store.getShare(req.params.code);
+    if (!share) return res.status(404).json({ error: 'Carrito compartido no encontrado o expirado' });
+    res.json(share);
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar el carrito compartido.');
+  }
+});
+
+// El invitado suma artículos al carrito compartido.
+app.post('/api/share/:code/items', async (req, res) => {
+  try {
+    const { items } = req.body || {};
+    const result = await store.addToShare({ code: req.params.code, items });
+    if (result.error) return res.status(404).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    fail(res, err, 'No se pudo agregar al carrito compartido.');
+  }
+});
+
+// Cierra el carrito compartido (solo el dueño).
+app.delete('/api/share/:code', async (req, res) => {
+  try {
+    const result = await store.deleteShare({ code: req.params.code, clientId: (req.body || {}).clientId });
+    if (result.error) return res.status(403).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    fail(res, err, 'No se pudo cerrar el carrito compartido.');
+  }
+});
+
 // Lista negra: clientes con deuda (balance > 0). Definido antes de las rutas
 // /api/customers/:phone para que "blacklist" no se interprete como teléfono.
 app.get('/api/customers/blacklist', requireAdmin, async (req, res) => {

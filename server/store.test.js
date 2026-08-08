@@ -392,4 +392,77 @@ describe('fileStore', () => {
     // getState purga las reservas vencidas.
     expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(0);
   });
+
+  it('crea un carrito compartido y el invitado puede sumar artículos', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+    const p2 = state.products.find((p) => p.id === 'p2');
+
+    const created = await store.createShare({
+      clientId: 'dueno-1',
+      ownerName: 'Lucía',
+      items: [{ id: 'p1', qty: 2 }]
+    });
+    expect(created.ok).toBe(true);
+    const code = created.share.code;
+    expect(code).toBeTruthy();
+
+    // El invitado suma su artículo.
+    const added = await store.addToShare({ code, items: [{ id: 'p2', qty: 1 }] });
+    expect(added.ok).toBe(true);
+    expect(added.share.items.length).toBe(2);
+    expect(added.share.items.find((i) => i.id === 'p2').qty).toBe(1);
+
+    // El dueño re-crea su carrito: se reemplaza el anterior (un solo activo por dueño).
+    await store.createShare({ clientId: 'dueno-1', ownerName: 'Lucía', items: [{ id: 'p1', qty: 1 }] });
+    const afterRecreate = await store.getShare(code);
+    expect(afterRecreate).toBeNull();
+  });
+
+  it('el invitado no puede superar el stock disponible en un carrito compartido', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+    const stock = p1.stock;
+
+    const created = await store.createShare({ clientId: 'dueno-2', items: [] });
+    const added = await store.addToShare({ code: created.share.code, items: [{ id: 'p1', qty: stock + 50 }] });
+    expect(added.ok).toBe(true);
+    expect(added.share.items.find((i) => i.id === 'p1').qty).toBe(stock);
+  });
+
+  it('solo el dueño puede cerrar el carrito compartido', async () => {
+    const store = await freshStore();
+    const created = await store.createShare({ clientId: 'dueno-3', ownerName: 'A', items: [] });
+
+    const denied = await store.deleteShare({ code: created.share.code, clientId: 'otro' });
+    expect(denied.error).toBeTruthy();
+
+    const ok = await store.deleteShare({ code: created.share.code, clientId: 'dueno-3' });
+    expect(ok.ok).toBe(true);
+    expect(await store.getShare(created.share.code)).toBeNull();
+  });
+
+  it('expone la predicción de stock (soldPerDay / runOutDays) en getState', async () => {
+    const store = await freshStore();
+    // Crear pedidos recientes de p1 para generar velocidad de venta.
+    const state0 = await store.getState();
+    const p1 = state0.products.find((p) => p.id === 'p1');
+    for (let i = 0; i < 4; i++) {
+      await store.createOrder({
+        customerName: 'Pred',
+        phone: '41111111111',
+        items: [{ id: 'p1', name: p1.name, price: p1.price, quantity: 2 }],
+        total: p1.price * 2
+      });
+    }
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    expect(product).toHaveProperty('soldPerDay');
+    expect(product).toHaveProperty('runOutDays');
+    // 4 pedidos x 7 uds en 14 días => 2/día; con stock inicial debe agotarse en días finitos.
+    expect(product.soldPerDay).toBeGreaterThan(0);
+    expect(product.runOutDays).toBeGreaterThan(0);
+  });
 });

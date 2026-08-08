@@ -82,7 +82,152 @@ export const releaseStock = async (clientId) => {
   return { ok: true, state: await store.getState(clientId) };
 };
 
+// ---------------------------------------------------------------------------
+// Carritos compartidos ("Compartir Carrito"). Un dueño crea un carrito con un
+// código corto y comparte el enlace; los invitados pueden sumar artículos al
+// mismo carrito y el dueño ve todo unificado y paga una sola vez. En memoria
+// (un solo dyno) con TTL de 24 h; se purgan al acceder.
+// ---------------------------------------------------------------------------
+const SHARE_TTL_MS = 24 * 60 * 60 * 1000;
+const shares = new Map(); // code -> { ownerClientId, ownerName, items: Map(id->qty), expiresAt, updatedAt }
+
+const purgeExpiredShares = (now = Date.now()) => {
+  for (const [code, s] of shares) {
+    if (s.expiresAt <= now) shares.delete(code);
+  }
+};
+
+const generateShareCode = () => {
+  let code;
+  do {
+    code = Math.random().toString(36).slice(2, 8).toUpperCase();
+  } while (shares.has(code));
+  return code;
+};
+
+// Resuelve un carrito compartido en su forma pública (con datos de producto).
+const getSharePublic = async (code) => {
+  const s = shares.get(code);
+  if (!s) return null;
+  const state = await store.getState();
+  const items = Array.from(s.items.entries()).map(([id, qty]) => {
+    const p = state.products.find((x) => x.id === id) || null;
+    return {
+      id,
+      qty,
+      name: p?.name || id,
+      price: p?.price != null ? Number(p.price) : 0,
+      image: p?.image || ''
+    };
+  });
+  return {
+    code: s.code,
+    ownerClientId: s.ownerClientId,
+    ownerName: s.ownerName || 'Un cliente',
+    items,
+    expiresAt: s.expiresAt
+  };
+};
+
+export const createShare = async ({ clientId, ownerName, items }) => {
+  purgeExpiredShares();
+  if (!clientId) return { error: 'Sesión de cliente inválida' };
+  for (const [code, s] of shares) {
+    if (s.ownerClientId === clientId) shares.delete(code);
+  }
+  const list = (Array.isArray(items) ? items : []).filter((it) => it && it.id && it.qty > 0);
+  const now = Date.now();
+  const code = generateShareCode();
+  shares.set(code, {
+    code,
+    ownerClientId: clientId,
+    ownerName: String(ownerName || '').slice(0, 60),
+    items: new Map(list.map((it) => [it.id, Number(it.qty)])),
+    expiresAt: now + SHARE_TTL_MS,
+    updatedAt: now
+  });
+  return { ok: true, share: await getSharePublic(code) };
+};
+
+export const getShare = async (code) => {
+  purgeExpiredShares();
+  if (!code) return null;
+  return getSharePublic(String(code).toUpperCase());
+};
+
+// Suma artículos a un carrito compartido (lo usa el invitado). No permite
+// superar el stock disponible del producto.
+export const addToShare = async ({ code, items }) => {
+  purgeExpiredShares();
+  const s = shares.get(String(code).toUpperCase());
+  if (!s) return { error: 'Carrito compartido no encontrado o expirado' };
+  const state = await store.getState();
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it || !it.id) continue;
+    const p = state.products.find((x) => x.id === it.id);
+    if (!p) continue;
+    const qty = Number(it.qty) || 1;
+    const avail = Math.max(0, Number(p.stock) || 0);
+    const cur = s.items.get(it.id) || 0;
+    s.items.set(it.id, Math.min(cur + qty, Math.max(avail, cur)));
+  }
+  s.updatedAt = Date.now();
+  return { ok: true, share: await getSharePublic(String(code).toUpperCase()) };
+};
+
+// Cierra el carrito compartido. Solo el dueño puede hacerlo.
+export const deleteShare = async ({ code, clientId }) => {
+  const s = shares.get(String(code).toUpperCase());
+  if (!s) return { error: 'Carrito compartido no encontrado' };
+  if (clientId && s.ownerClientId !== clientId) {
+    return { error: 'Solo el dueño puede cerrar el carrito compartido' };
+  }
+  shares.delete(String(code).toUpperCase());
+  return { ok: true };
+};
+
 const generateProductId = () => `p-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+// ---------------------------------------------------------------------------
+// Predicción de stock "Se Acaba Pronto". Estima la velocidad de venta de cada
+// producto a partir del historial de pedidos (últimos 14 días) y calcula en
+// cuántos días se agotaría con el stock actual. Se expone en getState para que
+// la tienda marque productos que están por agotarse.
+// ---------------------------------------------------------------------------
+const parseOrderDate = (o) => {
+  if (o.createdAt) {
+    const d = new Date(o.createdAt);
+    if (!isNaN(d)) return d;
+  }
+  const m = String(o.timestamp || '').match(/^(\d{1,2})\/(\d{1,2})[,]?\s*(\d{1,2}):(\d{2})/);
+  if (!m) return new Date(NaN);
+  return new Date(new Date().getFullYear(), Number(m[2]) - 1, Number(m[1]), Number(m[3]), Number(m[4]));
+};
+
+const FORECAST_DAYS = 14;
+
+const withForecast = (products, orders) => {
+  const cutoff = Date.now() - FORECAST_DAYS * 24 * 3600 * 1000;
+  const sold = new Map();
+  for (const o of orders || []) {
+    if (o.status === 'cancelado') continue;
+    const d = parseOrderDate(o);
+    if (isNaN(d) || d.getTime() < cutoff) continue;
+    for (const it of o.items || []) {
+      sold.set(it.id, (sold.get(it.id) || 0) + (Number(it.quantity) || 0));
+    }
+  }
+  return products.map((p) => {
+    const qty = sold.get(p.id) || 0;
+    const soldPerDay = qty / FORECAST_DAYS;
+    const stock = Math.max(0, Number(p.stock) || 0);
+    let runOutDays = null;
+    if (stock > 0 && soldPerDay > 0) {
+      runOutDays = Math.round((stock / soldPerDay) * 10) / 10;
+    }
+    return { ...p, soldPerDay: Math.round(soldPerDay * 100) / 100, runOutDays };
+  });
+};
 
 // ---------------------------------------------------------------------------
 // Backend de archivo (local / dev). Se usa cuando no hay DATABASE_URL.
@@ -116,7 +261,7 @@ const fileStore = {
     delete state.settings.adminPassword;
     delete state.settings.adminCredentials;
     const reserved = reservedByProduct(clientId);
-    state.products = state.products.map((p) => ({ ...p, reserved: reserved.get(p.id) || 0 }));
+    state.products = withForecast(state.products, state.orders).map((p) => ({ ...p, reserved: reserved.get(p.id) || 0 }));
     return state;
   },
 
@@ -618,23 +763,26 @@ const pgStore = {
       this.pool.query(`SELECT key, value FROM ${q('settings')}`)
     ]);
     const reserved = reservedByProduct(clientId);
-    const products = productsRes.rows.map((r) => ({
-      id: r.id,
-      code: r.code,
-      name: r.name,
-      brand: r.brand,
-      description: r.description,
-      price: Number(r.price),
-      category: r.category,
-      stock: r.stock,
-      reserved: reserved.get(r.id) || 0,
-      sizeValue: r.sizeValue === '' || r.sizeValue === null ? '' : Number(r.sizeValue),
-      sizeUnit: r.sizeUnit,
-      image: r.image,
-      createdAt: r.createdAt || null
-    }));
-    const categories = categoriesRes.rows.map((r) => r.name);
     const orders = ordersRes.rows.map((r) => ({ ...r, items: r.items || [], total: Number(r.total) }));
+    const products = withForecast(
+      productsRes.rows.map((r) => ({
+        id: r.id,
+        code: r.code,
+        name: r.name,
+        brand: r.brand,
+        description: r.description,
+        price: Number(r.price),
+        category: r.category,
+        stock: r.stock,
+        reserved: reserved.get(r.id) || 0,
+        sizeValue: r.sizeValue === '' || r.sizeValue === null ? '' : Number(r.sizeValue),
+        sizeUnit: r.sizeUnit,
+        image: r.image,
+        createdAt: r.createdAt || null
+      })),
+      orders
+    );
+    const categories = categoriesRes.rows.map((r) => r.name);
     const settings = {
       promos: []
     };

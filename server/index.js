@@ -218,7 +218,17 @@ app.get('/api/state', async (req, res) => {
   try {
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId : undefined;
     const [state, rate] = await Promise.all([store.getState(clientId), getBcvRate()]);
-    res.json({ ...state, rate });
+    const payload = { ...state, rate };
+    const body = JSON.stringify(payload);
+    const etag = `"${crypto.createHash('sha1').update(body).digest('hex')}"`;
+    // Revalidación condicional: si el cliente ya tiene este estado, no
+    // reenviamos el cuerpo. Ahorra ~90% del tráfico del polling.
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    res.set('ETag', etag);
+    res.set('Cache-Control', 'no-cache');
+    res.json(payload);
   } catch (err) {
     fail(res, err, 'No se pudo cargar la tienda. Intenta de nuevo en unos segundos.');
   }

@@ -19,6 +19,18 @@ services:
         sync: false
         # Connection string de Supabase (Transaction pooler, puerto 6543).
         # Ej: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+      - key: SUPABASE_URL
+        sync: false
+        # URL del proyecto Supabase (https://xxxx.supabase.co). Si se define junto
+        # a SUPABASE_ANON_KEY, los comprobantes se suben a Storage en vez de
+        # guardarse como base64 en la BD (mucho menos ancho de banda).
+      - key: SUPABASE_ANON_KEY
+        sync: false
+        # Publishable key de Supabase (sb_publishable_... o anon key).
+      - key: SUPABASE_STORAGE_BUCKET
+        sync: false
+        # Bucket de Storage para los comprobantes (default: comprobantes).
+        # Debe existir y permitir inserciones del rol anon.
 
   # Ambiente de pruebas: se despliega automáticamente con la rama develop.
   # URL esperada: https://kiosko-247-staging.onrender.com
@@ -44,3 +56,9 @@ services:
         # WARNING: temporalmente apunta a la misma BD que producción.
         # Solo probá UI/navegación; NO crees pedidos ni modifiques stock desde
         # staging, o ensuciarás los datos reales del kiosko.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        sync: false

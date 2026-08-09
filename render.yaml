@@ -17,13 +17,17 @@ services:
         # Ej: 04129862577,04141823718,04242980404,04242963490
       - key: DATABASE_URL
         sync: false
-        # Connection string de Supabase (Transaction pooler, puerto 6543).
-        # Ej: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+        # Connection string de Postgres. BD activa: Neon (plan free, 0.5 GB).
+        # Ej: postgresql://neondb_owner:<pass>@ep-<branch>.region.aws.neon.tech/neondb?sslmode=require
+        # Supabase quedó como respaldo (suspendida por exceso de egreso, ago 2026);
+        # al reactivarla se puede volver a apuntar aquí (transaction pooler, puerto 6543).
       - key: SUPABASE_URL
         sync: false
-        # URL del proyecto Supabase (https://xxxx.supabase.co). Si se define junto
-        # a SUPABASE_SERVICE_KEY, los comprobantes se suben a Storage en vez de
-        # guardarse como base64 en la BD (mucho menos ancho de banda).
+        # URL del proyecto Supabase (https://xxxx.supabase.co). Solo para el
+        # Storage de comprobantes (la BD ya vive en Neon). Si se define junto a
+        # SUPABASE_SERVICE_KEY, los comprobantes se suben a Storage en vez de
+        # guardarse como base64 en la BD (mucho menos ancho de banda). Si el
+        # upload falla (p. ej. Supabase suspendida), se guarda el base64.
       - key: SUPABASE_SERVICE_KEY
         sync: false
         # Secret key de Supabase (sb_secret_...). Preferida para el server:
@@ -58,9 +62,10 @@ services:
         # Teléfonos admin (mismos que producción si querés probar biometría).
       - key: DATABASE_URL
         sync: false
-        # WARNING: temporalmente apunta a la misma BD que producción.
-        # Solo probá UI/navegación; NO crees pedidos ni modifiques stock desde
-        # staging, o ensuciarás los datos reales del kiosko.
+        # Connection string de Neon (misma BD que producción pero schema "staging",
+        # vía KIOSKO_DB_SCHEMA). El espejo automático copia public -> staging.
+        # WARNING: NO apuntar a la BD de producción en schema public; solo probá
+        # UI/navegación o crearás pedidos que ensucian los datos reales.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_KEY

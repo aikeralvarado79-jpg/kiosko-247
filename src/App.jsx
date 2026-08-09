@@ -90,6 +90,96 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
   );
 };
 
+// Botón reusable con feedback visual completo: hover (lift + glow), press
+// (scale + sombra hundida), focus-visible ring, estados de carga (spinner),
+// éxito (check) y error. Variantes: primary | secondary | tonal | danger | ghost.
+const Btn = ({
+  variant = 'primary',
+  size = 'md',
+  loading = false,
+  success = false,
+  error = false,
+  icon,
+  children,
+  className = '',
+  style,
+  ...props
+}) => {
+  const base =
+    'relative inline-flex items-center justify-center gap-2 font-bold select-none whitespace-nowrap ' +
+    'transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ' +
+    'focus-visible:ring-teal-400 focus-visible:ring-offset-slate-900 ' +
+    'active:scale-[0.96] active:transition-transform active:duration-75 ' +
+    'disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ' +
+    'aria-disabled:opacity-50 aria-disabled:cursor-not-allowed';
+
+  const sizes = {
+    sm: 'px-3 py-1.5 rounded-xl text-xs gap-1.5',
+    md: 'px-4 py-2.5 rounded-xl text-sm gap-2',
+    lg: 'px-5 py-3 rounded-2xl text-sm gap-2',
+    xl: 'w-full py-4 rounded-2xl text-sm gap-2'
+  };
+
+  const variants = {
+    primary:
+      'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-lg shadow-teal-500/25 ' +
+      'hover:from-teal-400 hover:to-emerald-400 hover:shadow-xl hover:shadow-teal-500/30 hover:-translate-y-0.5 ' +
+      'active:shadow-md active:shadow-teal-500/20 active:translate-y-0',
+    secondary:
+      'bg-slate-800/70 border border-slate-600 text-slate-200 shadow-md shadow-slate-900/40 ' +
+      'hover:bg-slate-700/80 hover:border-slate-500 hover:-translate-y-0.5 ' +
+      'active:shadow-sm',
+    tonal:
+      'bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 ' +
+      'hover:bg-indigo-500/25 hover:border-indigo-500/60 hover:-translate-y-0.5 ' +
+      'active:bg-indigo-500/30',
+    danger:
+      'bg-rose-600/20 border border-rose-500/50 text-rose-300 ' +
+      'hover:bg-rose-600/35 hover:border-rose-500/80 hover:-translate-y-0.5 ' +
+      'active:bg-rose-600/40',
+    ghost: 'bg-transparent text-slate-300 hover:bg-slate-800/60 hover:text-white active:bg-slate-800/90'
+  };
+
+  const status = error
+    ? { classes: '!bg-rose-600 !border-rose-500 text-white shadow-lg shadow-rose-600/30 !from-rose-600 !to-rose-500', label: 'Ocurrió un error' }
+    : success
+      ? { classes: '!bg-emerald-500 !border-emerald-400 text-white shadow-lg shadow-emerald-500/30 !from-emerald-500 !to-emerald-400', label: 'Listo' }
+      : null;
+
+  const cls = `${base} ${sizes[size] || sizes.md} ${variants[variant] || variants.primary} ${status?.classes || ''} ${className}`.replace(/\s+/g, ' ');
+
+  const content = loading ? (
+    <>
+      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z" />
+      </svg>
+      {children}
+    </>
+  ) : success ? (
+    <>
+      <Icon name="check" className="w-4 h-4" />
+      {children}
+    </>
+  ) : error ? (
+    <>
+      <Icon name="alertTriangle" className="w-4 h-4" />
+      {children}
+    </>
+  ) : (
+    <>
+      {icon && <Icon name={icon} className="w-4 h-4 shrink-0" />}
+      {children}
+    </>
+  );
+
+  return (
+    <button className={cls} style={style} aria-busy={loading ? 'true' : undefined} {...props}>
+      {content}
+    </button>
+  );
+};
+
 // Detección de plataforma para elegir el logo de biometría correcto:
 // iOS → manzana de Apple + Face ID; Android/otros → huella dactilar.
 const IS_IOS =
@@ -3379,13 +3469,15 @@ function CustomerView({
               Te quedan {Math.max(0, Number(runOutAlertProduct.stock) - Number(runOutAlertProduct.reserved || 0))} unidades. ¿Lo agregamos?
             </p>
           </div>
-          <button
+          <Btn
             onClick={(e) => onAddToCart(runOutAlertProduct, 1, e.currentTarget.getBoundingClientRect())}
-            className="shrink-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-orange-500 text-slate-950 text-xs font-bold hover:from-rose-400 hover:to-orange-400 shadow-lg shadow-rose-500/20 transition-all active:scale-95 flex items-center gap-1.5"
+            variant="primary"
+            size="sm"
+            icon="plus"
+            className="shrink-0 !bg-gradient-to-r !from-rose-500 !to-orange-500 !shadow-lg !shadow-rose-500/20 hover:!from-rose-400 hover:!to-orange-400"
           >
-            <Icon name="plus" className="w-3.5 h-3.5" />
             <span className="hidden min-[360px]:inline">Agregar</span>
-          </button>
+          </Btn>
         </div>
       )}
 
@@ -3422,18 +3514,24 @@ function CustomerView({
             </button>
           </div>
           <div className="px-3 sm:px-4 pb-3 sm:pb-4 grid grid-cols-2 gap-2">
-            <button
+            <Btn
               onClick={onOpenMyKiosko}
-              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-xs font-bold hover:bg-teal-500/25 transition-all"
+              variant="primary"
+              size="sm"
+              icon="zap"
+              className="w-full py-2.5"
             >
-              <Icon name="zap" className="w-3.5 h-3.5" /> Mi historial
-            </button>
-            <button
+              Mi historial
+            </Btn>
+            <Btn
               onClick={onOpenDebt}
-              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-700/40 border border-slate-700 text-slate-200 text-xs font-bold hover:bg-slate-700/60 transition-all"
+              variant="secondary"
+              size="sm"
+              icon="creditCard"
+              className="w-full py-2.5"
             >
-              <Icon name="creditCard" className="w-3.5 h-3.5" /> Mi saldo
-            </button>
+              Mi saldo
+            </Btn>
           </div>
         </div>
       )}
@@ -3726,14 +3824,16 @@ function CustomerView({
               <Icon name="x" className="w-4 h-4" />
             </button>
           )}
-          <button
+          <Btn
             onClick={onOpenVoice}
-            className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-teal-500/15 text-teal-300 border border-teal-500/30 hover:bg-teal-500/25 transition-all"
+            variant="tonal"
+            size="sm"
+            icon="mic"
+            className="absolute right-3 top-1/2 -translate-y-1/2 !p-2.5 !rounded-xl"
+            style={{ width: 'auto', height: 'auto' }}
             title="Compra rápida por voz"
             aria-label="Compra rápida por voz"
-          >
-            <Icon name="mic" className="w-4 h-4" />
-          </button>
+          ></Btn>
 
           {/* Autocomplete suggestions */}
           {showSuggestions && suggestions.length > 0 && (
@@ -3929,25 +4029,18 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
             )}
           </div>
 
-          <button
+          <Btn
             onClick={handleAdd}
             disabled={isOut}
-            className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl font-semibold text-xs flex items-center gap-1.5 transition-all duration-300 active:scale-90 ${
-              justAdded
-                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                : isOut
-                ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
-                : 'bg-teal-500 text-slate-950 hover:bg-teal-400 shadow-md shadow-teal-500/20'
-            }`}
+            variant="primary"
+            size="sm"
+            icon={justAdded ? undefined : 'plus'}
+            success={justAdded}
+            className="!p-2.5 sm:!p-3 !rounded-xl sm:!rounded-2xl !text-xs !font-semibold !shadow-md"
             aria-label="Agregar al carrito"
           >
-            {justAdded ? (
-              <Icon name="check" className="w-4 h-4 animate-added-pop" />
-            ) : (
-              <Icon name="plus" className="w-4 h-4" />
-            )}
             <span className="hidden sm:inline">{justAdded ? '¡Listo!' : 'Agregar'}</span>
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -4167,25 +4260,21 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             )}
           </div>
 
-          <button
+          <Btn
             onClick={(e) => {
               onAddToCart(quantity, e.currentTarget.getBoundingClientRect());
               setQuantity(1);
             }}
             disabled={isOut}
-            className={`w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
-              isOut
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                : 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95'
-            }`}
+            variant="primary"
+            size="xl"
+            icon={isOut ? undefined : 'shoppingBag'}
+            className={isOut ? '!bg-slate-800 !text-slate-500 !shadow-none' : 'shadow-xl shadow-teal-500/25'}
           >
-            <Icon name="shoppingBag" className="w-5 h-5" />
-            <span>
-              {isOut
-                ? 'Sin Stock Disponible'
-                : `Agregar al Carrito • ${formatUsd(lineTotal)}${rate?.rate > 0 ? ` (${formatBs(usdToBs(lineTotal, rate.rate))})` : ''}`}
-            </span>
-          </button>
+            {isOut
+              ? 'Sin Stock Disponible'
+              : `Agregar al Carrito • ${formatUsd(lineTotal)}${rate?.rate > 0 ? ` (${formatBs(usdToBs(lineTotal, rate.rate))})` : ''}`}
+          </Btn>
         </div>
       </div>
 
@@ -4875,21 +4964,25 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
               </div>
             </div>
 
-            <button
+            <Btn
               onClick={onProceedToCheckout}
-              className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-xl shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+              variant="primary"
+              size="xl"
+              icon="check"
+              className="shadow-xl shadow-teal-500/25"
             >
-              <span>Confirmar y Elegir Forma de Pago</span>
-              <Icon name="check" className="w-5 h-5" />
-            </button>
+              Confirmar y Elegir Forma de Pago
+            </Btn>
 
-            <button
+            <Btn
               onClick={onShare}
-              className="w-full py-3 rounded-2xl bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 font-bold text-xs hover:bg-indigo-500/25 transition-all flex items-center justify-center gap-2"
+              variant="tonal"
+              size="md"
+              icon="share2"
+              className="w-full py-3"
             >
-              <Icon name="share2" className="w-4 h-4" />
-              <span>Compartir carrito</span>
-            </button>
+              Compartir carrito
+            </Btn>
           </div>
         )}
       </div>
@@ -11144,20 +11237,26 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <button
+          <Btn
             onClick={onRetry}
             disabled={listening}
-            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
+            variant="secondary"
+            size="md"
+            icon="refresh"
           >
-            <Icon name="refresh" className="w-3.5 h-3.5" /> Escuchar de nuevo
-          </button>
-          <button
+            Escuchar de nuevo
+          </Btn>
+          <Btn
             onClick={onConfirm}
             disabled={loading || items.length === 0 || listening}
-            className="py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-xs hover:from-teal-400 hover:to-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-teal-500/20 flex items-center justify-center gap-1.5"
+            variant="primary"
+            size="md"
+            icon="check"
+            loading={loading}
+            className="shadow-lg shadow-teal-500/20"
           >
-            {loading ? 'Agregando...' : 'Agregar al carrito'} <Icon name="check" className="w-3.5 h-3.5" />
-          </button>
+            {loading ? 'Agregando...' : 'Agregar al carrito'}
+          </Btn>
         </div>
       </div>
     </div>
@@ -11289,15 +11388,18 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
 
           {/* Repetir último pedido */}
           {customerOrders.length > 0 && (
-            <button
+            <Btn
               onClick={() => {
                 onClose();
                 onRepeatLastOrder?.();
               }}
-              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 flex items-center justify-center gap-1.5"
+              className="w-full !py-2.5"
+              icon="refresh"
+              variant="primary"
+              size="md"
             >
-              <Icon name="refresh" className="w-3.5 h-3.5" /> Repetir mi último pedido
-            </button>
+              Repetir mi último pedido
+            </Btn>
           )}
         </div>
       </div>
@@ -11356,12 +11458,15 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
               {copied ? '✓ Copiado' : 'Copiar'}
             </button>
           </div>
-          <button
+          <Btn
             onClick={() => onWhatsApp(link)}
-            className="w-full py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-600/30 flex items-center justify-center gap-1.5"
+            variant="secondary"
+            size="md"
+            icon="whatsapp"
+            className="w-full !border-emerald-500/50 !text-emerald-300 hover:!bg-emerald-600/30"
           >
-            <Icon name="whatsapp" className="w-4 h-4" /> Compartir por WhatsApp
-          </button>
+            Compartir por WhatsApp
+          </Btn>
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-2">

@@ -1,6 +1,6 @@
 # Kiosco 24/7
 
-App de kiosco con catálogo, pedidos con retiro o envío, y panel de administración. Frontend React + Vite, backend Express, persistencia en Postgres (Supabase) con fallback local a archivo.
+App de kiosco con catálogo, pedidos con retiro o envío, y panel de administración. Frontend React + Vite, backend Express, persistencia en Postgres (Neon) con fallback local a archivo y Supabase como respaldo.
 
 **Producción:** https://kiosko-247.onrender.com
 
@@ -8,7 +8,7 @@ App de kiosco con catálogo, pedidos con retiro o envío, y panel de administrac
 
 - **Frontend:** React 18 + Vite + Tailwind CSS v4
 - **Backend:** Express (API en `/api`)
-- **Persistencia:** Postgres/Supabase (transaction pooler, puerto 6543) con fallback a `server/data.json`
+- **Persistencia:** Postgres en **Neon** (BD activa) con fallback a `server/data.json`. Supabase se mantiene como **respaldo** (los datos originales siguen ahí y se pueden restaurar cuando se reactive la suscripción).
 - **Despliegue:** Render (blueprint `render.yaml`, plan free)
 - **Tiempo real:** polling cada 5 s (configurable), pausado cuando la pestaña está oculta
 
@@ -18,8 +18,11 @@ App de kiosco con catálogo, pedidos con retiro o envío, y panel de administrac
 | ---------- | ------------------------------------------------------------------------------------------------------- |
 | URL pública | `https://kiosko-247.onrender.com`                                                                      |
 | Admin pass | Master `kiosko247Aa` (`ADMIN_PASSWORD` en Render; localmente `server/config.json` → `kiosko123`). Cada admin puede tener su propia contraseña (login por teléfono + contraseña, configurada con "Recuperar contraseña"). |
-| Supabase   | ref `xhklvjvqhnnfpccqygti`; se conecta por **transaction pooler puerto 6543** (el directo 5432 es IPv6-only) |
+| Neon        | BD Postgres activa (plan free, 0.5 GB). Connection string se setea en `DATABASE_URL` en Render (no está en el repo). |
+| Supabase    | ref `xhklvjvqhnnfpccqygti`; **respaldo** de la BD y host de Storage para comprobantes. Se conecta por transaction pooler puerto 6543 (el directo 5432 es IPv6-only). |
 
+> **Migración a Neon (ago 2026):** la BD activa se movió de Supabase a Neon porque Supabase excedió la cuota de egreso del plan free (5 GB incluidos; se consumieron ~77 GB) y se suspendió temporalmente el 10/08. Los datos originales quedaron intactos en Supabase como respaldo. Cuando se pague/reactive Supabase se puede restaurar desde el respaldo (dump de Neon → Supabase) y volver a apuntar `DATABASE_URL`.
+>
 > Nota: el host directo de Supabase (`db.xhklvjvqhnnfpccqygti.supabase.co`) solo publica IPv6, inalcanzable desde redes IPv4 y desde Render. Usar siempre `aws-0-ca-central-1.pooler.supabase.com:6543`.
 
 ## Desarrollo local
@@ -45,7 +48,10 @@ Sin `DATABASE_URL` configurada, el backend usa `server/data.json` como almacenam
 | `PORT`               | Backend            | Puerto HTTP (default `3500`). Render lo define automáticamente.           |
 | `ADMIN_PASSWORD`     | Backend            | Contraseña del panel admin. En Render se setea en el Blueprint.           |
 | `ADMIN_PHONES`       | Backend            | Teléfonos admin separados por coma (recuperación de contraseña con biometría). Se combina con `server/config.json`. |
-| `DATABASE_URL`       | Backend            | Connection string de Postgres (transaction pooler de Supabase).          |
+| `DATABASE_URL`       | Backend            | Connection string de Postgres (BD activa en **Neon**; temporalmente fue Supabase).          |
+| `SUPABASE_URL`       | Backend            | URL del proyecto Supabase (https://xxxx.supabase.co). Solo para **Storage de comprobantes** (respaldo). |
+| `SUPABASE_SERVICE_KEY` | Backend          | Secret key de Supabase (sb_secret_...) para subir comprobantes al bucket. Fallback: `SUPABASE_ANON_KEY`. |
+| `SUPABASE_STORAGE_BUCKET` | Backend        | Bucket de Storage para los comprobantes (default: `comprobantes`). |
 | `PEXELS_API_KEY`     | Dev (proxy Vite)   | Key de Pexels para sugerencias de imagen al crear productos.              |
 | `VITE_POLL_INTERVAL` | Frontend           | Intervalo de polling en ms (default `5000`).                              |
 
@@ -54,7 +60,7 @@ Sin `DATABASE_URL` configurada, el backend usa `server/data.json` como almacenam
 1. Subí el repo a GitHub (`aikeralvarado79-jpg/kiosko-247`).
 2. En Render: **New → Blueprint**, seleccioná el repo.
 3. En `render.yaml` las variables `ADMIN_PASSWORD` y `DATABASE_URL` están como `sync: false`, así que Render te las pide al crear.
-4. `ADMIN_PASSWORD=kiosko247Aa` y `DATABASE_URL=postgresql://postgres.xhklvjvqhnnfpccqygti:kiosko247Aa@aws-0-ca-central-1.pooler.supabase.com:6543/postgres`
+4. `ADMIN_PASSWORD=kiosko247Aa` y `DATABASE_URL=postgresql://...neon.tech/neondb?sslmode=require` (connection string de Neon, se setea manualmente en el dashboard de Render; no está en el repo).
 5. **Apply** y esperá el deploy (2–3 min). La URL queda en `https://kiosko-247.onrender.com`.
 
 ### Costo y modo free

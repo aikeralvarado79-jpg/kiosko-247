@@ -40,10 +40,10 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  getState: async (clientId) => {
+  getState: async (clientId, { useEtag = false } = {}) => {
     const key = clientId ? `c:${clientId}` : 'default';
     const headers = {};
-    if (stateEtags[key]) headers['If-None-Match'] = stateEtags[key];
+    if (useEtag && stateEtags[key]) headers['If-None-Match'] = stateEtags[key];
     const res = await request(`/api/state${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`, { headers });
     if (res.ok && res.etag) {
       stateEtags[key] = res.etag;

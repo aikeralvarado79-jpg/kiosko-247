@@ -2542,6 +2542,7 @@ export default function App() {
         adminTab={adminTab}
         onAdminTab={handleAdminTabChange}
         pendingOrders={orders.filter((o) => !['entregado', 'cancelado'].includes(o.status)).length}
+        pendingPayments={payments.filter((p) => p.status === 'pendiente').length}
         onLogout={handleAdminLogout}
         isAdminAuthed={isAdminAuthed}
       />
@@ -5323,6 +5324,7 @@ function BottomTabBar({
   adminTab,
   onAdminTab,
   pendingOrders,
+  pendingPayments,
   onLogout,
   isAdminAuthed
 }) {
@@ -8028,7 +8030,7 @@ function AdminView({
           { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
           { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
           { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
-          { key: 'abonos', label: `Abonos (${payments.filter((p) => p.status === 'pendiente').length})`, full: `Abonos por Aprobar (${payments.filter((p) => p.status === 'pendiente').length})`, icon: 'wallet' },
+          { key: 'abonos', label: `Abonos (${pendingPayments})`, full: `Abonos por Aprobar (${pendingPayments})`, icon: 'wallet' },
           { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
           { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Negocio', icon: 'trendingUp' }
         ].map((tab) => (
@@ -9170,7 +9172,6 @@ function AdminView({
           onLoadPayments={onLoadPayments}
           onApprovePayment={onApprovePayment}
           onRejectPayment={onRejectPayment}
-          addToast={addToast}
         />
       )}
 
@@ -12025,7 +12026,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
 // Panel admin de abonos a la deuda: lista los pagos con comprobante que los
 // clientes subieron. El admin abre el comprobante, verifica y aprueba (aplica
 // el descuento al balance del cliente) o rechaza con nota.
-function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejectPayment, addToast }) {
+function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejectPayment }) {
   const [showProofId, setShowProofId] = useState(null);
   const [proof, setProof] = useState(null);
   const [loadingProof, setLoadingProof] = useState(false);

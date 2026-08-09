@@ -707,6 +707,11 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
+  // true cuando ya se cargaron datos en esta sesión. Se usa para que el ETag de
+  // /api/state solo se envíe en recargas posteriores (polling), nunca en la carga
+  // inicial: si llega 304 sin datos en memoria la app quedaría vacía.
+  const hasDataRef = useRef(false);
+
   // Admin session state
   const [isAdminAuthed, setIsAdminAuthed] = useState(() => Boolean(getToken()));
   const [refreshingDb, setRefreshingDb] = useState(false);
@@ -733,7 +738,7 @@ export default function App() {
       setIsLoading(true);
       setLoadError('');
     }
-    const res = await api.getState(clientId);
+    const res = await api.getState(clientId, { useEtag: hasDataRef.current });
     if (res.notModified) {
       setIsLoading(false);
       return;
@@ -752,6 +757,7 @@ export default function App() {
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
+    hasDataRef.current = true;
     setIsLoading(false);
   }, [clientId]);
 

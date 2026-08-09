@@ -245,6 +245,32 @@ app.get('/api/rate', async (req, res) => {
   }
 });
 
+// Sirve la imagen de un producto bajo demanda (el estado público solo expone
+// la URL). Convierte el base64 guardado en la BD a bytes y deja que el
+// navegador la cachee para no re-descargarla en cada carga.
+app.get('/api/products/:id/image', async (req, res) => {
+  try {
+    const product = await store.getProductById(req.params.id);
+    const image = product && product.image;
+    if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+      return res.status(404).json({ error: 'Imagen no encontrada' });
+    }
+    const match = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (!match) return res.status(404).json({ error: 'Imagen inválida' });
+    const buf = Buffer.from(match[2], 'base64');
+    const etag = `"${crypto.createHash('sha1').update(buf).digest('hex')}"`;
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    res.set('ETag', etag);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Content-Type', match[1]);
+    res.send(buf);
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar la imagen del producto.');
+  }
+});
+
 app.post('/api/orders', async (req, res) => {
   try {
     const result = await store.createOrder(req.body || {});

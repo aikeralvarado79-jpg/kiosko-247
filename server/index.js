@@ -421,6 +421,135 @@ app.put('/api/customers/:phone', async (req, res) => {
   }
 });
 
+// ---- Abonos a la deuda / "Mi Cartera" ----
+
+// Lista abonos: admin ve todos (con comprobante bajo demanda); el cliente ve
+// solo los suyos pasando ?phone= (mismo criterio que /api/customers/:phone).
+app.get('/api/payments', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const isAdmin = authHeader.startsWith('Bearer ') && verifyToken(authHeader.slice(7));
+    const phone = String(req.query.phone || '').replace(/\D/g, '').slice(-11);
+    if (!isAdmin && !phone) return res.status(403).json({ error: 'No autorizado' });
+    const all = await store.listPayments();
+    const list = phone ? all.filter((p) => String(p.phone || '').replace(/\D/g, '').slice(-11) === phone) : all;
+    res.json(
+      list.map((p) => {
+        const { proof, ...rest } = p;
+        return { ...rest, hasProof: Boolean(proof) };
+      })
+    );
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar los abonos.');
+  }
+});
+
+// El cliente registra un abono: sube comprobante + monto en Bs. El servidor lo
+// convierte a USD con la tasa del día y queda pendiente de aprobación admin.
+app.post('/api/payments', async (req, res) => {
+  try {
+    const { phone, customerName, amountBs, reference, proof } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!key || key.length < 7) return res.status(400).json({ error: 'Número de teléfono inválido' });
+    const amount = Number(amountBs);
+    if (!(amount > 0)) return res.status(400).json({ error: 'Indica cuánto abonaste en bolívares' });
+    if (!proof || typeof proof !== 'string' || !proof.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'Adjunta el comprobante del abono (foto o archivo)' });
+    }
+    if (proof.length > 3000000) {
+      return res.status(400).json({ error: 'La imagen es demasiado grande' });
+    }
+    const { rate } = await getBcvRate();
+    if (!(rate > 0)) return res.status(502).json({ error: 'No se pudo obtener la tasa del día. Intenta más tarde.' });
+    let storedProof = proof;
+    if (isStorageConfigured()) {
+      const url = await uploadProof(`abono-${Date.now()}`, proof);
+      if (url) storedProof = url;
+    }
+    const payment = await store.createPayment({
+      phone: key,
+      customerName: String(customerName || '').slice(0, 80) || 'Cliente',
+      amountBs: amount,
+      rate,
+      amountUsd: amount / rate,
+      reference: String(reference || '').slice(0, 120),
+      proof: storedProof
+    });
+    if (!payment) return res.status(400).json({ error: 'No se pudo registrar el abono' });
+    res.json({ payment });
+    if (ADMIN_PHONES.length > 0) {
+      push
+        .sendToPhone(ADMIN_PHONES, {
+          title: 'Nuevo abono por aprobar',
+          body: `${payment.id} · ${payment.customerName} · Bs ${payment.amountBs.toFixed(2)} (≈ $${payment.amountUsd.toFixed(2)})`,
+          url: '/'
+        })
+        .catch(() => {});
+    }
+  } catch (err) {
+    fail(res, err, 'No se pudo registrar el abono.');
+  }
+});
+
+// Sirve el comprobante de un abono bajo demanda (admin o el dueño del teléfono).
+app.get('/api/payments/:id/proof', async (req, res) => {
+  try {
+    const payment = await store.getPaymentById(req.params.id);
+    if (!payment) return res.status(404).json({ error: 'Abono no encontrado' });
+    const authHeader = req.headers.authorization || '';
+    const isAdmin = authHeader.startsWith('Bearer ') && verifyToken(authHeader.slice(7));
+    const phoneOk =
+      String(payment.phone || '').replace(/\D/g, '').slice(-11) ===
+      String(req.query.phone || '').replace(/\D/g, '').slice(-11);
+    if (!isAdmin && !phoneOk) return res.status(403).json({ error: 'No autorizado para este abono' });
+    if (!payment.proof) return res.status(404).json({ error: 'Este abono no tiene comprobante' });
+    res.json({ proof: payment.proof });
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar el comprobante del abono.');
+  }
+});
+
+// Aprobar un abono (solo admin): descuenta el monto en USD de la deuda del
+// cliente; el excedente queda como saldo a favor ("Mi Cartera").
+app.post('/api/payments/:id/approve', requireAdmin, async (req, res) => {
+  try {
+    const result = await store.approvePayment(req.params.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json({ payment: result, state: await store.getPublicState() });
+    if (result.phone) {
+      push
+        .sendToPhone([result.phone], {
+          title: 'Abono aprobado',
+          body: `Tu abono ${result.id} de $${(Number(result.amountUsd) || 0).toFixed(2)} fue aprobado y aplicado a tu cuenta.`,
+          url: '/'
+        })
+        .catch(() => {});
+    }
+  } catch (err) {
+    fail(res, err, 'No se pudo aprobar el abono.');
+  }
+});
+
+// Rechazar un abono (solo admin).
+app.post('/api/payments/:id/reject', requireAdmin, async (req, res) => {
+  try {
+    const result = await store.rejectPayment(req.params.id, (req.body || {}).note);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json({ payment: result, state: await store.getPublicState() });
+    if (result.phone) {
+      push
+        .sendToPhone([result.phone], {
+          title: 'Abono rechazado',
+          body: `Tu abono ${result.id} no pudo ser verificado. Revisa el comprobante e intenta de nuevo.`,
+          url: '/'
+        })
+        .catch(() => {});
+    }
+  } catch (err) {
+    fail(res, err, 'No se pudo rechazar el abono.');
+  }
+});
+
 // WebAuthn: biometría del celular para identificar al cliente
 app.post('/api/webauthn/register-options', webauthn.registrationOptions);
 app.post('/api/webauthn/register-verify', webauthn.registrationVerify);

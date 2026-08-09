@@ -12,6 +12,7 @@ const defaultState = () => ({
   categories: [...INITIAL_CATEGORIES],
   orders: JSON.parse(JSON.stringify(INITIAL_ORDERS)),
   customers: [],
+  payments: [],
   webauthn: [],
   settings: { promos: [] }
 });
@@ -290,6 +291,9 @@ const fileStore = {
       const { paymentProof, ...rest } = o;
       return { ...rest, hasProof: Boolean(paymentProof) };
     });
+    // Los abonos (con comprobante base64 pesado y sensible) no viajan en el
+    // estado público: se consultan por API dedicada (admin o el dueño).
+    delete state.payments;
     return state;
   },
 
@@ -500,12 +504,82 @@ const fileStore = {
     await this.addOrderToAccount(order);
     this.persist();
     return order;
+  },
+
+  // ---- Abonos a la deuda / pagos con comprobante (cliente) ----
+
+  async listPayments() {
+    return (this.state.payments || [])
+      .map((p) => ({ ...p, amountBs: Number(p.amountBs) || 0, amountUsd: Number(p.amountUsd) || 0 }))
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  },
+
+  async getPaymentById(id) {
+    return (this.state.payments || []).find((p) => p.id === id) || null;
+  },
+
+  // Crea un abono pendiente (el cliente sube comprobante). Devuelve el abono.
+  async createPayment({ phone, customerName, amountBs, rate, amountUsd, reference, proof }) {
+    const key = normalizePhone(phone);
+    if (!key || key.length < 7) return null;
+    let id;
+    do {
+      id = `PAG-${Math.floor(1000 + Math.random() * 9000)}`;
+    } while (this.state.payments.some((p) => p.id === id));
+    const payment = {
+      id,
+      phone: key,
+      customerName: customerName || 'Cliente',
+      amountBs: Number(amountBs) || 0,
+      rate: Number(rate) || 0,
+      amountUsd: Number(amountUsd) || 0,
+      reference: String(reference || '').slice(0, 120),
+      proof: proof || null,
+      status: 'pendiente', // pendiente | aprobado | rechazado
+      note: null,
+      createdAt: new Date().toISOString(),
+      decidedAt: null
+    };
+    this.state.payments = [payment, ...(this.state.payments || [])];
+    this.persist();
+    return payment;
+  },
+
+  // Aprueba un abono: descuenta amountUsd del balance del cliente (la deuda en
+  // USD); si queda negativo, es saldo a favor ("Mi Cartera"). Devuelve el abono
+  // actualizado o { error }.
+  async approvePayment(id) {
+    const payment = this.state.payments.find((p) => p.id === id);
+    if (!payment) return { error: 'Abono no encontrado' };
+    if (payment.status === 'aprobado') return { error: 'Este abono ya fue aprobado' };
+    const customer = this.state.customers.find((c) => c.phone === payment.phone);
+    const currentBalance = Number(customer?.balance) || 0;
+    const updated = {
+      ...payment,
+      status: 'aprobado',
+      decidedAt: new Date().toISOString()
+    };
+    this.state.payments = this.state.payments.map((p) => (p.id === id ? updated : p));
+    await this.setCustomerBalance(payment.phone, currentBalance - (Number(payment.amountUsd) || 0));
+    this.persist();
+    return updated;
+  },
+
+  // Rechaza un abono (no toca el balance).
+  async rejectPayment(id, note) {
+    const payment = this.state.payments.find((p) => p.id === id);
+    if (!payment) return { error: 'Abono no encontrado' };
+    const updated = {
+      ...payment,
+      status: 'rechazado',
+      note: String(note || '').slice(0, 300) || null,
+      decidedAt: new Date().toISOString()
+    };
+    this.state.payments = this.state.payments.map((p) => (p.id === id ? updated : p));
+    this.persist();
+    return updated;
   }
 };
-
-// ---------------------------------------------------------------------------
-// Backend Postgres (Supabase / producción). Se usa cuando existe DATABASE_URL.
-// ---------------------------------------------------------------------------
 const { Pool } = pg;
 
 // Schema donde vive el estado. Por defecto "public" (producción); staging usa un
@@ -748,6 +822,20 @@ const pgStore = {
         hash TEXT,
         "createdAt" TEXT
       );
+      CREATE TABLE IF NOT EXISTS ${q('payments')} (
+        id TEXT PRIMARY KEY,
+        phone TEXT,
+        "customerName" TEXT,
+        "amountBs" NUMERIC DEFAULT 0,
+        rate NUMERIC DEFAULT 0,
+        "amountUsd" NUMERIC DEFAULT 0,
+        reference TEXT,
+        proof TEXT,
+        status TEXT DEFAULT 'pendiente',
+        note TEXT,
+        "createdAt" TEXT,
+        "decidedAt" TEXT
+      );
     `);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
@@ -764,6 +852,16 @@ const pgStore = {
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentProof" TEXT`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentReference" TEXT`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`);
+    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "walletApplied" NUMERIC DEFAULT 0`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "amountBs" NUMERIC DEFAULT 0`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS rate NUMERIC DEFAULT 0`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "amountUsd" NUMERIC DEFAULT 0`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS reference TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS proof TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pendiente'`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS note TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
+    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "decidedAt" TEXT`);
   },
 
   async seedIfEmpty() {
@@ -796,7 +894,12 @@ const pgStore = {
       this.pool.query(`SELECT key, value FROM ${q('settings')}`)
     ]);
     const reserved = reservedByProduct(clientId);
-    const orders = ordersRes.rows.map((r) => ({ ...r, items: r.items || [], total: Number(r.total) }));
+    const orders = ordersRes.rows.map((r) => ({
+      ...r,
+      items: r.items || [],
+      total: Number(r.total),
+      walletApplied: Number(r.walletApplied) || 0
+    }));
     const products = withForecast(
       productsRes.rows.map((r) => ({
         id: r.id,
@@ -867,9 +970,9 @@ const pgStore = {
     await this.pool.query(`DELETE FROM ${q('orders')}`);
     for (const o of orders) {
       await this.pool.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "courier_lat", "courier_lng", "courier_updated_at", "paymentMethod", "paymentStatus", "paymentProof", "paymentReference", messages)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
-        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit), o.lat != null ? Number(o.lat) : null, o.lng != null ? Number(o.lng) : null, o.courier_lat != null ? Number(o.courier_lat) : null, o.courier_lng != null ? Number(o.courier_lng) : null, o.courier_updated_at || null, o.paymentMethod || null, o.paymentStatus || null, o.paymentProof || null, o.paymentReference || null, JSON.stringify(o.messages || [])]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "courier_lat", "courier_lng", "courier_updated_at", "paymentMethod", "paymentStatus", "paymentProof", "paymentReference", messages, "walletApplied")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
+        [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit), o.lat != null ? Number(o.lat) : null, o.lng != null ? Number(o.lng) : null, o.courier_lat != null ? Number(o.courier_lat) : null, o.courier_lng != null ? Number(o.courier_lng) : null, o.courier_updated_at || null, o.paymentMethod || null, o.paymentStatus || null, o.paymentProof || null, o.paymentReference || null, JSON.stringify(o.messages || []), Number(o.walletApplied) || 0]
       );
     }
   },
@@ -1051,6 +1154,85 @@ const pgStore = {
     return order;
   },
 
+  // ---- Abonos a la deuda / pagos con comprobante (pgStore) ----
+
+  async listPayments() {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM ${q('payments')} ORDER BY COALESCE("createdAt", '') DESC`
+    );
+    return rows.map((r) => ({
+      ...r,
+      amountBs: Number(r.amountBs) || 0,
+      rate: Number(r.rate) || 0,
+      amountUsd: Number(r.amountUsd) || 0
+    }));
+  },
+
+  async getPaymentById(id) {
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('payments')} WHERE id = $1`, [id]);
+    if (!rows[0]) return null;
+    return { ...rows[0], amountBs: Number(rows[0].amountBs) || 0, amountUsd: Number(rows[0].amountUsd) || 0 };
+  },
+
+  async createPayment({ phone, customerName, amountBs, rate, amountUsd, reference, proof }) {
+    const key = normalizePhone(phone);
+    if (!key || key.length < 7) return null;
+    let id;
+    do {
+      id = `PAG-${Math.floor(1000 + Math.random() * 9000)}`;
+      const dup = await this.pool.query(`SELECT 1 FROM ${q('payments')} WHERE id = $1`, [id]);
+      if (dup.rowCount > 0) id = null;
+    } while (!id);
+    const createdAt = new Date().toISOString();
+    await this.pool.query(
+      `INSERT INTO ${q('payments')} (id, phone, "customerName", "amountBs", rate, "amountUsd", reference, proof, status, note, "createdAt", "decidedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [id, key, customerName || 'Cliente', Number(amountBs) || 0, Number(rate) || 0, Number(amountUsd) || 0, String(reference || '').slice(0, 120), proof || null, 'pendiente', null, createdAt, null]
+    );
+    return this.getPaymentById(id);
+  },
+
+  // Aprueba un abono dentro de una transacción: descuenta amountUsd del balance
+  // del cliente (deuda en USD). Si queda negativo, es saldo a favor ("Cartera").
+  async approvePayment(id) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('payments')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT * FROM ${q('payments')} WHERE id = $1 FOR UPDATE`, [id]);
+      const payment = rows[0];
+      if (!payment) return { error: 'Abono no encontrado' };
+      if (payment.status === 'aprobado') return { error: 'Este abono ya fue aprobado' };
+      const amountUsd = Number(payment.amountUsd) || 0;
+      await client.query(
+        `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) - $2, "customerName" = COALESCE(NULLIF($3, ''), "customerName")
+         WHERE phone = $1`,
+        [payment.phone, amountUsd, payment.customerName || '']
+      );
+      const decidedAt = new Date().toISOString();
+      await client.query(
+        `UPDATE ${q('payments')} SET status = 'aprobado', "decidedAt" = $2 WHERE id = $1`,
+        [id, decidedAt]
+      );
+      return { ...payment, status: 'aprobado', amountUsd, amountBs: Number(payment.amountBs) || 0, decidedAt };
+    });
+    if (result.error) return result;
+    return this.getPaymentById(id);
+  },
+
+  async rejectPayment(id, note) {
+    const result = await this.withTx(async (client) => {
+      await client.query(`LOCK TABLE ${q('payments')} IN EXCLUSIVE MODE`);
+      const { rows } = await client.query(`SELECT id FROM ${q('payments')} WHERE id = $1 FOR UPDATE`, [id]);
+      if (!rows[0]) return { error: 'Abono no encontrado' };
+      await client.query(
+        `UPDATE ${q('payments')} SET status = 'rechazado', note = $2, "decidedAt" = $3 WHERE id = $1`,
+        [id, String(note || '').slice(0, 300) || null, new Date().toISOString()]
+      );
+      return { ok: true };
+    });
+    if (result.error) return result;
+    return this.getPaymentById(id);
+  },
+
   async getWebAuthnByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
@@ -1154,6 +1336,27 @@ const pgStore = {
         await client.query(`UPDATE ${q('products')} SET stock = stock - $1 WHERE id = $2`, [it.quantity, it.id]);
       }
 
+      // Pago con "Mi Cartera": el cliente tiene saldo a favor (balance < 0).
+      // Se descuenta el monto de la cartera del balance y, si cubre todo el
+      // pedido, queda confirmado sin comprobante. Si no, el resto se paga con
+      // el método indicado (paymentMethod del payload).
+      let walletApplied = Number(orderData.walletApplied) || 0;
+      const key = normalizePhone(orderData.phone);
+      if (walletApplied > 0) {
+        if (!key || key.length < 7) {
+          await client.query('ROLLBACK');
+          return { error: 'Teléfono inválido para usar Mi Cartera' };
+        }
+        const cust = await client.query(`SELECT balance FROM ${q('customers')} WHERE phone = $1`, [key]);
+        const balance = Number(cust.rows[0]?.balance) || 0;
+        const wallet = balance < 0 ? Math.abs(balance) : 0;
+        if (walletApplied > wallet) {
+          await client.query('ROLLBACK');
+          return { error: `Tu cartera solo cubre $${wallet.toFixed(2)}. Ajusta el monto o usa otro método.` };
+        }
+        walletApplied = Math.min(walletApplied, Number(orderData.total) || 0);
+      }
+
       const order = {
         id,
         customerName: orderData.customerName || 'Cliente',
@@ -1174,17 +1377,31 @@ const pgStore = {
         paymentStatus: orderData.paymentStatus || (orderData.paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
         paymentProof: orderData.paymentProof || null,
         paymentReference: orderData.paymentReference || null,
+        walletApplied,
         messages: []
       };
+      if (walletApplied > 0 && walletApplied >= order.total) {
+        order.paymentMethod = 'cartera';
+        order.paymentStatus = 'confirmado';
+        order.paymentProof = null;
+        order.paymentReference = '';
+      }
 
       await client.query(
-        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "paymentMethod", "paymentStatus", "paymentProof", "paymentReference", messages)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
-        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit, order.lat, order.lng, order.paymentMethod, order.paymentStatus, order.paymentProof, order.paymentReference, JSON.stringify(order.messages || [])]
+        `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "paymentMethod", "paymentStatus", "paymentProof", "paymentReference", messages, "walletApplied")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+        [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit, order.lat, order.lng, order.paymentMethod, order.paymentStatus, order.paymentProof, order.paymentReference, JSON.stringify(order.messages || []), walletApplied]
       );
 
+      // Descontar la cartera usada del balance del cliente (mismo teléfono).
+      if (walletApplied > 0 && key && key.length >= 7) {
+        await client.query(
+          `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) + $2 WHERE phone = $1`,
+          [key, walletApplied]
+        );
+      }
+
       // Registrar/actualizar el cliente reconocido en la misma transacción
-      const key = normalizePhone(order.phone);
       if (key && key.length >= 7) {
         const existing = await client.query(`SELECT * FROM ${q('customers')} WHERE phone = $1`, [key]);
         const addresses = existing.rows[0]?.addresses || [];
@@ -1533,6 +1750,16 @@ export const removeCollection = async (id) => {
   return { list };
 };
 
+export const listPayments = () => store.listPayments();
+
+export const getPaymentById = (id) => store.getPaymentById(id);
+
+export const createPayment = (data) => store.createPayment(data);
+
+export const approvePayment = (id) => store.approvePayment(id);
+
+export const rejectPayment = (id, note) => store.rejectPayment(id, note);
+
 export const createOrder = async (orderData) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {
     return { error: 'El pedido no tiene productos' };
@@ -1563,6 +1790,21 @@ export const createOrder = async (orderData) => {
     return inOrder ? { ...p, stock: p.stock - inOrder.quantity } : p;
   });
 
+  // Pago con "Mi Cartera": saldo a favor (balance < 0). Se descuenta del balance
+  // y si cubre todo el pedido queda confirmado sin comprobante.
+  let walletApplied = Number(orderData.walletApplied) || 0;
+  const key = normalizePhone(orderData.phone);
+  if (walletApplied > 0) {
+    if (!key || key.length < 7) return { error: 'Teléfono inválido para usar Mi Cartera' };
+    const customer = await store.getCustomerByPhone(key);
+    const balance = Number(customer?.balance) || 0;
+    const wallet = balance < 0 ? Math.abs(balance) : 0;
+    if (walletApplied > wallet) {
+      return { error: `Tu cartera solo cubre $${wallet.toFixed(2)}. Ajusta el monto o usa otro método.` };
+    }
+    walletApplied = Math.min(walletApplied, Number(orderData.total) || 0);
+  }
+
   const order = {
     id,
     customerName: orderData.customerName || 'Cliente',
@@ -1583,21 +1825,32 @@ export const createOrder = async (orderData) => {
     paymentStatus: orderData.paymentStatus || (orderData.paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
     paymentProof: orderData.paymentProof || null,
     paymentReference: orderData.paymentReference || null,
+    walletApplied,
     messages: []
   };
+  if (walletApplied > 0 && walletApplied >= order.total) {
+    order.paymentMethod = 'cartera';
+    order.paymentStatus = 'confirmado';
+    order.paymentProof = null;
+    order.paymentReference = '';
+  }
 
   const orders = [order, ...state.orders];
 
   await store.saveProducts(products);
   await store.saveOrders(orders);
 
-  const key = normalizePhone(order.phone);
   if (key && key.length >= 7) {
     await store.upsertCustomer({
       phone: order.phone,
       customerName: order.customerName,
       address: order.type === 'delivery' ? order.address : undefined
     });
+    // Descontar la cartera usada del balance del cliente.
+    if (walletApplied > 0) {
+      const customer = await store.getCustomerByPhone(key);
+      await store.setCustomerBalance(key, Number(customer?.balance || 0) + walletApplied);
+    }
   }
 
   if (orderData.clientId) holds.delete(orderData.clientId);

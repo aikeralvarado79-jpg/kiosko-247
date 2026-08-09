@@ -465,4 +465,144 @@ describe('fileStore', () => {
     expect(product.soldPerDay).toBeGreaterThan(0);
     expect(product.runOutDays).toBeGreaterThan(0);
   });
+
+  it('crea un abono pendiente y no lo expone en getState', async () => {
+    const store = await freshStore();
+    const created = await store.createPayment({
+      phone: '4125551234',
+      customerName: 'Cliente A',
+      amountBs: 1200,
+      rate: 60,
+      amountUsd: 20,
+      reference: 'REF-1',
+      proof: 'data:image/png;base64,xxxx'
+    });
+    expect(created.id).toMatch(/^PAG-/);
+    expect(created.status).toBe('pendiente');
+    expect(created.amountBs).toBe(1200);
+    expect(created.amountUsd).toBe(20);
+
+    const payment = await store.getPaymentById(created.id);
+    expect(payment.phone).toBe('4125551234');
+    expect(payment.proof).toBe('data:image/png;base64,xxxx');
+
+    const list = await store.listPayments();
+    expect(list.length).toBe(1);
+
+    const state = await store.getPublicState();
+    expect(state.payments).toBeUndefined();
+  });
+
+  it('aprueba un abono y descuenta del balance (excedente queda como cartera)', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '4125551234', customerName: 'Cliente A' });
+    await store.setCustomerBalance('4125551234', 100);
+    const created = await store.createPayment({
+      phone: '4125551234',
+      amountBs: 7200,
+      rate: 60,
+      amountUsd: 120,
+      proof: 'data:image/png;base64,xxxx'
+    });
+    const approved = await store.approvePayment(created.id);
+    expect(approved.status).toBe('aprobado');
+    expect(approved.decidedAt).toBeTruthy();
+    const customer = await store.getCustomerByPhone('4125551234');
+    // 100 de deuda - 120 abonados => -20 de saldo a favor (Mi Cartera)
+    expect(customer.balance).toBe(-20);
+
+    const dup = await store.approvePayment(created.id);
+    expect(dup.error).toBeTruthy();
+  });
+
+  it('rechaza un abono sin tocar el balance', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '4125551234', customerName: 'Cliente A' });
+    await store.setCustomerBalance('4125551234', 100);
+    const created = await store.createPayment({
+      phone: '4125551234',
+      amountBs: 600,
+      rate: 60,
+      amountUsd: 10
+    });
+    const rejected = await store.rejectPayment(created.id, 'Comprobante ilegible');
+    expect(rejected.status).toBe('rechazado');
+    expect(rejected.note).toBe('Comprobante ilegible');
+    const customer = await store.getCustomerByPhone('4125551234');
+    expect(customer.balance).toBe(100);
+  });
+
+  it('rechaza aprobar un abono inexistente', async () => {
+    const store = await freshStore();
+    expect((await store.approvePayment('PAG-9999')).error).toBeTruthy();
+    expect((await store.rejectPayment('PAG-9999')).error).toBeTruthy();
+  });
+
+  it('crea pedido pagado con Mi Cartera (cubre todo) sin comprobante', async () => {
+    const store = await freshStore();
+    // Cliente con saldo a favor enorme (balance negativo) que cubre el pedido completo
+    await store.upsertCustomer({ phone: '4125551234', customerName: 'Cliente A' });
+    await store.setCustomerBalance('4125551234', -99999);
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+    const total = p1.price * 2;
+
+    const result = await store.createOrder({
+      customerName: 'Cliente A',
+      phone: '4125551234',
+      items: [{ id: 'p1', name: p1.name, price: p1.price, quantity: 2 }],
+      total,
+      walletApplied: total,
+      paymentProof: 'data:image/png;base64,xxxx',
+      paymentReference: 'REF-X'
+    });
+    expect(result.order.paymentMethod).toBe('cartera');
+    expect(result.order.paymentStatus).toBe('confirmado');
+    expect(result.order.paymentProof).toBeNull();
+    expect(result.order.paymentReference).toBe('');
+    expect(result.order.walletApplied).toBe(total);
+    const customer = await store.getCustomerByPhone('4125551234');
+    expect(customer.balance).toBe(-99999 + total);
+  });
+
+  it('crea pedido con cartera parcial y método de pago restante', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '4125551234', customerName: 'Cliente A' });
+    await store.setCustomerBalance('4125551234', -30);
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+    const total = p1.price * 5; // > 30
+
+    const result = await store.createOrder({
+      customerName: 'Cliente A',
+      phone: '4125551234',
+      items: [{ id: 'p1', name: p1.name, price: p1.price, quantity: 5 }],
+      total,
+      walletApplied: 30,
+      paymentMethod: 'pago_movil',
+      paymentStatus: 'pendiente',
+      paymentReference: 'REF-Y'
+    });
+    expect(result.order.paymentMethod).toBe('pago_movil');
+    expect(result.order.walletApplied).toBe(30);
+    const customer = await store.getCustomerByPhone('4125551234');
+    expect(customer.balance).toBe(0);
+  });
+
+  it('rechaza pedido cuando la cartera no alcanza el monto indicado', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '4125551234', customerName: 'Cliente A' });
+    await store.setCustomerBalance('4125551234', -10);
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+
+    const result = await store.createOrder({
+      customerName: 'Cliente A',
+      phone: '4125551234',
+      items: [{ id: 'p1', name: p1.name, price: p1.price, quantity: 1 }],
+      total: p1.price,
+      walletApplied: 50
+    });
+    expect(result.error).toBe('Tu cartera solo cubre $10.00. Ajusta el monto o usa otro método.');
+  });
 });

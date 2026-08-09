@@ -9185,6 +9185,7 @@ function AdminView({
           orders={orders}
           rate={rate}
           products={products}
+          payments={payments}
           onLoadCustomers={onLoadCustomers}
           onAddToBlacklist={onAddToBlacklist}
           onAddBlacklistDebt={onAddBlacklistDebt}
@@ -9690,6 +9691,7 @@ function BlacklistAdminView({
   orders,
   rate,
   products,
+  payments,
   onLoadCustomers,
   onAddToBlacklist,
   onAddBlacklistDebt,

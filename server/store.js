@@ -117,7 +117,7 @@ const getSharePublic = async (code) => {
       qty,
       name: p?.name || id,
       price: p?.price != null ? Number(p.price) : 0,
-      image: p?.image || ''
+      image: p ? productImageUrl(p.id, p.image) : ''
     };
   });
   return {
@@ -232,6 +232,20 @@ const withForecast = (products, orders) => {
 // ---------------------------------------------------------------------------
 // Backend de archivo (local / dev). Se usa cuando no hay DATABASE_URL.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Imágenes de productos bajo demanda
+// ---------------------------------------------------------------------------
+// Convierte una imagen base64 embebida en el estado en su URL pública. Las
+// imágenes que ya son URLs (p.ej. sugerencias de búsqueda) se dejan igual, y
+// el base64 se sirve por /api/products/:id/image para que /api/state no
+// arrastre ~4 MB de imágenes en cada polling.
+const productImageUrl = (id, image) => {
+  if (typeof image === 'string' && image.startsWith('data:image/')) {
+    return `/api/products/${encodeURIComponent(id)}/image`;
+  }
+  return image || '';
+};
+
 const fileStore = {
   state: defaultState(),
 
@@ -267,14 +281,21 @@ const fileStore = {
 
   // Vista pública del estado: oculta el comprobante (base64 pesado y sensible)
   // y lo reemplaza por un flag hasProof. El comprobante se sirve bajo demanda
-  // vía GET /api/orders/:id/proof (solo admin o el dueño del pedido).
+  // vía GET /api/orders/:id/proof (solo admin o el dueño del pedido). También
+  // convierte las imágenes base64 de productos en URLs servidas bajo demanda.
   async getPublicState(clientId) {
     const state = await this.getState(clientId);
+    state.products = state.products.map((p) => ({ ...p, image: productImageUrl(p.id, p.image) }));
     state.orders = state.orders.map((o) => {
       const { paymentProof, ...rest } = o;
       return { ...rest, hasProof: Boolean(paymentProof) };
     });
     return state;
+  },
+
+  async getProductById(id) {
+    const state = await this.getState();
+    return state.products.find((p) => p.id === id) || null;
   },
 
   async saveProducts(products) {
@@ -811,11 +832,17 @@ const pgStore = {
   // Vista pública del estado (ver fileStore.getPublicState).
   async getPublicState(clientId) {
     const state = await this.getState(clientId);
+    state.products = state.products.map((p) => ({ ...p, image: productImageUrl(p.id, p.image) }));
     state.orders = state.orders.map((o) => {
       const { paymentProof, ...rest } = o;
       return { ...rest, hasProof: Boolean(paymentProof) };
     });
     return state;
+  },
+
+  async getProductById(id) {
+    const { rows } = await this.pool.query(`SELECT * FROM ${q('products')} WHERE id = $1`, [id]);
+    return rows[0] || null;
   },
 
   async saveProducts(products) {
@@ -1364,7 +1391,12 @@ const pgStore = {
   async atomicUpdateProduct(id, data) {
     const { rows } = await this.pool.query(`SELECT * FROM ${q('products')} WHERE id = $1 FOR UPDATE`, [id]);
     if (!rows[0]) return { error: 'Producto no encontrado' };
-    const p = { ...rows[0], ...data, id };
+    const payload = { ...data };
+    // Si llega la URL pública de la imagen, conservar el base64 original.
+    if (typeof payload.image === 'string' && payload.image.startsWith('/api/products/')) {
+      payload.image = rows[0].image;
+    }
+    const p = { ...rows[0], ...payload, id };
     await this.pool.query(
       `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11, "createdAt"=$12 WHERE id=$1`,
       [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || rows[0].createdAt || null]
@@ -1413,6 +1445,8 @@ export const getState = (clientId) => store.getState(clientId);
 // Vista pública del estado (sin comprobantes de pago). Para el polling y
 // respuestas que llegan al navegador; los comprobantes se sirven bajo demanda.
 export const getPublicState = (clientId) => store.getPublicState(clientId);
+
+export const getProductById = (id) => store.getProductById(id);
 
 export const saveSettings = (settings) => store.saveSettings(settings);
 
@@ -1596,7 +1630,14 @@ export const updateProduct = async (id, data) => {
   const existing = state.products.find((p) => p.id === id);
   if (!existing) return { error: 'Producto no encontrado' };
 
-  const products = state.products.map((p) => (p.id === id ? { ...p, ...data, id } : p));
+  // Si el cliente devuelve la URL pública de la imagen (porque el estado público
+  // la sirve así), conservar el base64 original en lugar de guardar la URL.
+  const payload = { ...data };
+  if (typeof payload.image === 'string' && payload.image.startsWith('/api/products/')) {
+    payload.image = existing.image;
+  }
+
+  const products = state.products.map((p) => (p.id === id ? { ...p, ...payload, id } : p));
   const categories = maybeAddCategory(state.categories, data.category);
 
   await store.saveProducts(products);

@@ -67,6 +67,16 @@ createRoot(document.getElementById('root')).render(
 // instalación en el móvil y el funcionamiento offline básico.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker
+      .register('/sw.js', { updateViaCache: 'none' })
+      .catch(() => {});
+  });
+  // Si un service worker nuevo toma control (nueva versión desplegada),
+  // recarga la app una vez para que deje de servir el shell cacheado viejo.
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    window.location.reload();
   });
 }

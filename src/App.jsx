@@ -71,6 +71,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
       share2: <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" />,
       barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
       star: <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />,
+      wallet: <path d="M21 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2M21 12h-5a2 2 0 0 0 0 4h5a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1z" />,
     };
 
   return (
@@ -122,8 +123,8 @@ const Btn = ({
 
   const variants = {
     primary:
-      'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-lg shadow-teal-500/25 ' +
-      'hover:from-teal-400 hover:to-emerald-400 hover:shadow-xl hover:shadow-teal-500/30 hover:-translate-y-0.5 ' +
+      'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 animate-btn-glow ' +
+      'hover:from-teal-400 hover:to-emerald-400 hover:animate-none hover:shadow-xl hover:shadow-teal-500/30 hover:-translate-y-0.5 ' +
       'active:shadow-md active:shadow-teal-500/20 active:translate-y-0',
     secondary:
       'bg-slate-800/70 border border-slate-600 text-slate-200 shadow-md shadow-slate-900/40 ' +
@@ -141,9 +142,9 @@ const Btn = ({
   };
 
   const status = error
-    ? { classes: '!bg-rose-600 !border-rose-500 text-white shadow-lg shadow-rose-600/30 !from-rose-600 !to-rose-500', label: 'Ocurrió un error' }
+    ? { classes: '!bg-rose-600 !border-rose-500 text-white shadow-lg shadow-rose-600/30 !from-rose-600 !to-rose-500 animate-none', label: 'Ocurrió un error' }
     : success
-      ? { classes: '!bg-emerald-500 !border-emerald-400 text-white shadow-lg shadow-emerald-500/30 !from-emerald-500 !to-emerald-400', label: 'Listo' }
+      ? { classes: '!bg-emerald-500 !border-emerald-400 text-white shadow-lg shadow-emerald-500/30 !from-emerald-500 !to-emerald-400 animate-none', label: 'Listo' }
       : null;
 
   const cls = `${base} ${sizes[size] || sizes.md} ${variants[variant] || variants.primary} ${status?.classes || ''} ${className}`.replace(/\s+/g, ' ');
@@ -1053,6 +1054,45 @@ export default function App() {
     addToast('Cobro eliminado', 'info');
   };
 
+  // Abonos a la deuda ("Mi Cartera"): el admin aprueba o rechaza los abonos
+  // que los clientes suben con su comprobante.
+  const [payments, setPayments] = useState([]);
+
+  const loadPayments = async () => {
+    const res = await api.listPayments();
+    if (res.ok) setPayments(res.data || []);
+  };
+
+  const handleApprovePayment = async (id) => {
+    const res = await api.approvePayment(id);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo aprobar el abono', 'error');
+      return false;
+    }
+    if (res.data.state) {
+      setProducts(res.data.state.products || []);
+      setOrders(res.data.state.orders || []);
+    }
+    await loadPayments();
+    addToast('Abono aprobado y aplicado al cliente', 'success');
+    return true;
+  };
+
+  const handleRejectPayment = async (id, note) => {
+    const res = await api.rejectPayment(id, note);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo rechazar el abono', 'error');
+      return false;
+    }
+    if (res.data.state) {
+      setProducts(res.data.state.products || []);
+      setOrders(res.data.state.orders || []);
+    }
+    await loadPayments();
+    addToast('Abono rechazado', 'info');
+    return true;
+  };
+
   // Toast notifications
   const [toasts, setToasts] = useState([]);
 
@@ -1425,6 +1465,7 @@ export default function App() {
       credit: Boolean(formData.credit),
       paymentMethod: formData.paymentMethod || 'efectivo',
       paymentReference: formData.paymentReference || '',
+      walletApplied: Number(formData.walletApplied) || 0,
       timestamp: formatTimestamp(),
       estimatedMinutes: formData.type === 'delivery' ? 25 : 10,
       clientId
@@ -2199,6 +2240,11 @@ export default function App() {
             onLoadCollections={loadCollections}
             onUpsertCollection={handleUpsertCollection}
             onDeleteCollection={handleDeleteCollection}
+            payments={payments}
+            pendingPayments={payments.filter((p) => p.status === 'pendiente').length}
+            onLoadPayments={loadPayments}
+            onApprovePayment={handleApprovePayment}
+            onRejectPayment={handleRejectPayment}
             addToast={addToast}
             storeLocation={storeLocation}
             onSaveStoreLocation={handleSaveStoreLocation}
@@ -2260,6 +2306,7 @@ export default function App() {
             customer={customerProfile}
             orders={orders}
             rate={rate}
+            addToast={addToast}
             onClose={() => setIsDebtDrawerOpen(false)}
           />
         </ErrorBoundary>
@@ -2495,6 +2542,7 @@ export default function App() {
         adminTab={adminTab}
         onAdminTab={handleAdminTabChange}
         pendingOrders={orders.filter((o) => !['entregado', 'cancelado'].includes(o.status)).length}
+        pendingPayments={payments.filter((p) => p.status === 'pendiente').length}
         onLogout={handleAdminLogout}
         isAdminAuthed={isAdminAuthed}
       />
@@ -3505,18 +3553,36 @@ function CustomerView({
                   Pago a la entrega
                 </span>
               )}
+              {Number(customerProfile.balance) < 0 && (
+                <span className="block text-[11px] sm:text-xs text-emerald-400 font-bold mt-0.5">
+                  <Icon name="check" className="w-3 h-3 inline -mt-0.5" /> Saldo a favor · úsalo al pagar
+                </span>
+              )}
             </div>
             <button
               onClick={onOpenDebt}
               className="text-right shrink-0 flex flex-col items-end gap-1 hover:opacity-90 transition-opacity"
-              aria-label="Ver detalle de mi deuda"
+              aria-label="Ver detalle de mi saldo"
             >
-              <span className="block text-lg sm:text-xl font-black text-white">
-                {formatUsd(Number(customerProfile.balance) || 0)}
-              </span>
-              <span className="flex items-center gap-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
-                Ver saldo <Icon name="chevronRight" className="w-3 h-3" />
-              </span>
+              {Number(customerProfile.balance) < 0 ? (
+                <>
+                  <span className="block text-lg sm:text-xl font-black text-emerald-400">
+                    {formatUsd(Math.abs(Number(customerProfile.balance)) || 0)}
+                  </span>
+                  <span className="flex items-center gap-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                    Mi Cartera <Icon name="chevronRight" className="w-3 h-3" />
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="block text-lg sm:text-xl font-black text-white">
+                    {formatUsd(Number(customerProfile.balance) || 0)}
+                  </span>
+                  <span className="flex items-center gap-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                    Ver saldo <Icon name="chevronRight" className="w-3 h-3" />
+                  </span>
+                </>
+              )}
             </button>
           </div>
           <div className="px-3 sm:px-4 pb-3 sm:pb-4 grid grid-cols-2 gap-2">
@@ -5258,6 +5324,7 @@ function BottomTabBar({
   adminTab,
   onAdminTab,
   pendingOrders,
+  pendingPayments,
   onLogout,
   isAdminAuthed
 }) {
@@ -5315,6 +5382,7 @@ function BottomTabBar({
     { key: 'orders', label: 'Pedidos', icon: 'clock', onClick: () => onAdminTab('orders'), badge: pendingOrders > 0 ? pendingOrders : null },
     { key: 'benefited', label: 'Beneficiados', icon: 'users', onClick: () => onAdminTab('benefited'), badge: null },
     { key: 'blacklist', label: 'Lista Negra', icon: 'alertTriangle', onClick: () => onAdminTab('blacklist'), badge: null },
+    { key: 'abonos', label: 'Abonos', icon: 'wallet', onClick: () => onAdminTab('abonos'), badge: pendingPayments > 0 ? pendingPayments : null },
     { key: 'analytics', label: 'Estadísticas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null }
   ];
 
@@ -6064,8 +6132,14 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     mapAddress: null,
     paymentMethod: 'efectivo',
     paymentReference: '',
-    paymentProof: null
+    paymentProof: null,
+    restPaymentMethod: '',
+    walletApplied: 0
   });
+
+  // "Mi Cartera": saldo a favor del cliente (balance < 0). Solo aparece como
+  // método de pago si hay saldo.
+  const walletAvailable = customerProfile && Number(customerProfile.balance) < 0 ? Math.abs(Number(customerProfile.balance)) : 0;
 
   const [errors, setErrors] = useState({});
   const [showPhoneSuggestions, setShowPhoneSuggestions] = useState(false);
@@ -6159,9 +6233,18 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
       !formData.credit &&
       formData.paymentMethod &&
       formData.paymentMethod !== 'efectivo' &&
+      formData.paymentMethod !== 'cartera' &&
       !formData.paymentProof
     ) {
       newErrors.payment = 'Adjunta el comprobante del pago (foto de la transferencia o pago móvil)';
+    }
+    // Con cartera parcial: el cliente elige con qué método paga el resto.
+    if (!formData.credit && formData.paymentMethod === 'cartera' && walletAvailable < cartTotal) {
+      if (!formData.restPaymentMethod) {
+        newErrors.payment = 'Tu cartera no cubre todo: elige con qué método pagas el resto';
+      } else if (formData.restPaymentMethod !== 'efectivo' && !formData.paymentProof) {
+        newErrors.payment = 'Adjunta el comprobante del pago del resto';
+      }
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -6171,8 +6254,23 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     e.preventDefault();
     if (isPlacingOrder) return;
     if (validate()) {
+      // Con "Mi Cartera": aplica el saldo a favor al total. Si cubre todo el
+      // pedido, el pago queda confirmado con cartera; si no, el resto se paga
+      // con el método elegido (restPaymentMethod).
+      let paymentMethod = formData.paymentMethod;
+      let walletApplied = 0;
+      if (formData.paymentMethod === 'cartera' && walletAvailable > 0) {
+        walletApplied = Math.min(walletAvailable, cartTotal);
+        if (walletApplied >= cartTotal) {
+          paymentMethod = 'cartera';
+        } else {
+          paymentMethod = formData.restPaymentMethod || 'efectivo';
+        }
+      }
       const full = {
         ...formData,
+        paymentMethod,
+        walletApplied,
         phone: `${formData.phoneCode} ${formData.phoneNumber}`
       };
       if (onSaveCustomer) {
@@ -6459,6 +6557,30 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
                 )}
               </span>
             </div>
+            {formData.paymentMethod === 'cartera' && walletAvailable > 0 && (
+              <>
+                <div className="text-xs flex justify-between">
+                  <span className="text-slate-400 flex items-center gap-1.5">
+                    <Icon name="wallet" className="w-3.5 h-3.5 text-emerald-400" />
+                    Mi Cartera
+                  </span>
+                  <span className="font-bold text-emerald-400 text-right">
+                    -{formatUsd(Math.min(walletAvailable, cartTotal))}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-300 flex justify-between border-t border-slate-800 pt-2">
+                  <span className="font-semibold">A pagar</span>
+                  <span className="font-black text-white text-right">
+                    {formatUsd(Math.max(0, cartTotal - walletAvailable))}
+                    {rate?.rate > 0 && (
+                      <span className="block text-[11px] text-slate-400">
+                        {formatBs(usdToBs(Math.max(0, cartTotal - walletAvailable), rate.rate))}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Pedido a crédito (solo clientes beneficiados) */}
@@ -6493,17 +6615,24 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
           {!formData.credit && (
             <div className="space-y-2.5">
               <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Método de pago</span>
-              <div className="grid grid-cols-3 gap-2">
+              <div className={`grid gap-2 ${walletAvailable > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
                 {[
                   { key: 'efectivo', label: 'Efectivo', icon: 'dollarSign' },
                   { key: 'pago_movil', label: 'Pago Móvil', icon: 'zap' },
-                  { key: 'transferencia', label: 'Transferencia', icon: 'creditCard' }
+                  { key: 'transferencia', label: 'Transferencia', icon: 'creditCard' },
+                  ...(walletAvailable > 0
+                    ? [{ key: 'cartera', label: 'Mi Cartera', icon: 'wallet', sub: formatUsd(walletAvailable) }]
+                    : [])
                 ].map((m) => (
                   <button
                     key={m.key}
                     type="button"
                     onClick={() =>
-                      setFormData({ ...formData, paymentMethod: formData.paymentMethod === m.key ? '' : m.key })
+                      setFormData({
+                        ...formData,
+                        paymentMethod: formData.paymentMethod === m.key ? '' : m.key,
+                        restPaymentMethod: m.key === 'cartera' ? formData.restPaymentMethod : ''
+                      })
                     }
                     className={`px-2 py-3 rounded-xl border text-[11px] sm:text-xs font-bold flex flex-col items-center gap-1.5 transition-all ${
                       formData.paymentMethod === m.key
@@ -6513,9 +6642,140 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
                   >
                     <Icon name={m.icon} className="w-4 h-4" />
                     {m.label}
+                    {m.sub && <span className="text-[9px] text-emerald-400 font-bold">{m.sub}</span>}
                   </button>
                 ))}
               </div>
+
+              {/* Cartera parcial: explicación + método para el resto */}
+              {formData.paymentMethod === 'cartera' && walletAvailable > 0 && (
+                <div className="space-y-2.5 animate-fade-in">
+                  <p className="text-[11px] text-slate-300 bg-slate-800/60 rounded-xl p-3 border border-slate-700 flex items-start gap-2">
+                    <Icon name="wallet" className="w-4 h-4 mt-0.5 text-emerald-400 shrink-0" />
+                    {walletAvailable >= cartTotal ? (
+                      <span>
+                        Tu cartera cubre todo el pedido ({formatUsd(cartTotal)}). Se descuenta al confirmar; no necesitas pagar nada más.
+                      </span>
+                    ) : (
+                      <span>
+                        Tu cartera cubre <b className="text-emerald-300">{formatUsd(walletAvailable)}</b> y el resto es{' '}
+                        <b className="text-amber-300">{formatUsd(cartTotal - walletAvailable)}</b>. Elige con qué pagas la diferencia.
+                      </span>
+                    )}
+                  </p>
+                  {walletAvailable < cartTotal && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { key: 'efectivo', label: 'Efectivo', icon: 'dollarSign' },
+                        { key: 'pago_movil', label: 'Pago Móvil', icon: 'zap' },
+                        { key: 'transferencia', label: 'Transferencia', icon: 'creditCard' }
+                      ].map((m) => (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, restPaymentMethod: formData.restPaymentMethod === m.key ? '' : m.key })}
+                          className={`px-2 py-2.5 rounded-xl border text-[10px] sm:text-[11px] font-bold flex flex-col items-center gap-1 transition-all ${
+                            formData.restPaymentMethod === m.key
+                              ? 'bg-teal-500/15 border-teal-500/50 text-teal-300'
+                              : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-teal-500/40'
+                          }`}
+                        >
+                          <Icon name={m.icon} className="w-4 h-4" />
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {formData.restPaymentMethod === 'pago_movil' && paymentConfig?.pagoMovil && (
+                    <p className="text-[11px] text-slate-300 bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                      <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">
+                        Datos para el pago móvil
+                      </span>
+                      Banco: <span className="text-white font-bold">{paymentConfig.pagoMovil.bank || '—'}</span> · Teléfono:{' '}
+                      <span className="text-white font-bold">{paymentConfig.pagoMovil.phone || '—'}</span> · Cedula:{' '}
+                      <span className="text-white font-bold">{paymentConfig.pagoMovil.id || '—'}</span>
+                    </p>
+                  )}
+                  {formData.restPaymentMethod === 'transferencia' && paymentConfig?.bank && (
+                    <p className="text-[11px] text-slate-300 bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                      <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">
+                        Datos para la transferencia
+                      </span>
+                      Banco: <span className="text-white font-bold">{paymentConfig.bank.name || '—'}</span> · Número de cuenta:{' '}
+                      <span className="text-white font-bold">{paymentConfig.bank.account || '—'}</span>
+                      {paymentConfig.bank.titular ? (
+                        <> · Titular: <span className="text-white font-bold">{paymentConfig.bank.titular}</span></>
+                      ) : null}
+                    </p>
+                  )}
+                  {formData.restPaymentMethod && formData.restPaymentMethod !== 'efectivo' && (
+                    <div className="space-y-2.5">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          Número de referencia / comprobante (opcional)
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.paymentReference}
+                          onChange={(e) => setFormData({ ...formData, paymentReference: e.target.value })}
+                          placeholder="Ej: 12H3456789"
+                          className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          Foto del comprobante *
+                        </label>
+                        <label className="w-full flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-xl border-2 border-dashed border-slate-700 bg-slate-800/60 cursor-pointer hover:border-teal-500/50 transition-all text-center">
+                          {formData.paymentProof ? (
+                            <>
+                              <img
+                                src={formData.paymentProof}
+                                alt="Comprobante de pago"
+                                className="max-h-36 rounded-lg object-contain"
+                              />
+                              <span className="text-[11px] text-teal-300 font-semibold flex items-center gap-1">
+                                <Icon name="check" className="w-3.5 h-3.5" />
+                                Comprobante adjunto — toca para cambiarlo
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Icon name="upload" className="w-6 h-6 text-slate-500" />
+                              <span className="text-xs text-slate-400">
+                                Toca para tomar una foto, elegir de la galería o subir un archivo del comprobante
+                              </span>
+                            </>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files && e.target.files[0];
+                              if (!file) return;
+                              if (file.size > 8 * 1024 * 1024) {
+                                addToast('La imagen supera 8 MB. Elige una más liviana.', 'error');
+                                e.target.value = '';
+                                return;
+                              }
+                              try {
+                                const compressed = await compressImage(file);
+                                setFormData({ ...formData, paymentProof: compressed });
+                              } catch {
+                                addToast('No se pudo procesar la imagen. Prueba con otra.', 'error');
+                              } finally {
+                                e.target.value = '';
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  {errors.payment && <p className="text-xs text-rose-400 mt-1">{errors.payment}</p>}
+                </div>
+              )}
 
               {formData.paymentMethod === 'pago_movil' && paymentConfig?.pagoMovil && (
                 <p className="text-[11px] text-slate-300 bg-slate-800/60 rounded-xl p-3 border border-slate-700">
@@ -6541,7 +6801,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
                 </p>
               )}
 
-              {formData.paymentMethod !== '' && formData.paymentMethod !== 'efectivo' && (
+              {formData.paymentMethod !== '' && formData.paymentMethod !== 'efectivo' && formData.paymentMethod !== 'cartera' && (
                 <div className="space-y-2.5 animate-fade-in">
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -6672,6 +6932,11 @@ function AdminView({
   onLoadCollections,
   onUpsertCollection,
   onDeleteCollection,
+  payments,
+  pendingPayments,
+  onLoadPayments,
+  onApprovePayment,
+  onRejectPayment,
   addToast,
   storeLocation,
   onSaveStoreLocation,
@@ -7765,6 +8030,7 @@ function AdminView({
           { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
           { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
           { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
+          { key: 'abonos', label: `Abonos (${pendingPayments})`, full: `Abonos por Aprobar (${pendingPayments})`, icon: 'wallet' },
           { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
           { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Negocio', icon: 'trendingUp' }
         ].map((tab) => (
@@ -7773,6 +8039,7 @@ function AdminView({
             onClick={() => {
               if (tab.key === 'benefited' || tab.key === 'blacklist') onLoadCustomers();
               if (tab.key === 'blacklist') onLoadCollections();
+              if (tab.key === 'abonos') onLoadPayments();
               setAdminTab(tab.key);
             }}
             className={`pb-3 sm:pb-4 text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-all whitespace-nowrap shrink-0 ${
@@ -8898,6 +9165,16 @@ function AdminView({
         />
       )}
 
+      {/* Tab: Abonos — pagos a cuenta que los clientes subieron para aprobar */}
+      {adminTab === 'abonos' && (
+        <PaymentsAdminView
+          payments={payments}
+          onLoadPayments={onLoadPayments}
+          onApprovePayment={onApprovePayment}
+          onRejectPayment={onRejectPayment}
+        />
+      )}
+
       {/* Tab: Tienda — ubicación fija del comercio */}
       {adminTab === 'tienda' && (
         <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md space-y-4">
@@ -9932,15 +10209,87 @@ function DebtDetailModal({
 
 // Modal que el cliente ve en "Mi Cuenta": desglose de su deuda con conversión
 // a bolívares según la tasa del día.
-function CustomerDebtModal({ customer, orders, rate, onClose }) {
+function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
   const key = normalizePhoneDigits(customer.phone);
   const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
   // El balance del cliente es la fuente autoritativa (lo actualiza el servidor al
-  // pasar un pedido a entregado o al saldar la deuda); el desglose por pedidos
-  // es solo un detalle informativo.
-  const debtTotal = Number(customer.balance) || 0;
+  // pasar un pedido a entregado o al saldar la deuda). balance < 0 = saldo a favor.
+  const balance = Number(customer.balance) || 0;
+  const hasWallet = balance < 0;
+  const walletAmount = Math.abs(balance);
+  const debtTotal = hasWallet ? 0 : balance;
+
+  // Formulario de abono: monto en Bs + referencia + comprobante. El servidor lo
+  // convierte a USD con la tasa del día y queda pendiente de aprobación.
+  const [showAbono, setShowAbono] = useState(false);
+  const [amountBs, setAmountBs] = useState('');
+  const [reference, setReference] = useState('');
+  const [proof, setProof] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [payments, setPayments] = useState([]);
+  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .listPayments(key)
+      .then((res) => {
+        if (active && res.ok && Array.isArray(res.data)) setPayments(res.data);
+      })
+      .finally(() => {
+        if (active) setPaymentsLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [key]);
+
+  const handleAbono = async (e) => {
+    e.preventDefault();
+    if (sending) return;
+    const monto = parseAmount(amountBs);
+    if (!(monto > 0)) {
+      addToast('Indica cuánto abonaste en bolívares', 'error');
+      return;
+    }
+    if (!proof) {
+      addToast('Adjunta el comprobante del abono', 'error');
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await api.createPayment({
+        phone: key,
+        customerName: customer.customerName || 'Cliente',
+        amountBs: monto,
+        reference,
+        proof
+      });
+      if (!res.ok) {
+        addToast(res.data?.error || 'No se pudo enviar el abono', 'error');
+        return;
+      }
+      addToast('Abono enviado. El kiosko lo verificará y lo aplicará a tu cuenta.', 'success');
+      setAmountBs('');
+      setReference('');
+      setProof(null);
+      setShowAbono(false);
+      const list = await api.listPayments(key);
+      if (list.ok && Array.isArray(list.data)) setPayments(list.data);
+    } catch {
+      addToast('No se pudo enviar el abono. Intenta de nuevo.', 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const STATUS_LABEL = {
+    pendiente: { text: 'En revisión', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/25' },
+    aprobado: { text: 'Aprobado', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25' },
+    rechazado: { text: 'Rechazado', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/25' }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
@@ -9950,11 +10299,20 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <Icon name="creditCard" className="w-5 h-5 text-indigo-400" />
-              Mi deuda
+              {hasWallet ? 'Mi Cartera' : 'Mi deuda'}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              {customer.customerName || customer.phone} · Total {formatUsd(debtTotal)}
-              {rate?.rate > 0 && <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}</span>}
+              {customer.customerName || customer.phone} ·{' '}
+              {hasWallet ? (
+                <span className="text-emerald-400 font-bold">Saldo a favor {formatUsd(walletAmount)}</span>
+              ) : (
+                <>Total {formatUsd(debtTotal)}</>
+              )}
+              {rate?.rate > 0 && (
+                <span className="block text-[10px] text-slate-500">
+                  {formatBs(usdToBs(hasWallet ? walletAmount : debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}
+                </span>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
@@ -9963,65 +10321,220 @@ function CustomerDebtModal({ customer, orders, rate, onClose }) {
         </div>
 
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
-          <div className="space-y-2">
-            <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
-              <span>Detalle de la deuda ({debtOrders.length} pedidos)</span>
-              <span className="text-red-400 font-black text-sm">{formatUsd(debtTotal)}</span>
-            </span>
-            {debtOrders.length === 0 ? (
-              <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl">
-                {debtTotal > 0
-                  ? 'Tu saldo deudor está registrado manualmente; no hay pedidos a crédito pendientes en el historial.'
-                  : 'No tienes deudas registradas en este momento.'}
-              </p>
-            ) : (
-              debtOrders.map((o) => (
-                <div key={o.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-mono text-cyan-400">{o.id}</span>
-                    <span className="text-slate-500">{new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}</span>
-                  </div>
-                  {Array.isArray(o.items) ? o.items.map((it, i) => (
-                    <div key={i} className="flex justify-between text-xs text-slate-300">
-                      <span>{it.quantity}x {it.name}</span>
-                      <span className="font-bold text-white">
-                        {formatUsd(it.price * it.quantity)}
+          {hasWallet && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-300 flex items-start gap-2">
+              <Icon name="check" className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                Tienes <b>{formatUsd(walletAmount)}</b> a tu favor. Al pagar tu próximo pedido,
+                elige <b>Mi Cartera</b> como método de pago para usarlo.
+              </span>
+            </div>
+          )}
+
+          {!hasWallet && (
+            <div className="space-y-2">
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+                <span>Detalle de la deuda ({debtOrders.length} pedidos)</span>
+                <span className="text-red-400 font-black text-sm">{formatUsd(debtTotal)}</span>
+              </span>
+              {debtOrders.length === 0 ? (
+                <p className="text-xs text-slate-500 bg-slate-900/50 p-3 rounded-xl">
+                  {debtTotal > 0
+                    ? 'Tu saldo deudor está registrado manualmente; no hay pedidos a crédito pendientes en el historial.'
+                    : 'No tienes deudas registradas en este momento.'}
+                </p>
+              ) : (
+                debtOrders.map((o) => (
+                  <div key={o.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-mono text-cyan-400">{o.id}</span>
+                      <span className="text-slate-500">{new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}</span>
+                    </div>
+                    {Array.isArray(o.items) ? o.items.map((it, i) => (
+                      <div key={i} className="flex justify-between text-xs text-slate-300">
+                        <span>{it.quantity}x {it.name}</span>
+                        <span className="font-bold text-white">
+                          {formatUsd(it.price * it.quantity)}
+                          {rate?.rate > 0 && (
+                            <span className="block text-[10px] text-slate-500 text-right">
+                              {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )) : null}
+                    <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs">
+                      <span className="text-slate-400">Total</span>
+                      <span className="text-amber-400 text-right">
+                        {formatUsd(o.total)}
                         {rate?.rate > 0 && (
-                          <span className="block text-[10px] text-slate-500 text-right">
-                            {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
-                          </span>
+                          <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(o.total, rate.rate))}</span>
                         )}
                       </span>
                     </div>
-                  )) : null}
-                  <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs">
-                    <span className="text-slate-400">Total</span>
-                    <span className="text-amber-400 text-right">
-                      {formatUsd(o.total)}
-                      {rate?.rate > 0 && (
-                        <span className="block text-[10px] text-slate-500">{formatBs(usdToBs(o.total, rate.rate))}</span>
-                      )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Formulario de abono */}
+          {showAbono && (
+            <form onSubmit={handleAbono} className="space-y-2.5 rounded-2xl bg-slate-950 border border-slate-700 p-4 animate-fade-in">
+              <span className="text-xs text-slate-300 font-bold flex items-center gap-1.5">
+                <Icon name="upload" className="w-4 h-4 text-teal-400" />
+                Abonar a mi cuenta
+              </span>
+              {rate?.rate > 0 && (
+                <p className="text-[10px] text-slate-500">
+                  Tasa del día: Bs {Number(rate.rate).toFixed(2)} ·{' '}
+                  {amountBs && Number(parseAmount(amountBs)) > 0
+                    ? <>equivale a <b className="text-teal-300">{formatUsd(parseAmount(amountBs) / rate.rate)}</b></>
+                    : 'se convierte sola al enviar'}
+                </p>
+              )}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Monto abonado en bolívares *</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={amountBs}
+                  onChange={(e) => setAmountBs(e.target.value)}
+                  placeholder="Ej: 1500"
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Número de referencia / comprobante</label>
+                <input
+                  type="text"
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value)}
+                  placeholder="Ej: 12H3456789"
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Foto del comprobante *</label>
+                <label className="w-full flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-xl border-2 border-dashed border-slate-700 bg-slate-800/60 cursor-pointer hover:border-teal-500/50 transition-all text-center">
+                  {proof ? (
+                    <>
+                      <img src={proof} alt="Comprobante del abono" className="max-h-32 rounded-lg object-contain" />
+                      <span className="text-[11px] text-teal-300 font-semibold flex items-center gap-1">
+                        <Icon name="check" className="w-3.5 h-3.5" />
+                        Adjunto — toca para cambiarlo
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="upload" className="w-6 h-6 text-slate-500" />
+                      <span className="text-xs text-slate-400">Toca para tomar una foto o subir el comprobante</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files && e.target.files[0];
+                      if (!file) return;
+                      if (file.size > 8 * 1024 * 1024) {
+                        addToast('La imagen supera 8 MB. Elige una más liviana.', 'error');
+                        e.target.value = '';
+                        return;
+                      }
+                      try {
+                        const compressed = await compressImage(file);
+                        setProof(compressed);
+                      } catch {
+                        addToast('No se pudo procesar la imagen. Prueba con otra.', 'error');
+                      } finally {
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowAbono(false)}
+                  className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={sending}
+                  className="py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
+                >
+                  {sending ? (
+                    <Icon name="refresh" className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Icon name="check" className="w-4 h-4" /> Enviar abono
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Historial de abonos */}
+          {payments.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
+                Mis abonos ({payments.length})
+              </span>
+              {payments.map((p) => (
+                <div key={p.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-mono text-cyan-400">{p.id}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${(STATUS_LABEL[p.status] || STATUS_LABEL.pendiente).cls}`}>
+                      {(STATUS_LABEL[p.status] || STATUS_LABEL.pendiente).text}
                     </span>
                   </div>
+                  <div className="flex justify-between text-xs text-slate-300">
+                    <span>Bs {Number(p.amountBs).toLocaleString('es-AR')}</span>
+                    <span className="font-bold text-white">≈ {formatUsd(Number(p.amountUsd))}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    {new Date(p.createdAt).toLocaleString('es-VE')}
+                    {p.reference ? ` · Ref ${p.reference}` : ''}
+                  </div>
+                  {p.status === 'rechazado' && p.note && (
+                    <p className="text-[10px] text-rose-300">{p.note}</p>
+                  )}
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
+        <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0 space-y-2.5">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-slate-500">Total deuda en bolívares</span>
-            <span className="text-base font-black text-red-400">
-              {formatUsd(debtTotal)}
+            <span className="text-xs text-slate-500">{hasWallet ? 'Saldo a favor' : 'Total deuda'}</span>
+            <span className={`text-base font-black ${hasWallet ? 'text-emerald-400' : 'text-red-400'}`}>
+              {formatUsd(hasWallet ? walletAmount : debtTotal)}
               {rate?.rate > 0 && (
-                <span className="block text-[10px] font-bold text-slate-400 text-right">{formatBs(usdToBs(debtTotal, rate.rate))}</span>
+                <span className="block text-[10px] font-bold text-slate-400 text-right">
+                  {formatBs(usdToBs(hasWallet ? walletAmount : debtTotal, rate.rate))}
+                </span>
               )}
             </span>
           </div>
+          {!showAbono && (
+            <button
+              onClick={() => setShowAbono(true)}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-sm font-bold transition-all flex items-center justify-center gap-1.5"
+            >
+              <Icon name="upload" className="w-4 h-4" />
+              Abonar
+            </button>
+          )}
           <button
             onClick={onClose}
-            className="mt-3 w-full py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm font-bold transition-all"
+            className="w-full py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm font-bold transition-all"
           >
             Entendido
           </button>
@@ -11506,6 +12019,245 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
           Cerrar carrito compartido
         </button>
       </div>
+    </div>
+  );
+}
+
+// Panel admin de abonos a la deuda: lista los pagos con comprobante que los
+// clientes subieron. El admin abre el comprobante, verifica y aprueba (aplica
+// el descuento al balance del cliente) o rechaza con nota.
+function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejectPayment }) {
+  const [showProofId, setShowProofId] = useState(null);
+  const [proof, setProof] = useState(null);
+  const [loadingProof, setLoadingProof] = useState(false);
+  const [note, setNote] = useState('');
+  const [rejectingId, setRejectingId] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
+
+  useEffect(() => {
+    onLoadPayments();
+  }, [onLoadPayments]);
+
+  const openProof = async (payment) => {
+    setShowProofId(payment.id);
+    setProof(null);
+    setLoadingProof(true);
+    try {
+      const res = await api.getPaymentProof(payment.id, payment.phone);
+      setProof(res.ok ? res.data?.proof : null);
+    } catch {
+      setProof(null);
+    } finally {
+      setLoadingProof(false);
+    }
+  };
+
+  const approve = async (payment) => {
+    setActionLoading(payment.id);
+    try {
+      const ok = await onApprovePayment(payment.id);
+      if (ok) {
+        setShowProofId(null);
+        setNote('');
+      }
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const reject = async (payment) => {
+    setActionLoading(payment.id);
+    try {
+      const ok = await onRejectPayment(payment.id, note);
+      if (ok) {
+        setShowProofId(null);
+        setRejectingId(null);
+        setNote('');
+      }
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const pendientes = payments.filter((p) => p.status === 'pendiente');
+  const resueltos = payments.filter((p) => p.status !== 'pendiente');
+
+  const STATUS_BADGE = {
+    pendiente: { text: 'Por verificar', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+    aprobado: { text: 'Aprobado', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+    rechazado: { text: 'Rechazado', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/30' }
+  };
+
+  const renderPayment = (p) => (
+    <div key={p.id} className="rounded-2xl bg-slate-900 border border-slate-700/70 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-cyan-400 text-xs">{p.id}</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${(STATUS_BADGE[p.status] || STATUS_BADGE.pendiente).cls}`}>
+              {(STATUS_BADGE[p.status] || STATUS_BADGE.pendiente).text}
+            </span>
+          </div>
+          <p className="text-sm font-bold text-white mt-1.5">{p.customerName}</p>
+          <p className="text-[11px] text-slate-500">{p.phone}</p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-base font-black text-white">Bs {Number(p.amountBs).toLocaleString('es-AR')}</p>
+          <p className="text-xs font-bold text-teal-300">≈ {formatUsd(Number(p.amountUsd))}</p>
+          <p className="text-[10px] text-slate-500">a Bs {Number(p.rate).toFixed(2)}</p>
+        </div>
+      </div>
+      <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
+        <span>{new Date(p.createdAt).toLocaleString('es-VE')}</span>
+        {p.reference ? <span>Ref: {p.reference}</span> : null}
+      </div>
+
+      {p.status === 'pendiente' && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openProof(p)}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-sky-500/15 border border-sky-500/40 text-sky-300 hover:bg-sky-500/25 transition-all inline-flex items-center justify-center gap-1.5"
+          >
+            <Icon name="eye" className="w-4 h-4" />
+            Ver comprobante
+          </button>
+          <button
+            onClick={() => approve(p)}
+            disabled={actionLoading === p.id}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+          >
+            {actionLoading === p.id ? (
+              <Icon name="refresh" className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <Icon name="check" className="w-4 h-4" /> Aprobar
+              </>
+            )}
+          </button>
+        </div>
+      )}
+      {p.status === 'rechazado' && p.note && (
+        <p className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/20 p-2 rounded-xl">
+          Nota: {p.note}
+        </p>
+      )}
+
+      {showProofId === p.id && (
+        <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 space-y-3 animate-fade-in">
+          <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+            <Icon name="image" className="w-3.5 h-3.5" /> Comprobante
+          </span>
+          {loadingProof ? (
+            <div className="w-full h-40 flex items-center justify-center bg-slate-800/60 rounded-xl">
+              <Icon name="refresh" className="w-6 h-6 text-teal-400 animate-spin" />
+            </div>
+          ) : proof ? (
+            <img src={proof} alt="Comprobante del abono" className="w-full max-h-72 rounded-xl object-contain bg-slate-900 border border-slate-800" />
+          ) : (
+            <p className="text-xs text-slate-500 bg-slate-800/60 p-3 rounded-xl text-center">
+              No se pudo cargar el comprobante.
+            </p>
+          )}
+          {p.status === 'pendiente' && (
+            <div className="space-y-2">
+              {rejectingId === p.id ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Motivo del rechazo (se envía al cliente)…"
+                    rows={2}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:border-rose-500 focus:outline-none resize-none"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        setRejectingId(null);
+                        setNote('');
+                      }}
+                      className="py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold"
+                    >
+                      Volver
+                    </button>
+                    <button
+                      onClick={() => reject(p)}
+                      disabled={actionLoading === p.id}
+                      className="py-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-bold disabled:opacity-60"
+                    >
+                      {actionLoading === p.id ? (
+                        <Icon name="refresh" className="w-4 h-4 animate-spin mx-auto" />
+                      ) : (
+                        'Confirmar rechazo'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setRejectingId(p.id);
+                    setNote('');
+                  }}
+                  className="w-full py-2.5 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all inline-flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="x" className="w-4 h-4" />
+                  Rechazar abono
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="p-4 sm:p-6 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md">
+        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+          <Icon name="wallet" className="w-5 h-5 text-teal-400" />
+          Abonos a la deuda
+        </h3>
+        <p className="text-xs text-slate-400 mt-1">
+          Los clientes suben comprobantes para abonar su cuenta. Verifica el pago y aprueba: el monto
+          (en USD, según la tasa del día) se descuenta de su deuda; el excedente queda como "Mi Cartera".
+        </p>
+        <div className="grid grid-cols-2 gap-2 mt-4">
+          <div className="rounded-2xl bg-slate-900/80 border border-slate-700/60 p-3">
+            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">Por verificar</span>
+            <span className="text-2xl font-black text-amber-300">{pendientes.length}</span>
+          </div>
+          <div className="rounded-2xl bg-slate-900/80 border border-slate-700/60 p-3">
+            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">Aprobados</span>
+            <span className="text-2xl font-black text-emerald-400">{resueltos.filter((p) => p.status === 'aprobado').length}</span>
+          </div>
+        </div>
+      </div>
+
+      {pendientes.length === 0 && resueltos.length === 0 ? (
+        <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 text-sm text-slate-400 text-center">
+          Aún no hay abonos. Cuando un cliente suba un comprobante, aparecerá aquí.
+        </div>
+      ) : (
+        <>
+          {pendientes.length > 0 && (
+            <div className="space-y-3">
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
+                Por verificar ({pendientes.length})
+              </span>
+              {pendientes.map(renderPayment)}
+            </div>
+          )}
+          {resueltos.length > 0 && (
+            <div className="space-y-3">
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
+                Resueltos ({resueltos.length})
+              </span>
+              {resueltos.map(renderPayment)}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

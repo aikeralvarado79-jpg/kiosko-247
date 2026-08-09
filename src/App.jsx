@@ -10098,7 +10098,8 @@ function DebtDetailModal({
   onClearDebt,
   collections,
   onUpsertCollection,
-  onDeleteCollection
+  onDeleteCollection,
+  payments
 }) {
   const [showScheduler, setShowScheduler] = useState(false);
 

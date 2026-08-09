@@ -219,6 +219,14 @@ const parseAmount = (value) => {
 
 const formatBs = (n) => `Bs ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Formatea bolívares mientras se escribe: "1000" -> "1.000,00", "150000" -> "150.000,00"
+const formatAmountBsInput = (raw) => {
+  const digits = String(raw || '').replace(/[^\d]/g, '');
+  if (!digits) return '';
+  const num = parseInt(digits, 10);
+  return num.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
 const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
 
 const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
@@ -1075,6 +1083,14 @@ export default function App() {
     }
     await loadPayments();
     addToast('Abono aprobado y aplicado al cliente', 'success');
+    // Refrescar perfil si el abono pertenece al cliente actual
+    if (customerProfile) {
+      const payment = payments.find((p) => p.id === id);
+      if (payment && normalizePhoneDigits(payment.phone) === normalizePhoneDigits(customerProfile.phone)) {
+        const fresh = await api.getCustomer(normalizePhoneDigits(customerProfile.phone));
+        if (fresh.ok && fresh.data?.phone) setCustomerProfile(fresh.data);
+      }
+    }
     return true;
   };
 
@@ -1090,6 +1106,13 @@ export default function App() {
     }
     await loadPayments();
     addToast('Abono rechazado', 'info');
+    if (customerProfile) {
+      const payment = payments.find((p) => p.id === id);
+      if (payment && normalizePhoneDigits(payment.phone) === normalizePhoneDigits(customerProfile.phone)) {
+        const fresh = await api.getCustomer(normalizePhoneDigits(customerProfile.phone));
+        if (fresh.ok && fresh.data?.phone) setCustomerProfile(fresh.data);
+      }
+    }
     return true;
   };
 
@@ -1884,6 +1907,12 @@ export default function App() {
     }
     setOrders(res.data.state.orders || []);
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
+    // Si el pedido pertenece al cliente actual, refrescar su perfil (balance actualizado)
+    const updatedOrder = res.data.state.orders?.find((o) => o.id === orderId);
+    if (updatedOrder && customerProfile && normalizePhoneDigits(updatedOrder.phone) === normalizePhoneDigits(customerProfile.phone)) {
+      const fresh = await api.getCustomer(normalizePhoneDigits(customerProfile.phone));
+      if (fresh.ok && fresh.data?.phone) setCustomerProfile(fresh.data);
+    }
   };
 
   // Admin confirma o rechaza el pago digital de un pedido (dispara push al cliente).
@@ -9813,6 +9842,7 @@ function BlacklistAdminView({
           collections={collections}
           onUpsertCollection={onUpsertCollection}
           onDeleteCollection={onDeleteCollection}
+          payments={payments}
         />
       )}
 
@@ -10077,6 +10107,18 @@ function DebtDetailModal({
     .sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
   const debtTotal = debtOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
 
+  // Historial de pagos/abonos de este cliente (de admin PaymentsAdminView o lista global)
+  // Se obtiene de los pagos aprobados/rechazados que coincidan con el teléfono.
+  // Nota: los pagos no vienen en el estado público; se cargan aparte si se necesita.
+  // Aquí usamos los pagos que vienen de props si existen (ver BlacklistAdminView).
+  const clientPayments = (payments || []).filter((p) => normalizePhoneDigits(p.phone) === key);
+  // Separa: depósitos a cartera (pagos aprobados cuando el cliente ya tenía saldo a favor
+  // o el monto supera la deuda pendiente) vs abonos a deuda.
+  // Heurística simple: pagos aprobados con amountUsd > 0. El tipo real se ve en el detalle.
+  const approvedPayments = clientPayments.filter((p) => p.status === 'aprobado');
+  const pendingPayments = clientPayments.filter((p) => p.status === 'pendiente');
+  const rejectedPayments = clientPayments.filter((p) => p.status === 'rechazado');
+
   const wa = formatPhoneWhatsApp(customer.phone);
 
   const accountMsg = buildAccountMessage(customer, orders);
@@ -10086,7 +10128,7 @@ function DebtDetailModal({
     .filter((c) => normalizePhoneDigits(c.phone) === key && (c.status === 'programado' || c.status === 'pendiente'))
     .sort((a, b) => new Date(a.dueAt || 0) - new Date(b.dueAt || 0));
 
-  const overdue = futureCollectionDue(upcoming); // helper para destacar vencidos
+  const overdue = futureCollectionDue(upcoming);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
@@ -10182,6 +10224,81 @@ function DebtDetailModal({
             )}
           </div>
         </div>
+
+        {/* Historial de pagos y depósitos de este cliente (agrupado) */}
+        {(approvedPayments.length > 0 || pendingPayments.length > 0 || rejectedPayments.length > 0) && (
+          <div className="p-4 sm:p-6 border-t border-slate-800 space-y-4">
+            <div className="flex items-center gap-2">
+              <Icon name="wallet" className="w-4 h-4 text-teal-400" />
+              <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                Historial de pagos ({clientPayments.length})
+              </span>
+            </div>
+            <div className="grid gap-3">
+              {approvedPayments.length > 0 && (
+                <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-emerald-300 font-bold flex items-center gap-1">
+                      <Icon name="check" className="w-3.5 h-3.5" />
+                      Abonos aprobados ({approvedPayments.length})
+                    </span>
+                    <span className="text-emerald-300 font-black">
+                      {formatUsd(approvedPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
+                    </span>
+                  </div>
+                  {approvedPayments.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                      <span className="text-slate-300">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                      <span className="font-bold text-teal-300">
+                        {formatUsd(p.amountUsd)} (Bs {Number(p.amountBs).toLocaleString('es-AR')})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {pendingPayments.length > 0 && (
+                <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-amber-300 font-bold flex items-center gap-1">
+                      <Icon name="clock" className="w-3.5 h-3.5" />
+                      Por verificar ({pendingPayments.length})
+                    </span>
+                    <span className="text-amber-300 font-black">
+                      {formatUsd(pendingPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
+                    </span>
+                  </div>
+                  {pendingPayments.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                      <span className="text-slate-400">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                      <span className="font-bold text-amber-300">
+                        {formatUsd(p.amountUsd)} (Bs {Number(p.amountBs).toLocaleString('es-AR')})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {rejectedPayments.length > 0 && (
+                <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-rose-300 font-bold flex items-center gap-1">
+                      <Icon name="x" className="w-3.5 h-3.5" />
+                      Rechazados ({rejectedPayments.length})
+                    </span>
+                  </div>
+                  {rejectedPayments.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                      <span className="text-slate-500">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                      <span className="font-bold text-rose-300">
+                        {formatUsd(p.amountUsd)} (Bs {Number(p.amountBs).toLocaleString('es-AR')})
+                        {p.note && <span className="block text-[10px] text-slate-500">Nota: {p.note}</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Pie */}
         <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
@@ -10378,12 +10495,12 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
             </div>
           )}
 
-          {/* Formulario de abono */}
+          {/* Formulario de abono / depósito a cartera */}
           {showAbono && (
             <form onSubmit={handleAbono} className="space-y-2.5 rounded-2xl bg-slate-950 border border-slate-700 p-4 animate-fade-in">
               <span className="text-xs text-slate-300 font-bold flex items-center gap-1.5">
-                <Icon name="upload" className="w-4 h-4 text-teal-400" />
-                Abonar a mi cuenta
+                <Icon name={hasWallet ? 'wallet' : 'upload'} className="w-4 h-4 text-teal-400" />
+                {hasWallet ? 'Depositar en mi cartera' : 'Abonar a mi cuenta'}
               </span>
               {rate?.rate > 0 && (
                 <p className="text-[10px] text-slate-500">
@@ -10399,8 +10516,8 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
                   type="text"
                   inputMode="decimal"
                   value={amountBs}
-                  onChange={(e) => setAmountBs(e.target.value)}
-                  placeholder="Ej: 1500"
+                  onChange={(e) => setAmountBs(formatAmountBsInput(e.target.value))}
+                  placeholder="Ej: 1.500,00"
                   className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
                 />
               </div>
@@ -10528,8 +10645,8 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
               onClick={() => setShowAbono(true)}
               className="w-full py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-sm font-bold transition-all flex items-center justify-center gap-1.5"
             >
-              <Icon name="upload" className="w-4 h-4" />
-              Abonar
+              <Icon name={hasWallet ? 'wallet' : 'upload'} className="w-4 h-4" />
+              {hasWallet ? 'Depositar en cartera' : 'Abonar'}
             </button>
           )}
           <button
@@ -12026,6 +12143,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
 // Panel admin de abonos a la deuda: lista los pagos con comprobante que los
 // clientes subieron. El admin abre el comprobante, verifica y aprueba (aplica
 // el descuento al balance del cliente) o rechaza con nota.
+// Agrupa por cliente y separa "Depósitos a cartera" (saldo a favor) de "Abonos a deuda".
 function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejectPayment }) {
   const [showProofId, setShowProofId] = useState(null);
   const [proof, setProof] = useState(null);
@@ -12033,6 +12151,7 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
   const [note, setNote] = useState('');
   const [rejectingId, setRejectingId] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
+  const [expandedClient, setExpandedClient] = useState(null);
 
   useEffect(() => {
     onLoadPayments();
@@ -12079,8 +12198,19 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
     }
   };
 
-  const pendientes = payments.filter((p) => p.status === 'pendiente');
-  const resueltos = payments.filter((p) => p.status !== 'pendiente');
+  // Agrupa pagos por cliente (teléfono)
+  const paymentsByClient = payments.reduce((acc, p) => {
+    const key = p.phone;
+    if (!acc[key]) acc[key] = { phone: key, name: p.customerName, payments: [] };
+    acc[key].payments.push(p);
+    return acc;
+  }, {});
+
+  // Para cada cliente, ordena pagos por fecha descendente
+  const clients = Object.values(paymentsByClient).map((client) => {
+    client.payments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return client;
+  });
 
   const STATUS_BADGE = {
     pendiente: { text: 'Por verificar', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
@@ -12088,7 +12218,7 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
     rechazado: { text: 'Rechazado', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/30' }
   };
 
-  const renderPayment = (p) => (
+  const renderPayment = (p, clientPhone) => (
     <div key={p.id} className="rounded-2xl bg-slate-900 border border-slate-700/70 p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -12211,52 +12341,115 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
     </div>
   );
 
+  const renderClient = (client) => {
+    const pendientes = client.payments.filter((p) => p.status === 'pendiente');
+    const aprobados = client.payments.filter((p) => p.status === 'aprobado');
+    const rechazados = client.payments.filter((p) => p.status === 'rechazado');
+    const isExpanded = expandedClient === client.phone;
+
+    const totalAprobado = aprobados.reduce((sum, p) => sum + Number(p.amountUsd || 0), 0);
+    const totalPendiente = pendientes.reduce((sum, p) => sum + Number(p.amountUsd || 0), 0);
+
+    return (
+      <div key={client.phone} className="rounded-2xl bg-slate-900 border border-slate-700/70 overflow-hidden">
+        <button
+          onClick={() => setExpandedClient(isExpanded ? null : client.phone)}
+          className="w-full p-4 flex items-center justify-between gap-3 text-left"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              totalAprobado > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'
+            }`}>
+              <Icon name={totalAprobado > 0 ? 'wallet' : 'creditCard'} className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-bold text-white truncate">{client.name || 'Cliente'}</p>
+                <span className="font-mono text-cyan-400 text-xs">{client.phone}</span>
+              </div>
+              <p className="text-[11px] text-slate-500 flex items-center gap-2">
+                <span>{client.payments.length} pagos</span>
+                <span>·</span>
+                <span className="text-teal-300 font-bold">Aprobados: {formatUsd(totalAprobado)}</span>
+                <span>·</span>
+                <span className="text-amber-300 font-bold">Pendientes: {formatUsd(totalPendiente)}</span>
+                <span>·</span>
+                <span className="text-rose-300 font-bold">Rechazados: {rechazados.length}</span>
+              </p>
+            </div>
+          </div>
+          <Icon name={isExpanded ? 'chevronUp' : 'chevronDown'} className="w-5 h-5 text-slate-400 shrink-0" />
+        </button>
+
+        {isExpanded && (
+          <div className="border-t border-slate-800 p-4 space-y-4">
+            {pendientes.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
+                  Por verificar ({pendientes.length})
+                </span>
+                {pendientes.map((p) => renderPayment(p, client.phone))}
+              </div>
+            )}
+            {aprobados.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
+                  Aprobados ({aprobados.length}) — Total: {formatUsd(totalAprobado)}
+                </span>
+                {aprobados.map((p) => renderPayment(p, client.phone))}
+              </div>
+            )}
+            {rechazados.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
+                  Rechazados ({rechazados.length})
+                </span>
+                {rechazados.map((p) => renderPayment(p, client.phone))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <div className="p-4 sm:p-6 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md">
         <h3 className="text-lg font-bold text-white flex items-center gap-2">
           <Icon name="wallet" className="w-5 h-5 text-teal-400" />
-          Abonos a la deuda
+          Abonos y depósitos
         </h3>
         <p className="text-xs text-slate-400 mt-1">
-          Los clientes suben comprobantes para abonar su cuenta. Verifica el pago y aprueba: el monto
-          (en USD, según la tasa del día) se descuenta de su deuda; el excedente queda como "Mi Cartera".
+          Los clientes suben comprobantes para abonar deuda o depositar en cartera. Verifica el pago y aprueba:
+          el monto (en USD, según la tasa del día) se descuenta de su deuda; el excedente queda como "Mi Cartera".
         </p>
-        <div className="grid grid-cols-2 gap-2 mt-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4 text-center">
           <div className="rounded-2xl bg-slate-900/80 border border-slate-700/60 p-3">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">Por verificar</span>
-            <span className="text-2xl font-black text-amber-300">{pendientes.length}</span>
+            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">Clientes con pagos</span>
+            <span className="text-2xl font-black text-teal-300">{Object.keys(paymentsByClient).length}</span>
           </div>
           <div className="rounded-2xl bg-slate-900/80 border border-slate-700/60 p-3">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">Aprobados</span>
-            <span className="text-2xl font-black text-emerald-400">{resueltos.filter((p) => p.status === 'aprobado').length}</span>
+            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">Pagos por verificar</span>
+            <span className="text-2xl font-black text-amber-300">{payments.filter((p) => p.status === 'pendiente').length}</span>
+          </div>
+          <div className="rounded-2xl bg-slate-900/80 border border-slate-700/60 p-3">
+            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">Total aprobado (USD)</span>
+            <span className="text-2xl font-black text-emerald-300">
+              {formatUsd(payments.filter((p) => p.status === 'aprobado').reduce((sum, p) => sum + Number(p.amountUsd || 0), 0))}
+            </span>
           </div>
         </div>
       </div>
 
-      {pendientes.length === 0 && resueltos.length === 0 ? (
+      {Object.keys(paymentsByClient).length === 0 ? (
         <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 text-sm text-slate-400 text-center">
-          Aún no hay abonos. Cuando un cliente suba un comprobante, aparecerá aquí.
+          Aún no hay pagos. Cuando un cliente suba un comprobante, aparecerá aquí agrupado por cliente.
         </div>
       ) : (
-        <>
-          {pendientes.length > 0 && (
-            <div className="space-y-3">
-              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
-                Por verificar ({pendientes.length})
-              </span>
-              {pendientes.map(renderPayment)}
-            </div>
-          )}
-          {resueltos.length > 0 && (
-            <div className="space-y-3">
-              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
-                Resueltos ({resueltos.length})
-              </span>
-              {resueltos.map(renderPayment)}
-            </div>
-          )}
-        </>
+        <div className="space-y-3">
+          {clients.map(renderClient)}
+        </div>
       )}
     </div>
   );

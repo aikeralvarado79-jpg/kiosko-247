@@ -3835,7 +3835,7 @@ function CustomerView({
             variant="tonal"
             size="sm"
             icon="mic"
-            className="absolute right-3 top-1/2 -translate-y-1/2 !p-2.5 !rounded-xl"
+            className="!absolute right-3 top-1/2 -translate-y-1/2 !p-2.5 !rounded-xl"
             style={{ width: 'auto', height: 'auto' }}
             title="Compra rápida por voz"
             aria-label="Compra rápida por voz"

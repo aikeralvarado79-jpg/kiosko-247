@@ -122,8 +122,8 @@ const Btn = ({
 
   const variants = {
     primary:
-      'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-lg shadow-teal-500/25 ' +
-      'hover:from-teal-400 hover:to-emerald-400 hover:shadow-xl hover:shadow-teal-500/30 hover:-translate-y-0.5 ' +
+      'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 animate-btn-glow ' +
+      'hover:from-teal-400 hover:to-emerald-400 hover:animate-none hover:shadow-xl hover:shadow-teal-500/30 hover:-translate-y-0.5 ' +
       'active:shadow-md active:shadow-teal-500/20 active:translate-y-0',
     secondary:
       'bg-slate-800/70 border border-slate-600 text-slate-200 shadow-md shadow-slate-900/40 ' +
@@ -141,9 +141,9 @@ const Btn = ({
   };
 
   const status = error
-    ? { classes: '!bg-rose-600 !border-rose-500 text-white shadow-lg shadow-rose-600/30 !from-rose-600 !to-rose-500', label: 'Ocurrió un error' }
+    ? { classes: '!bg-rose-600 !border-rose-500 text-white shadow-lg shadow-rose-600/30 !from-rose-600 !to-rose-500 animate-none', label: 'Ocurrió un error' }
     : success
-      ? { classes: '!bg-emerald-500 !border-emerald-400 text-white shadow-lg shadow-emerald-500/30 !from-emerald-500 !to-emerald-400', label: 'Listo' }
+      ? { classes: '!bg-emerald-500 !border-emerald-400 text-white shadow-lg shadow-emerald-500/30 !from-emerald-500 !to-emerald-400 animate-none', label: 'Listo' }
       : null;
 
   const cls = `${base} ${sizes[size] || sizes.md} ${variants[variant] || variants.primary} ${status?.classes || ''} ${className}`.replace(/\s+/g, ' ');

@@ -569,11 +569,32 @@ const STATUS_LABELS = {
   cancelado: 'Cancelado'
 };
 
+// Un pedido con pago digital "pendiente" aún no debe mostrar su estatus de avance
+// (Pendiente/En prep./Listo/...): el estatus solo tiene sentido una vez validado
+// el pago (confirmado) o rechazado. Los pagos en efectivo y por cartera se
+// validan al instante, así que siempre muestran estatus.
+const needsPaymentValidation = (o) =>
+  !!o.paymentMethod &&
+  o.paymentMethod !== 'efectivo' &&
+  o.paymentMethod !== 'cartera' &&
+  o.paymentStatus === 'pendiente' &&
+  !o.credit;
+
 // Time lapse de pasos de un pedido: muestra el avance con un color distinto por
 // estatus. Retiro en tienda: Pendiente → En prep. → Listo → Retirado.
 // Delivery: Pendiente → En prep. → Listo → En camino → Entregado.
 function OrderStepsTimeline({ order, className = '' }) {
   if (!order) return null;
+  // Si el pago digital aún no está validado, no se muestran los pasos de avance:
+  // el pedido queda "congelado" hasta confirmar el pago.
+  if (needsPaymentValidation(order)) {
+    return (
+      <div className={`flex items-center justify-center gap-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-300 font-semibold ${className}`}>
+        <Icon name="clock" className="w-3.5 h-3.5 shrink-0" />
+        Esperando validación del pago
+      </div>
+    );
+  }
   const isDelivery = order.type === 'delivery';
   const steps = isDelivery
     ? [
@@ -775,13 +796,17 @@ export default function App() {
     setProducts(res.data.products || []);
     setCategories(res.data.categories || []);
     setOrders(res.data.orders || []);
+    // El estado público ya incluye customers (con balance); mantener la lista de
+    // clientes del admin sincronizada en tiempo real para que la vista previa de
+    // Lista Negra refleje los cambios sin tener que pulsar "Actualizar lista".
+    if (isAdminAuthed && Array.isArray(res.data.customers)) setAllCustomers(res.data.customers);
     if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
     hasDataRef.current = true;
     setIsLoading(false);
-  }, [clientId]);
+  }, [clientId, isAdminAuthed]);
 
   useEffect(() => {
     loadState();
@@ -1311,15 +1336,15 @@ export default function App() {
     return true;
   };
 
-  const handleAddBlacklistDebt = async ({ phone, name, items }) => {
-    const res = await api.addBlacklistDebt({ phone, name, items });
+  const handleAddBlacklistDebt = async ({ phone, name, items, description }) => {
+    const res = await api.addBlacklistDebt({ phone, name, items, description });
     if (!res.ok) {
       addToast(res.data.error || 'No se pudo registrar la deuda', 'error');
       return false;
     }
     await loadCustomers();
     await loadState({ silent: true });
-    addToast('Productos añadidos a la deuda', 'success');
+    addToast(description ? 'Deuda registrada' : 'Productos añadidos a la deuda', 'success');
     return true;
   };
 
@@ -3785,6 +3810,7 @@ function CustomerView({
                 const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                 const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
                 const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
+                const payPending = needsPaymentValidation(o);
                 return (
                   <div
                     key={o.id}
@@ -3794,9 +3820,15 @@ function CustomerView({
                       <span className="text-xs sm:text-sm font-bold text-white">
                         Pedido <span className="text-teal-400">#{o.id}</span>
                       </span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
-                        {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
-                      </span>
+                      {payPending ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                          Pago en revisión
+                        </span>
+                      ) : (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
+                          {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
+                        </span>
+                      )}
                     </div>
                     <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
                       {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
@@ -5293,15 +5325,22 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
                   const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                   const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
                   const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
+                  const payPending = needsPaymentValidation(o);
                   return (
                     <div key={o.id} className={`p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border ${payRejected ? 'border-rose-500/50' : 'border-slate-700/50'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs sm:text-sm font-bold text-white">
                           Pedido <span className="text-teal-400">#{o.id}</span>
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
-                          {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
-                        </span>
+                        {payPending ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                            Pago en revisión
+                          </span>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
+                            {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
+                          </span>
+                        )}
                       </div>
                       <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
                         {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
@@ -6094,7 +6133,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
             </h3>
             <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${style.badge}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${style.dot} ${status === 'en_camino' ? 'animate-pulse' : ''}`} />
-              {STATUS_LABELS[status] || 'Pendiente'}
+              {needsPaymentValidation(order) ? 'Pago en revisión' : STATUS_LABELS[status] || 'Pendiente'}
             </span>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
@@ -6103,7 +6142,13 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
         </div>
 
         <div className="p-5 sm:p-6 space-y-4">
-          {/* Stepper de estados */}
+          {/* Stepper de estados: oculto hasta validar el pago digital */}
+          {needsPaymentValidation(order) ? (
+            <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
+              <Icon name="clock" className="w-4 h-4 shrink-0" />
+              Tu pedido avanza cuando el kiosko confirme el pago. Revisa el estado de tu pago abajo.
+            </div>
+          ) : (
           <div className={`grid gap-1.5 sm:gap-2 pt-1 ${order.type === 'delivery' ? 'grid-cols-5' : 'grid-cols-4'}`}>
             {steps.map((step, idx) => {
               const isPassed = idx <= currentIdx;
@@ -6118,6 +6163,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
               );
             })}
           </div>
+          )}
 
           {/* Mapa: destino + repartidor en vivo */}
           <DeliveryMap order={track} storeLocation={storeLocation} />
@@ -7712,16 +7758,17 @@ function AdminView({
     const sem = semaforoOf(order);
     const missingStock = lowStockInOrder(order);
     const isPinned = pinnedOrders.includes(order.id);
+    const payPending = needsPaymentValidation(order);
     return (
       <div
         key={order.id}
-        className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${st.ring}`}
+        className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${payPending ? 'border-amber-500/50' : st.ring}`}
       >
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
-              {['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
+              {!payPending && ['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
                 <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 shrink-0 ${SEM_TONES[sem.tone]}`}>
                   <Icon name="clock" className="w-3 h-3" />
                   {sem.text}
@@ -7729,12 +7776,19 @@ function AdminView({
               )}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {payPending ? (
+                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-400/40 bg-amber-500/15 text-amber-300 text-[11px] font-bold">
+                  <Icon name="clock" className="w-3 h-3" />
+                  Pago en revisión
+                </span>
+              ) : (
               <span
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
                 {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
               </span>
+              )}
               {(order.paymentMethod === 'cartera' || Number(order.walletApplied) > 0) && (
                 <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-[11px] font-bold">
                   <Icon name="wallet" className="w-3 h-3" />
@@ -7947,6 +8001,13 @@ function AdminView({
 
         {/* Status Update Controls */}
         <div className="pt-3 border-t border-slate-700/60 space-y-2">
+          {payPending ? (
+            <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
+              <Icon name="lock" className="w-3.5 h-3.5 shrink-0" />
+              Confirma o rechaza el pago arriba para poder avanzar el estado del pedido.
+            </p>
+          ) : (
+          <>
           <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
           <div className="grid grid-cols-2 gap-2">
             {[
@@ -8023,6 +8084,8 @@ function AdminView({
               <Icon name="trash" className="w-3.5 h-3.5" />
               Eliminar pedido
             </button>
+          )}
+          </>
           )}
         </div>
       </div>
@@ -9476,14 +9539,14 @@ function AdminView({
 
       {fichaOrder && (
         <div
-          className="fixed inset-x-0 bottom-0 z-[70] overflow-y-auto animate-fade-in"
+          className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
           style={{ top: headerHeight }}
           role="dialog"
           aria-label={`Ficha del pedido ${fichaOrder.id}`}
         >
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={closeFicha} />
-          <div className="relative min-h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
-            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col">
+          <div className="relative h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
+            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col max-h-full">
               <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">
                 <div>
                   <h3 className="font-black text-white text-sm flex items-center gap-2">
@@ -9500,7 +9563,7 @@ function AdminView({
                   <Icon name="x" className="w-4 h-4" />
                 </button>
               </div>
-              <div className="p-4 sm:p-5">
+              <div className="p-4 sm:p-5 overflow-y-auto">
                 <OrderStepsTimeline order={fichaOrder} />
                 <div className="mt-4">
                   {renderOrderCard(fichaOrder, { inFicha: true })}
@@ -9774,28 +9837,19 @@ function BlacklistAdminView({
   onUpsertCollection,
   onDeleteCollection
 }) {
-  const [phone, setPhone] = useState('');
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
   const [selectedDebtor, setSelectedDebtor] = useState(null); // customer abierto
   const [isAddProductsOpen, setIsAddProductsOpen] = useState(false);
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [isAddAmountOpen, setIsAddAmountOpen] = useState(false);
 
   const debtors = customers.filter((c) => (Number(c.balance) || 0) > 0);
 
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    const ok = await onAddToBlacklist(phone.replace(/\D/g, ''), name, amount);
-    if (ok) {
-      setPhone('');
-      setName('');
-      setAmount('');
-    }
-  };
-
-  const handleAddDebt = async ({ phone: targetPhone, name: targetName, items }) => {
-    const ok = await onAddBlacklistDebt({ phone: targetPhone, name: targetName, items });
+  const handleAddDebt = async ({ phone: targetPhone, name: targetName, items, description: targetDescription }) => {
+    const ok = await onAddBlacklistDebt({ phone: targetPhone, name: targetName, items, description: targetDescription });
     if (ok) {
       setIsAddProductsOpen(false);
+      setIsAddAmountOpen(false);
+      setIsRegisterOpen(false);
       setSelectedDebtor(null);
     }
   };
@@ -9817,11 +9871,11 @@ function BlacklistAdminView({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setIsAddProductsOpen(true)}
-            className="px-3 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-colors flex items-center gap-1.5"
+            onClick={() => setIsRegisterOpen(true)}
+            className="px-3 py-2 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 text-slate-950 text-xs font-bold hover:from-red-400 hover:to-amber-400 shadow-lg shadow-red-500/20 transition-colors flex items-center gap-1.5"
           >
             <Icon name="plus" className="w-4 h-4" />
-            Añadir productos
+            Registrar
           </button>
           <button
             onClick={onLoadCustomers}
@@ -9831,51 +9885,6 @@ function BlacklistAdminView({
           </button>
         </div>
       </div>
-
-      <form
-        onSubmit={handleAdd}
-        className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end p-4 rounded-2xl bg-slate-900 border border-slate-700/60"
-      >
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono *</label>
-          <input
-            type="tel"
-            inputMode="numeric"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="0414 1234567"
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre del deudor"
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1">Deuda (USD) *</label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-          />
-        </div>
-        <button
-          type="submit"
-          className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 text-slate-950 text-sm font-bold hover:from-red-400 hover:to-amber-400 shadow-lg shadow-red-500/20 transition-all"
-        >
-          Añadir a la lista negra
-        </button>
-      </form>
 
       {debtors.length === 0 ? (
         <p className="text-sm text-slate-500 py-8 text-center">No hay deudores registrados.</p>
@@ -9930,6 +9939,80 @@ function BlacklistAdminView({
           rate={rate}
           customers={customers}
           onClose={() => setIsAddProductsOpen(false)}
+          onConfirm={handleAddDebt}
+        />
+      )}
+
+      {/* Modal de elección de registro (productos o monto) */}
+      {isRegisterOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="absolute inset-0" onClick={() => setIsRegisterOpen(false)} />
+          <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up p-5 sm:p-6 space-y-3">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Icon name="plus" className="w-5 h-5 text-amber-400" />
+                Registrar deuda
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Elige cómo quieres cargar la deuda del cliente.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setIsRegisterOpen(false);
+                setIsAddProductsOpen(true);
+              }}
+              className="w-full p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-teal-500/50 text-left transition-all"
+            >
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 rounded-xl bg-teal-500/15 text-teal-300 shrink-0">
+                  <Icon name="package" className="w-5 h-5" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-slate-100">Añadir productos</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Elige productos del catálogo que el cliente debe (ventas presenciales o deudas viejas).
+                  </p>
+                </div>
+                <Icon name="chevronRight" className="w-4 h-4 text-slate-500 shrink-0" />
+              </div>
+            </button>
+            <button
+              onClick={() => {
+                setIsRegisterOpen(false);
+                setIsAddAmountOpen(true);
+              }}
+              className="w-full p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-amber-500/50 text-left transition-all"
+            >
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 rounded-xl bg-amber-500/15 text-amber-300 shrink-0">
+                  <Icon name="wallet" className="w-5 h-5" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-slate-100">Registrar monto</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Carga una deuda directa en dólares con teléfono, nombre y motivo.
+                  </p>
+                </div>
+                <Icon name="chevronRight" className="w-4 h-4 text-slate-500 shrink-0" />
+              </div>
+            </button>
+            <button
+              onClick={() => setIsRegisterOpen(false)}
+              className="w-full py-2.5 rounded-xl bg-slate-800 text-slate-300 text-sm font-bold hover:bg-slate-700 transition-all"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para registrar una deuda por monto directo (teléfono, nombre, monto, motivo) */}
+      {isAddAmountOpen && (
+        <AddDebtAmountModal
+          customers={customers}
+          rate={rate}
+          onClose={() => setIsAddAmountOpen(false)}
           onConfirm={handleAddDebt}
         />
       )}
@@ -10163,6 +10246,181 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
   );
 }
 
+// Modal para registrar una deuda por monto directo en USD (teléfono, nombre,
+// monto y motivo). Al confirmar crea un pedido a crédito entregado con un
+// único ítem "Deuda manual" y la descripción como nota del pedido.
+function AddDebtAmountModal({ customers, rate, onClose, onConfirm }) {
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerAmount, setCustomerAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const pickCustomer = (phone) => {
+    const c = (customers || []).find((x) => normalizePhoneDigits(x.phone) === normalizePhoneDigits(phone));
+    setCustomerPhone(phone);
+    if (c) setCustomerName(c.customerName || '');
+  };
+
+  const handleConfirm = async () => {
+    const key = customerPhone.replace(/\D/g, '').slice(-11);
+    if (key.length < 7) {
+      setError('Ingresa el número de teléfono del deudor');
+      return;
+    }
+    const monto = parseAmount(customerAmount);
+    if (!monto || monto <= 0) {
+      setError('Ingresa un monto de deuda válido');
+      return;
+    }
+    setError('');
+    setSubmitting(true);
+    await onConfirm({
+      phone: key,
+      name: customerName,
+      items: [{ name: description ? `Deuda manual · ${description}` : 'Deuda manual', price: monto, quantity: 1 }],
+      description
+    });
+    setSubmitting(false);
+  };
+
+  const totalBs = usdToBs(parseAmount(customerAmount) || 0, rate?.rate || 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="wallet" className="w-5 h-5 text-amber-400" />
+              Registrar monto de la deuda
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Carga una deuda directa en dólares con su motivo.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Deudor (cliente registrado)</label>
+              <select
+                value=""
+                onChange={(e) => e.target.value && pickCustomer(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-amber-500 focus:outline-none"
+              >
+                <option value="">— Seleccionar deudor existente —</option>
+                {(customers || []).map((c) => (
+                  <option key={c.phone} value={c.phone}>
+                    {c.customerName || 'Cliente'} · {c.phone} · {formatUsd(Number(c.balance) || 0)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono *</label>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={customerPhone}
+                  onChange={(e) => pickCustomer(e.target.value)}
+                  placeholder="0414 1234567"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre</label>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="Nombre del deudor"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Deuda (USD) *</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={customerAmount}
+              onChange={(e) => setCustomerAmount(formatAmountBsInput(e.target.value))}
+              placeholder="0.00"
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+            />
+            {rate?.rate > 0 && totalBs > 0 && (
+              <span className="block text-[11px] text-slate-500 mt-1">
+                ≈ {formatBs(totalBs)}
+              </span>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Descripción del motivo</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ej.: Compra a crédito no registrada, préstamo, saldo de la semana…"
+              rows={2}
+              maxLength={300}
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none resize-none"
+            />
+            <span className="block text-[10px] text-slate-600 text-right">{description.length}/300</span>
+          </div>
+        </div>
+
+        {/* Pie */}
+        <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
+          {error && (
+            <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 mb-3">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
+                Total a cargar
+              </span>
+              <span className="text-lg font-black text-amber-400">
+                {formatUsd(parseAmount(customerAmount) || 0)}
+                {rate?.rate > 0 && (
+                  <span className="block text-[10px] text-slate-500">{formatBs(totalBs)}</span>
+                )}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-sm font-bold hover:bg-slate-700 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={submitting}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 text-slate-950 text-sm font-bold hover:from-red-400 hover:to-amber-400 shadow-lg shadow-red-500/20 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5"
+              >
+                <Icon name="check" className="w-4 h-4" />
+                {submitting ? 'Guardando…' : 'Registrar deuda'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Desglosa los pedidos de un deudor y ofrece enviar la cuenta por WhatsApp
 // o programar el cobro (cuenta + fecha) para envío automático.
 function DebtDetailModal({
@@ -10196,6 +10454,34 @@ function DebtDetailModal({
   const approvedPayments = clientPayments.filter((p) => p.status === 'aprobado');
   const pendingPayments = clientPayments.filter((p) => p.status === 'pendiente');
   const rejectedPayments = clientPayments.filter((p) => p.status === 'rechazado');
+
+  // Estado de cuenta cronológico: combina deudas (pedidos a crédito entregados,
+  // +monto) y abonos aprobados (-monto) en una sola línea de tiempo ordenada por
+  // fecha, con el saldo acumulado de cada movimiento. Los movimientos sin fecha
+  // (deuda manual sin createdAt) se consideran los más antiguos.
+  const movements = [
+    ...debtOrders.map((o) => ({
+      id: `ORD-${o.id}`,
+      kind: 'deuda',
+      date: new Date(o.createdAt || o.timestamp || 0),
+      label: `Pedido ${o.id}`,
+      detail: Array.isArray(o.items) ? o.items.map((it) => `${it.quantity}x ${it.name}`).join(', ') : '',
+      amount: Number(o.total) || 0
+    })),
+    ...approvedPayments.map((p) => ({
+      id: `PAG-${p.id}`,
+      kind: 'abono',
+      date: new Date(p.decidedAt || p.createdAt || 0),
+      label: `Abono ${p.id}`,
+      detail: p.reference ? `Ref: ${p.reference}` : `Bs ${formatBs(Number(p.amountBs))}`,
+      amount: -(Number(p.amountUsd) || 0)
+    }))
+  ].sort((a, b) => a.date - b.date || a.label.localeCompare(b.label));
+  let runningBalance = 0;
+  const timeline = movements.map((m) => {
+    runningBalance += m.amount;
+    return { ...m, balance: runningBalance };
+  });
 
   const wa = formatPhoneWhatsApp(customer.phone);
 
@@ -10288,6 +10574,9 @@ function DebtDetailModal({
                       </span>
                     </div>
                   )) : null}
+                  {o.notes && o.notes !== 'Deuda registrada manualmente' && (
+                    <p className="text-[10px] text-slate-500 italic truncate">{o.notes}</p>
+                  )}
                   <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs">
                     <span className="text-slate-400">Total</span>
                     <span className="text-amber-400 text-right">
@@ -10301,6 +10590,50 @@ function DebtDetailModal({
               ))
             )}
           </div>
+
+          {/* Estado de cuenta cronológico (deudas y abonos mezclados) */}
+          {timeline.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
+                Estado de cuenta ({timeline.length} movimientos)
+              </span>
+              <div className="space-y-0">
+                {timeline.map((m, idx) => (
+                  <div key={m.id} className="relative flex gap-3 pb-3">
+                    {idx < timeline.length - 1 && (
+                      <span className="absolute left-[7px] top-4 bottom-0 w-px bg-slate-700/60" />
+                    )}
+                    <div className="flex flex-col items-center shrink-0">
+                      <span
+                        className={`w-[15px] h-[15px] rounded-full border-2 flex items-center justify-center ${
+                          m.kind === 'deuda'
+                            ? 'bg-red-500/20 border-red-500/60'
+                            : 'bg-emerald-500/20 border-emerald-500/60'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${m.kind === 'deuda' ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0 bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className={`font-mono font-bold ${m.kind === 'deuda' ? 'text-red-400' : 'text-emerald-300'}`}>
+                          {m.kind === 'deuda' ? '+' : '−'}{formatUsd(Math.abs(m.amount))}
+                        </span>
+                        <span className="text-slate-500">
+                          {m.date.getTime() ? m.date.toLocaleDateString('es-VE') : 'Sin fecha'}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-200 mt-0.5">{m.label}</p>
+                      {m.detail && <p className="text-[10px] text-slate-500 truncate">{m.detail}</p>}
+                      <p className={`text-[10px] font-bold mt-1 ${m.balance > 0 ? 'text-red-300' : m.balance < 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                        Saldo: {formatUsd(m.balance)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Historial de pagos y depósitos de este cliente (agrupado) */}
@@ -10444,6 +10777,33 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
       active = false;
     };
   }, [key]);
+
+  // Estado de cuenta cronológico del cliente: deudas (+monto) y abonos
+  // aprobados (−monto) en una sola línea de tiempo, con saldo acumulado.
+  const approvedPayments = (payments || []).filter((p) => p.status === 'aprobado');
+  const customerMovements = [
+    ...debtOrders.map((o) => ({
+      id: `ORD-${o.id}`,
+      kind: 'deuda',
+      date: new Date(o.createdAt || o.timestamp || 0),
+      label: `Pedido ${o.id}`,
+      detail: Array.isArray(o.items) ? o.items.map((it) => `${it.quantity}x ${it.name}`).join(', ') : '',
+      amount: Number(o.total) || 0
+    })),
+    ...approvedPayments.map((p) => ({
+      id: `PAG-${p.id}`,
+      kind: 'abono',
+      date: new Date(p.decidedAt || p.createdAt || 0),
+      label: `Abono ${p.id}`,
+      detail: p.reference ? `Ref: ${p.reference}` : `Bs ${formatBs(Number(p.amountBs))}`,
+      amount: -(Number(p.amountUsd) || 0)
+    }))
+  ].sort((a, b) => a.date - b.date || a.label.localeCompare(b.label));
+  let customerRunning = 0;
+  const customerTimeline = customerMovements.map((m) => {
+    customerRunning += m.amount;
+    return { ...m, balance: customerRunning };
+  });
 
   const handleAbono = async (e) => {
     e.preventDefault();
@@ -10723,6 +11083,50 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                   </div>
                 ))
               )}
+            </div>
+          )}
+
+          {/* Estado de cuenta cronológico (deudas y abonos mezclados) */}
+          {!isSaldoView && customerTimeline.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
+                Estado de cuenta ({customerTimeline.length} movimientos)
+              </span>
+              <div className="space-y-0">
+                {customerTimeline.map((m, idx) => (
+                  <div key={m.id} className="relative flex gap-3 pb-3">
+                    {idx < customerTimeline.length - 1 && (
+                      <span className="absolute left-[7px] top-4 bottom-0 w-px bg-slate-700/60" />
+                    )}
+                    <div className="flex flex-col items-center shrink-0">
+                      <span
+                        className={`w-[15px] h-[15px] rounded-full border-2 flex items-center justify-center ${
+                          m.kind === 'deuda'
+                            ? 'bg-red-500/20 border-red-500/60'
+                            : 'bg-emerald-500/20 border-emerald-500/60'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${m.kind === 'deuda' ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0 bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className={`font-mono font-bold ${m.kind === 'deuda' ? 'text-red-400' : 'text-emerald-300'}`}>
+                          {m.kind === 'deuda' ? '+' : '−'}{formatUsd(Math.abs(m.amount))}
+                        </span>
+                        <span className="text-slate-500">
+                          {m.date.getTime() ? m.date.toLocaleDateString('es-VE') : 'Sin fecha'}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-200 mt-0.5">{m.label}</p>
+                      {m.detail && <p className="text-[10px] text-slate-500 truncate">{m.detail}</p>}
+                      <p className={`text-[10px] font-bold mt-1 ${m.balance > 0 ? 'text-red-300' : m.balance < 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                        Saldo: {formatUsd(m.balance)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -11831,9 +12235,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
             <h3 className="text-base sm:text-lg font-black text-white">
               Detalle del Pedido <span className="text-teal-400">#{order.id}</span>
             </h3>
-            <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${style.badge}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-              {STATUS_LABELS[order.status] || 'Pendiente'}
+            <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${needsPaymentValidation(order) ? 'border-amber-400/40 bg-amber-500/15 text-amber-300' : style.badge}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${needsPaymentValidation(order) ? 'bg-amber-400' : style.dot}`} />
+              {needsPaymentValidation(order) ? 'Pago en revisión' : STATUS_LABELS[order.status] || 'Pendiente'}
             </span>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
@@ -11842,6 +12246,12 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
         </div>
 
         <div className="p-5 sm:p-6 space-y-4">
+          {needsPaymentValidation(order) && (
+            <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
+              <Icon name="clock" className="w-4 h-4 shrink-0" />
+              Esperando validación del pago. El pedido avanzará al confirmarse el pago.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="bg-slate-800/60 rounded-xl p-3">
               <span className="text-slate-500 block text-[10px] font-semibold uppercase tracking-wider">Cliente</span>

@@ -471,7 +471,7 @@ const fileStore = {
   // Registra una deuda manual por productos (ventas presenciales o deudas
   // anteriores a la app). Crea un pedido a crédito entregado y lo suma al
   // balance del cliente. No descuenta stock: no es una venta real por la app.
-  async addDebtToCustomer({ phone, customerName, items }) {
+  async addDebtToCustomer({ phone, customerName, items, notes }) {
     const key = normalizePhone(phone);
     if (!key) return null;
     const normalized = (items || []).map((it) => ({
@@ -491,7 +491,7 @@ const fileStore = {
       phone: key,
       type: 'pickup',
       address: undefined,
-      notes: 'Deuda registrada manualmente',
+      notes: String(notes || '').slice(0, 300) || 'Deuda registrada manualmente',
       items: normalized,
       total,
       status: 'entregado',
@@ -1120,7 +1120,7 @@ const pgStore = {
   // Registra una deuda manual por productos (ventas presenciales o deudas
   // anteriores a la app). Crea un pedido a crédito entregado y lo suma al
   // balance del cliente. No descuenta stock: no es una venta real por la app.
-  async addDebtToCustomer({ phone, customerName, items }) {
+  async addDebtToCustomer({ phone, customerName, items, notes }) {
     const key = normalizePhone(phone);
     if (!key) return null;
     const normalized = (items || []).map((it) => ({
@@ -1142,7 +1142,7 @@ const pgStore = {
       phone: key,
       type: 'pickup',
       address: undefined,
-      notes: 'Deuda registrada manualmente',
+      notes: String(notes || '').slice(0, 300) || 'Deuda registrada manualmente',
       items: normalized,
       total,
       status: 'entregado',

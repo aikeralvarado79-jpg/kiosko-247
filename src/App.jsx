@@ -10413,7 +10413,8 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
   // pasar un pedido a entregado o al saldar la deuda). balance < 0 = saldo a favor.
   const balance = Number(customer.balance) || 0;
   const hasWallet = balance < 0;
-  const walletAmount = Math.abs(balance);
+  // Solo hay saldo "disponible" cuando el cliente tiene saldo a favor (balance < 0).
+  const walletAmount = hasWallet ? Math.abs(balance) : 0;
   const debtTotal = hasWallet ? 0 : balance;
   // 'saldo' = solo muestra el saldo disponible y el historial de abonos/descuentos.
   // 'deuda' = muestra el desglose de la deuda y permite abonar.
@@ -10502,7 +10503,13 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
             <p className="text-xs text-slate-400 mt-0.5">
               {customer.customerName || customer.phone} ·{' '}
               {isSaldoView ? (
-                <span className="text-emerald-400 font-bold">Saldo disponible {formatUsd(walletAmount)}</span>
+                walletAmount > 0 ? (
+                  <span className="text-emerald-400 font-bold">Saldo disponible {formatUsd(walletAmount)}</span>
+                ) : balance > 0 ? (
+                  <span className="text-rose-400 font-bold">Saldo pendiente por pagar {formatUsd(balance)}</span>
+                ) : (
+                  <span className="text-slate-400 font-bold">Sin saldo a favor</span>
+                )
               ) : hasWallet ? (
                 <span className="text-emerald-400 font-bold">Saldo a favor {formatUsd(walletAmount)}</span>
               ) : (
@@ -10510,7 +10517,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
               )}
               {rate?.rate > 0 && (
                 <span className="block text-[10px] text-slate-500">
-                  {formatBs(usdToBs(isSaldoView || hasWallet ? walletAmount : debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}
+                  {formatBs(usdToBs(isSaldoView ? (walletAmount > 0 ? walletAmount : balance) : hasWallet ? walletAmount : debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}
                 </span>
               )}
             </p>
@@ -10537,14 +10544,26 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                     Al pagar tu próximo pedido elige <b>Mi Cartera</b> como método de pago para usarlo.
                   </p>
                 </div>
+              ) : balance > 0 ? (
+                <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-rose-300">
+                  <span className="text-[11px] uppercase tracking-wider text-rose-400/80 font-semibold">Saldo pendiente por pagar</span>
+                  <div className="flex items-end justify-between mt-1">
+                    <span className="text-3xl font-black text-rose-400">{formatUsd(balance)}</span>
+                    {rate?.rate > 0 && (
+                      <span className="text-[10px] text-rose-400/70">{formatBs(usdToBs(balance, rate.rate))}</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-rose-200/80 mt-2 flex items-start gap-1.5">
+                    <Icon name="alertTriangle" className="w-4 h-4 mt-0.5 shrink-0" />
+                    Tienes pedidos a cuenta por pagar. Puedes abonar desde <b>Mi deuda</b> para descontar este saldo.
+                  </p>
+                </div>
               ) : (
                 <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700">
                   <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Saldo disponible</span>
                   <div className="text-3xl font-black text-slate-500 mt-1">{formatUsd(0)}</div>
                   <p className="text-xs text-slate-400 mt-2">
-                    {balance > 0
-                      ? 'Aún no tienes saldo a favor. Tus abonos primero descuentan la deuda; el excedente queda disponible.'
-                      : 'Sin saldo a favor por el momento.'}
+                    Sin saldo a favor por el momento.
                   </p>
                 </div>
               )}
@@ -10843,13 +10862,25 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
         <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0 space-y-2.5">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-slate-500">
-              {isSaldoView ? 'Saldo disponible' : hasWallet ? 'Saldo a favor' : 'Total deuda'}
+              {isSaldoView
+                ? walletAmount > 0
+                  ? 'Saldo disponible'
+                  : balance > 0
+                  ? 'Saldo pendiente por pagar'
+                  : 'Saldo disponible'
+                : hasWallet
+                ? 'Saldo a favor'
+                : 'Total deuda'}
             </span>
-            <span className={`text-base font-black ${isSaldoView || hasWallet ? 'text-emerald-400' : 'text-red-400'}`}>
-              {formatUsd(isSaldoView || hasWallet ? walletAmount : debtTotal)}
+            <span
+              className={`text-base font-black ${
+                isSaldoView ? (walletAmount > 0 ? 'text-emerald-400' : balance > 0 ? 'text-red-400' : 'text-slate-400') : hasWallet ? 'text-emerald-400' : 'text-red-400'
+              }`}
+            >
+              {formatUsd(isSaldoView ? (walletAmount > 0 ? walletAmount : balance) : hasWallet ? walletAmount : debtTotal)}
               {rate?.rate > 0 && (
                 <span className="block text-[10px] font-bold text-slate-400 text-right">
-                  {formatBs(usdToBs(isSaldoView || hasWallet ? walletAmount : debtTotal, rate.rate))}
+                  {formatBs(usdToBs(isSaldoView ? (walletAmount > 0 ? walletAmount : balance) : hasWallet ? walletAmount : debtTotal, rate.rate))}
                 </span>
               )}
             </span>

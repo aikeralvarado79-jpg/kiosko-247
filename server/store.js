@@ -887,11 +887,12 @@ const pgStore = {
   },
 
   async getState(clientId) {
-    const [productsRes, categoriesRes, ordersRes, settingsRes] = await Promise.all([
+    const [productsRes, categoriesRes, ordersRes, settingsRes, customersRes] = await Promise.all([
       this.pool.query(`SELECT * FROM ${q('products')}`),
       this.pool.query(`SELECT * FROM ${q('categories')} ORDER BY name`),
       this.pool.query(`SELECT * FROM ${q('orders')}`),
-      this.pool.query(`SELECT key, value FROM ${q('settings')}`)
+      this.pool.query(`SELECT key, value FROM ${q('settings')}`),
+      this.pool.query(`SELECT * FROM ${q('customers')}`)
     ]);
     const reserved = reservedByProduct(clientId);
     const orders = ordersRes.rows.map((r) => ({
@@ -919,6 +920,11 @@ const pgStore = {
       orders
     );
     const categories = categoriesRes.rows.map((r) => r.name);
+    const customers = customersRes.rows.map((r) => ({
+      ...r,
+      balance: Number(r.balance) || 0,
+      isBenefited: Boolean(r.isBenefited)
+    }));
     const settings = {
       promos: []
     };
@@ -929,7 +935,7 @@ const pgStore = {
         if (row.key === 'paymentConfig' && row.value && typeof row.value === 'object') settings.paymentConfig = row.value;
       } catch {}
     }
-    return { products, categories, orders, settings };
+    return { products, categories, orders, settings, customers };
   },
 
   // Vista pública del estado (ver fileStore.getPublicState).
@@ -1464,11 +1470,29 @@ const pgStore = {
       if (!existing) return { error: 'Pedido no encontrado' };
       await client.query(`UPDATE ${q('orders')} SET status = $2 WHERE id = $1`, [id, status]);
       if (existing.credit && status === 'entregado') {
-        await client.query(
-          `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) + $2, "customerName" = COALESCE(NULLIF($3, ''), "customerName")
-           WHERE phone = $1`,
-          [existing.phone, Number(existing.total) || 0, existing.customerName || '']
-        );
+        // El teléfono del pedido puede venir con formato legible (espacios) mientras
+        // que la tabla customers guarda el número normalizado; hay que normalizar
+        // antes de comparar, o la deuda nunca se registra (0 filas actualizadas).
+        const phoneKey = normalizePhone(existing.phone);
+        if (phoneKey && phoneKey.length >= 7) {
+          const upd = await client.query(
+            `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) + $2, "customerName" = COALESCE(NULLIF($3, ''), "customerName")
+             WHERE phone = $1`,
+            [phoneKey, Number(existing.total) || 0, existing.customerName || '']
+          );
+          if (upd.rowCount === 0) {
+            // Cliente aún no registrado: crearlo con la deuda como saldo inicial.
+            const now = new Date().toISOString();
+            await client.query(
+              `INSERT INTO ${q('customers')} (phone, "customerName", balance, "createdAt", "lastOrderAt")
+               VALUES ($1,$2,$3,$4,$5)
+               ON CONFLICT (phone) DO UPDATE SET
+                 balance = COALESCE(${q('customers')}.balance, 0) + EXCLUDED.balance,
+                 "customerName" = COALESCE(NULLIF(EXCLUDED."customerName", ''), ${q('customers')}."customerName")`,
+              [phoneKey, existing.customerName || 'Cliente', Number(existing.total) || 0, existing.customerName || '', now]
+            );
+          }
+        }
       }
       return { ok: true };
     });

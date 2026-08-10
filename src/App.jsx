@@ -197,7 +197,7 @@ const formatSize = (product) => {
   return `${formatted}${product.sizeUnit || ''}`;
 };
 
-const formatUsd = (n) => `$${Number(n || 0).toLocaleString('es-AR')}`;
+const formatUsd = (n) => `$${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // Formatea un número como monto con separador de miles (.) y decimales (,),
 // ej: 1100 → "1.100,00". Se usa en la calculadora del header.
@@ -213,18 +213,31 @@ const parseAmount = (value) => {
   const hasDot = s.includes('.');
   if (hasComma && hasDot) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
   if (hasComma && !hasDot) return parseFloat(s.replace(',', '.'));
-  if (!hasComma && hasDot && (s.match(/\./g) || []).length > 1) return parseFloat(s.replace(/\./g, ''));
+  if (!hasComma && hasDot) {
+    // Formato es-VE: el punto agrupa miles ("1.200" = 1200), la coma separa
+    // decimales. Si la última parte tiene 3 dígitos, se trata de miles.
+    const parts = s.split('.');
+    const last = parts[parts.length - 1];
+    if (parts.length > 1 && last.length === 3) return parseFloat(s.replace(/\./g, ''));
+    return parseFloat(s);
+  }
   return parseFloat(s);
 };
 
 const formatBs = (n) => `Bs ${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// Formatea bolívares mientras se escribe: "1000" -> "1.000,00", "150000" -> "150.000,00"
+// Formatea bolívares mientras se escribe: agrega separadores de miles (.) y deja
+// que el usuario agregue la coma para decimales. Ej: "1200" -> "1.200", "12000" -> "12.000".
 const formatAmountBsInput = (raw) => {
-  const digits = String(raw || '').replace(/[^\d]/g, '');
-  if (!digits) return '';
-  const num = parseInt(digits, 10);
-  return num.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const cleaned = s.replace(/[^\d.,]/g, '');
+  const commaIdx = cleaned.indexOf(',');
+  const intPart = (commaIdx === -1 ? cleaned : cleaned.slice(0, commaIdx)).replace(/\D/g, '');
+  const decPart = commaIdx === -1 ? '' : cleaned.slice(commaIdx + 1).replace(/\D/g, '').slice(0, 2);
+  const formattedInt = intPart ? Number(intPart).toLocaleString('es-VE') : '';
+  if (commaIdx === -1) return formattedInt;
+  return decPart ? `${formattedInt},${decPart}` : `${formattedInt},`;
 };
 
 const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
@@ -812,6 +825,7 @@ export default function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isOrdersDrawerOpen, setIsOrdersDrawerOpen] = useState(false);
   const [isDebtDrawerOpen, setIsDebtDrawerOpen] = useState(false);
+  const [debtDrawerMode, setDebtDrawerMode] = useState('deuda'); // 'deuda' | 'saldo'
 
   // Pestaña activa del cliente en la barra inferior (móvil)
   const [customerTab, setCustomerTab] = useState('store'); // 'store' | 'orders' | 'account'
@@ -2233,7 +2247,10 @@ export default function App() {
             favorites={favorites}
             onToggleFavorite={toggleFavorite}
             focusSection={focusCustomerSection}
-            onOpenDebt={() => setIsDebtDrawerOpen(true)}
+            onOpenDebt={(mode) => {
+              setDebtDrawerMode(mode || 'deuda');
+              setIsDebtDrawerOpen(true);
+            }}
             onOpenMyKiosko={() => setIsMyKioskoOpen(true)}
             onOpenVoice={openVoiceOrder}
             guestShare={guestShare}
@@ -2340,6 +2357,7 @@ export default function App() {
             orders={orders}
             rate={rate}
             addToast={addToast}
+            mode={debtDrawerMode}
             onClose={() => setIsDebtDrawerOpen(false)}
           />
         </ErrorBoundary>
@@ -2552,7 +2570,10 @@ export default function App() {
           setCustomerTab(tab);
           setFocusCustomerSection(null);
           if (tab === 'orders') setIsOrdersDrawerOpen(true);
-          if (tab === 'account') setIsDebtDrawerOpen(true);
+          if (tab === 'account') {
+            setDebtDrawerMode('saldo');
+            setIsDebtDrawerOpen(true);
+          }
         }}
         cartCount={cartCount}
         hasCustomer={Boolean(savedCustomer)}
@@ -3428,7 +3449,7 @@ function CustomerView({
     const timer = setTimeout(() => {
       const id = focusSection === 'orders' ? 'pedidos-seccion' : 'cuenta-seccion';
       if (focusSection === 'orders') setShowMyOrders(true);
-      if (focusSection === 'account') onOpenDebt?.();
+      if (focusSection === 'account') onOpenDebt?.('saldo');
       const el = document.getElementById(id);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
@@ -3591,9 +3612,14 @@ function CustomerView({
                   <Icon name="check" className="w-3 h-3 inline -mt-0.5" /> Saldo a favor · úsalo al pagar
                 </span>
               )}
+              {Number(customerProfile.balance) > 0 && (
+                <span className="block text-[11px] sm:text-xs text-red-400 font-bold mt-0.5">
+                  <Icon name="alertTriangle" className="w-3 h-3 inline -mt-0.5" /> Saldo deudor pendiente
+                </span>
+              )}
             </div>
             <button
-              onClick={onOpenDebt}
+              onClick={() => onOpenDebt?.(Number(customerProfile.balance) < 0 ? 'saldo' : 'deuda')}
               className="text-right shrink-0 flex flex-col items-end gap-1 hover:opacity-90 transition-opacity"
               aria-label="Ver detalle de mi saldo"
             >
@@ -3606,10 +3632,19 @@ function CustomerView({
                     Mi Cartera <Icon name="chevronRight" className="w-3 h-3" />
                   </span>
                 </>
+              ) : Number(customerProfile.balance) > 0 ? (
+                <>
+                  <span className="block text-lg sm:text-xl font-black text-red-400">
+                    {formatUsd(Number(customerProfile.balance) || 0)}
+                  </span>
+                  <span className="flex items-center gap-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                    Mi deuda <Icon name="chevronRight" className="w-3 h-3" />
+                  </span>
+                </>
               ) : (
                 <>
                   <span className="block text-lg sm:text-xl font-black text-white">
-                    {formatUsd(Number(customerProfile.balance) || 0)}
+                    {formatUsd(0)}
                   </span>
                   <span className="flex items-center gap-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                     Ver saldo <Icon name="chevronRight" className="w-3 h-3" />
@@ -3618,7 +3653,7 @@ function CustomerView({
               )}
             </button>
           </div>
-          <div className="px-3 sm:px-4 pb-3 sm:pb-4 grid grid-cols-2 gap-2">
+          <div className="px-3 sm:px-4 pb-3 sm:pb-4 grid gap-2 grid-cols-2">
             <Btn
               onClick={onOpenMyKiosko}
               variant="primary"
@@ -3628,11 +3663,22 @@ function CustomerView({
             >
               Mi historial
             </Btn>
+            {Number(customerProfile.balance) > 0 && (
+              <Btn
+                onClick={() => onOpenDebt?.('deuda')}
+                variant="secondary"
+                size="sm"
+                icon="creditCard"
+                className="w-full py-2.5"
+              >
+                Mi deuda
+              </Btn>
+            )}
             <Btn
-              onClick={onOpenDebt}
+              onClick={() => onOpenDebt?.('saldo')}
               variant="secondary"
               size="sm"
-              icon="creditCard"
+              icon="wallet"
               className="w-full py-2.5"
             >
               Mi saldo
@@ -3755,6 +3801,12 @@ function CustomerView({
                     <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
                       {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
                     </p>
+                    {(o.paymentMethod === 'cartera' || Number(o.walletApplied) > 0) && (
+                      <p className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-[10px] font-bold">
+                        <Icon name="wallet" className="w-3 h-3" />
+                        Pagado con cartera
+                      </p>
+                    )}
                     <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                       {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
                     </p>
@@ -5254,6 +5306,12 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
                       <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
                         {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
                       </p>
+                      {(o.paymentMethod === 'cartera' || Number(o.walletApplied) > 0) && (
+                        <p className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-[10px] font-bold">
+                          <Icon name="wallet" className="w-3 h-3" />
+                          Pagado con cartera
+                        </p>
+                      )}
                       <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                         {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
                       </p>
@@ -7677,7 +7735,14 @@ function AdminView({
                 <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
                 {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
               </span>
-              {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+              {(order.paymentMethod === 'cartera' || Number(order.walletApplied) > 0) && (
+                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-[11px] font-bold">
+                  <Icon name="wallet" className="w-3 h-3" />
+                  Pagado con cartera
+                  {Number(order.walletApplied) > 0 && <span className="text-[10px] opacity-80">({formatUsd(Number(order.walletApplied))})</span>}
+                </span>
+              )}
+              {order.paymentMethod && order.paymentMethod !== 'efectivo' && order.paymentMethod !== 'cartera' && (
                 <span
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold ${
                     order.paymentStatus === 'confirmado'
@@ -7815,7 +7880,13 @@ function AdminView({
           )}
 
           {/* Pago digital: comprobante y estado */}
-          {order.paymentMethod && order.paymentMethod !== 'efectivo' && (
+          {order.paymentMethod === 'cartera' || Number(order.walletApplied || 0) > 0 ? (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
+              <Icon name="wallet" className="w-4 h-4 shrink-0" />
+              Pagado con cartera — saldo a favor del cliente
+              {Number(order.walletApplied || 0) > 0 && <span className="text-[10px] opacity-80">({formatUsd(Number(order.walletApplied))})</span>}
+            </div>
+          ) : order.paymentMethod && order.paymentMethod !== 'efectivo' ? (
             <div className="space-y-2">
               {order.paymentReference && (
                 <p className="text-xs text-slate-300 bg-slate-900/40 p-2 rounded-xl">
@@ -7868,7 +7939,7 @@ function AdminView({
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* Chat con el cliente */}
           <OrderChat order={order} />
@@ -10257,7 +10328,7 @@ function DebtDetailModal({
                     <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
                       <span className="text-slate-300">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
                       <span className="font-bold text-teal-300">
-                        {formatUsd(p.amountUsd)} (Bs {Number(p.amountBs).toLocaleString('es-AR')})
+                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
                       </span>
                     </div>
                   ))}
@@ -10278,7 +10349,7 @@ function DebtDetailModal({
                     <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
                       <span className="text-slate-400">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
                       <span className="font-bold text-amber-300">
-                        {formatUsd(p.amountUsd)} (Bs {Number(p.amountBs).toLocaleString('es-AR')})
+                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
                       </span>
                     </div>
                   ))}
@@ -10296,7 +10367,7 @@ function DebtDetailModal({
                     <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
                       <span className="text-slate-500">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
                       <span className="font-bold text-rose-300">
-                        {formatUsd(p.amountUsd)} (Bs {Number(p.amountBs).toLocaleString('es-AR')})
+                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
                         {p.note && <span className="block text-[10px] text-slate-500">Nota: {p.note}</span>}
                       </span>
                     </div>
@@ -10333,7 +10404,7 @@ function DebtDetailModal({
 
 // Modal que el cliente ve en "Mi Cuenta": desglose de su deuda con conversión
 // a bolívares según la tasa del día.
-function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
+function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = 'deuda' }) {
   const key = normalizePhoneDigits(customer.phone);
   const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
@@ -10344,6 +10415,9 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
   const hasWallet = balance < 0;
   const walletAmount = Math.abs(balance);
   const debtTotal = hasWallet ? 0 : balance;
+  // 'saldo' = solo muestra el saldo disponible y el historial de abonos/descuentos.
+  // 'deuda' = muestra el desglose de la deuda y permite abonar.
+  const isSaldoView = mode === 'saldo';
 
   // Formulario de abono: monto en Bs + referencia + comprobante. El servidor lo
   // convierte a USD con la tasa del día y queda pendiente de aprobación.
@@ -10422,19 +10496,21 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Icon name="creditCard" className="w-5 h-5 text-indigo-400" />
-              {hasWallet ? 'Mi Cartera' : 'Mi deuda'}
+              <Icon name={isSaldoView ? 'wallet' : 'creditCard'} className={`w-5 h-5 ${isSaldoView ? 'text-emerald-400' : 'text-indigo-400'}`} />
+              {isSaldoView ? 'Mi saldo' : hasWallet ? 'Mi Cartera' : 'Mi deuda'}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               {customer.customerName || customer.phone} ·{' '}
-              {hasWallet ? (
+              {isSaldoView ? (
+                <span className="text-emerald-400 font-bold">Saldo disponible {formatUsd(walletAmount)}</span>
+              ) : hasWallet ? (
                 <span className="text-emerald-400 font-bold">Saldo a favor {formatUsd(walletAmount)}</span>
               ) : (
                 <>Total {formatUsd(debtTotal)}</>
               )}
               {rate?.rate > 0 && (
                 <span className="block text-[10px] text-slate-500">
-                  {formatBs(usdToBs(hasWallet ? walletAmount : debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}
+                  {formatBs(usdToBs(isSaldoView || hasWallet ? walletAmount : debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}
                 </span>
               )}
             </p>
@@ -10445,7 +10521,136 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
         </div>
 
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
-          {hasWallet && (
+          {isSaldoView ? (
+            <div className="space-y-3">
+              {walletAmount > 0 ? (
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
+                  <span className="text-[11px] uppercase tracking-wider text-emerald-400/80 font-semibold">Disponible para usar</span>
+                  <div className="flex items-end justify-between mt-1">
+                    <span className="text-3xl font-black text-emerald-400">{formatUsd(walletAmount)}</span>
+                    {rate?.rate > 0 && (
+                      <span className="text-[10px] text-emerald-400/70">{formatBs(usdToBs(walletAmount, rate.rate))}</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-emerald-200/80 mt-2 flex items-start gap-1.5">
+                    <Icon name="check" className="w-4 h-4 mt-0.5 shrink-0" />
+                    Al pagar tu próximo pedido elige <b>Mi Cartera</b> como método de pago para usarlo.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700">
+                  <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Saldo disponible</span>
+                  <div className="text-3xl font-black text-slate-500 mt-1">{formatUsd(0)}</div>
+                  <p className="text-xs text-slate-400 mt-2">
+                    {balance > 0
+                      ? 'Aún no tienes saldo a favor. Tus abonos primero descuentan la deuda; el excedente queda disponible.'
+                      : 'Sin saldo a favor por el momento.'}
+                  </p>
+                </div>
+              )}
+              {/* Formulario de depósito a cartera */}
+              {showAbono && (
+                <form onSubmit={handleAbono} className="space-y-2.5 rounded-2xl bg-slate-950 border border-slate-700 p-4 animate-fade-in">
+                  <span className="text-xs text-slate-300 font-bold flex items-center gap-1.5">
+                    <Icon name="wallet" className="w-4 h-4 text-teal-400" />
+                    Depositar en mi cartera
+                  </span>
+                  {rate?.rate > 0 && (
+                    <p className="text-[10px] text-slate-500">
+                      Tasa del día: Bs {Number(rate.rate).toFixed(2)} ·{' '}
+                      {amountBs && Number(parseAmount(amountBs)) > 0
+                        ? <>equivale a <b className="text-teal-300">{formatUsd(parseAmount(amountBs) / rate.rate)}</b></>
+                        : 'se convierte sola al enviar'}
+                    </p>
+                  )}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Monto a depositar en bolívares *</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={amountBs}
+                      onChange={(e) => setAmountBs(formatAmountBsInput(e.target.value))}
+                      placeholder="Ej: 1.500,00"
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Número de referencia / comprobante</label>
+                    <input
+                      type="text"
+                      value={reference}
+                      onChange={(e) => setReference(e.target.value)}
+                      placeholder="Ej: 12H3456789"
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Foto del comprobante *</label>
+                    <label className="w-full flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-xl border-2 border-dashed border-slate-700 bg-slate-800/60 cursor-pointer hover:border-teal-500/50 transition-all text-center">
+                      {proof ? (
+                        <>
+                          <img src={proof} alt="Comprobante del abono" className="max-h-32 rounded-lg object-contain" />
+                          <span className="text-[11px] text-teal-300 font-semibold flex items-center gap-1">
+                            <Icon name="check" className="w-3.5 h-3.5" />
+                            Adjunto — toca para cambiarlo
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="upload" className="w-6 h-6 text-slate-500" />
+                          <span className="text-xs text-slate-400">Toca para tomar una foto o subir el comprobante</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files && e.target.files[0];
+                          if (!file) return;
+                          if (file.size > 8 * 1024 * 1024) {
+                            addToast('La imagen supera 8 MB. Elige una más liviana.', 'error');
+                            e.target.value = '';
+                            return;
+                          }
+                          try {
+                            const compressed = await compressImage(file);
+                            setProof(compressed);
+                          } catch {
+                            addToast('No se pudo procesar la imagen. Prueba con otra.', 'error');
+                          } finally {
+                            e.target.value = '';
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowAbono(false)}
+                      className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={sending}
+                      className="py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
+                    >
+                      {sending ? (
+                        <Icon name="refresh" className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Icon name="check" className="w-4 h-4" /> Enviar depósito
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          ) : hasWallet ? (
             <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-300 flex items-start gap-2">
               <Icon name="check" className="w-4 h-4 mt-0.5 shrink-0" />
               <span>
@@ -10453,9 +10658,9 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
                 elige <b>Mi Cartera</b> como método de pago para usarlo.
               </span>
             </div>
-          )}
+          ) : null}
 
-          {!hasWallet && (
+          {!isSaldoView && !hasWallet && (
             <div className="space-y-2">
               <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
                 <span>Detalle de la deuda ({debtOrders.length} pedidos)</span>
@@ -10503,7 +10708,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
           )}
 
           {/* Formulario de abono / depósito a cartera */}
-          {showAbono && (
+          {!isSaldoView && showAbono && (
             <form onSubmit={handleAbono} className="space-y-2.5 rounded-2xl bg-slate-950 border border-slate-700 p-4 animate-fade-in">
               <span className="text-xs text-slate-300 font-bold flex items-center gap-1.5">
                 <Icon name={hasWallet ? 'wallet' : 'upload'} className="w-4 h-4 text-teal-400" />
@@ -10608,7 +10813,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
           {payments.length > 0 && (
             <div className="space-y-2">
               <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                Mis abonos ({payments.length})
+                Historial de abonos y descuentos ({payments.length})
               </span>
               {payments.map((p) => (
                 <div key={p.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
@@ -10619,7 +10824,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
                     </span>
                   </div>
                   <div className="flex justify-between text-xs text-slate-300">
-                    <span>Bs {Number(p.amountBs).toLocaleString('es-AR')}</span>
+                    <span>{formatBs(Number(p.amountBs))}</span>
                     <span className="font-bold text-white">≈ {formatUsd(Number(p.amountUsd))}</span>
                   </div>
                   <div className="text-[10px] text-slate-500">
@@ -10637,12 +10842,14 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
 
         <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0 space-y-2.5">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-slate-500">{hasWallet ? 'Saldo a favor' : 'Total deuda'}</span>
-            <span className={`text-base font-black ${hasWallet ? 'text-emerald-400' : 'text-red-400'}`}>
-              {formatUsd(hasWallet ? walletAmount : debtTotal)}
+            <span className="text-xs text-slate-500">
+              {isSaldoView ? 'Saldo disponible' : hasWallet ? 'Saldo a favor' : 'Total deuda'}
+            </span>
+            <span className={`text-base font-black ${isSaldoView || hasWallet ? 'text-emerald-400' : 'text-red-400'}`}>
+              {formatUsd(isSaldoView || hasWallet ? walletAmount : debtTotal)}
               {rate?.rate > 0 && (
                 <span className="block text-[10px] font-bold text-slate-400 text-right">
-                  {formatBs(usdToBs(hasWallet ? walletAmount : debtTotal, rate.rate))}
+                  {formatBs(usdToBs(isSaldoView || hasWallet ? walletAmount : debtTotal, rate.rate))}
                 </span>
               )}
             </span>
@@ -10652,8 +10859,8 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast }) {
               onClick={() => setShowAbono(true)}
               className="w-full py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-sm font-bold transition-all flex items-center justify-center gap-1.5"
             >
-              <Icon name={hasWallet ? 'wallet' : 'upload'} className="w-4 h-4" />
-              {hasWallet ? 'Depositar en cartera' : 'Abonar'}
+              <Icon name={isSaldoView || hasWallet ? 'wallet' : 'upload'} className="w-4 h-4" />
+              {isSaldoView || hasWallet ? 'Depositar en cartera' : 'Abonar'}
             </button>
           )}
           <button
@@ -11503,6 +11710,21 @@ function PaymentStatusCard({ order, isBenefited, onOrderUpdated, addToast }) {
 
   const status = order.paymentStatus || 'pendiente';
 
+  // Pagado con saldo a favor de la cartera: identificador propio, sin comprobante.
+  if (order.paymentMethod === 'cartera' || Number(order.walletApplied || 0) > 0) {
+    return (
+      <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/40 p-3 flex items-center gap-2.5">
+        <Icon name="wallet" className="w-5 h-5 text-emerald-400 shrink-0" />
+        <div>
+          <p className="text-sm font-bold text-emerald-300">Pagado con Mi Cartera</p>
+          <p className="text-[11px] text-emerald-200/70">
+            Se usó {formatUsd(Number(order.walletApplied || 0) || Number(order.total) || 0)} de tu saldo a favor. ¡Gracias!
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (status === 'confirmado') {
     return (
       <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/40 p-3 flex items-center gap-2.5">
@@ -12239,7 +12461,7 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
           <p className="text-[11px] text-slate-500">{p.phone}</p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-base font-black text-white">Bs {Number(p.amountBs).toLocaleString('es-AR')}</p>
+          <p className="text-base font-black text-white">{formatBs(Number(p.amountBs))}</p>
           <p className="text-xs font-bold text-teal-300">≈ {formatUsd(Number(p.amountUsd))}</p>
           <p className="text-[10px] text-slate-500">a Bs {Number(p.rate).toFixed(2)}</p>
         </div>

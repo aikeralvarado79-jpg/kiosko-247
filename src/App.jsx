@@ -9330,6 +9330,7 @@ function AdminView({
           collections={collections}
           onUpsertCollection={onUpsertCollection}
           onDeleteCollection={onDeleteCollection}
+          headerHeight={headerHeight}
         />
       )}
 
@@ -9835,7 +9836,8 @@ function BlacklistAdminView({
   onAddBlacklistDebt,
   collections,
   onUpsertCollection,
-  onDeleteCollection
+  onDeleteCollection,
+  headerHeight = 0
 }) {
   const [selectedDebtor, setSelectedDebtor] = useState(null); // customer abierto
   const [isAddProductsOpen, setIsAddProductsOpen] = useState(false);
@@ -9928,6 +9930,7 @@ function BlacklistAdminView({
           collections={collections}
           onUpsertCollection={onUpsertCollection}
           onDeleteCollection={onDeleteCollection}
+          headerHeight={headerHeight}
           payments={payments}
         />
       )}
@@ -9940,14 +9943,19 @@ function BlacklistAdminView({
           customers={customers}
           onClose={() => setIsAddProductsOpen(false)}
           onConfirm={handleAddDebt}
+          headerHeight={headerHeight}
         />
       )}
 
       {/* Modal de elección de registro (productos o monto) */}
       {isRegisterOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="absolute inset-0" onClick={() => setIsRegisterOpen(false)} />
-          <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up p-5 sm:p-6 space-y-3">
+        <div
+          className="fixed inset-x-0 bottom-0 z-[70] overflow-y-auto animate-fade-in"
+          style={{ top: headerHeight }}
+        >
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsRegisterOpen(false)} />
+          <div className="relative min-h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+            <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up p-5 sm:p-6 space-y-3">
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Icon name="plus" className="w-5 h-5 text-amber-400" />
@@ -10005,6 +10013,7 @@ function BlacklistAdminView({
             </button>
           </div>
         </div>
+        </div>
       )}
 
       {/* Modal para registrar una deuda por monto directo (teléfono, nombre, monto, motivo) */}
@@ -10014,6 +10023,7 @@ function BlacklistAdminView({
           rate={rate}
           onClose={() => setIsAddAmountOpen(false)}
           onConfirm={handleAddDebt}
+          headerHeight={headerHeight}
         />
       )}
     </div>
@@ -10023,7 +10033,7 @@ function BlacklistAdminView({
 // Modal que permite registrar una deuda por productos (ventas presenciales o
 // deudas anteriores a la app). Muestra el catálogo actual y deja elegir
 // cantidades; al confirmar crea un pedido a crédito entregado para el cliente.
-function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm }) {
+function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, headerHeight = 0 }) {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [category, setCategory] = useState('Todas');
@@ -10075,9 +10085,13 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+      <div className="pointer-events-auto relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10242,6 +10256,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
           </div>
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -10249,7 +10264,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
 // Modal para registrar una deuda por monto directo en USD (teléfono, nombre,
 // monto y motivo). Al confirmar crea un pedido a crédito entregado con un
 // único ítem "Deuda manual" y la descripción como nota del pedido.
-function AddDebtAmountModal({ customers, rate, onClose, onConfirm }) {
+function AddDebtAmountModal({ customers, rate, onClose, onConfirm, headerHeight = 0 }) {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerAmount, setCustomerAmount] = useState('');
@@ -10288,9 +10303,13 @@ function AddDebtAmountModal({ customers, rate, onClose, onConfirm }) {
   const totalBs = usdToBs(parseAmount(customerAmount) || 0, rate?.rate || 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+      <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10417,6 +10436,7 @@ function AddDebtAmountModal({ customers, rate, onClose, onConfirm }) {
           </div>
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -10432,7 +10452,8 @@ function DebtDetailModal({
   collections,
   onUpsertCollection,
   onDeleteCollection,
-  payments
+  payments,
+  headerHeight = 0
 }) {
   const [showScheduler, setShowScheduler] = useState(false);
 
@@ -10495,9 +10516,13 @@ function DebtDetailModal({
   const overdue = futureCollectionDue(upcoming);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+      <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10731,6 +10756,7 @@ function DebtDetailModal({
           </div>
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -10761,7 +10787,6 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
   const [proof, setProof] = useState(null);
   const [sending, setSending] = useState(false);
   const [payments, setPayments] = useState([]);
-  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -10769,26 +10794,26 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
       .listPayments(key)
       .then((res) => {
         if (active && res.ok && Array.isArray(res.data)) setPayments(res.data);
-      })
-      .finally(() => {
-        if (active) setPaymentsLoaded(true);
       });
     return () => {
       active = false;
     };
   }, [key]);
 
-  // Estado de cuenta cronológico del cliente: deudas (+monto) y abonos
-  // aprobados (−monto) en una sola línea de tiempo, con saldo acumulado.
+  // Estado de cuenta (extracto mensual): un pedido a crédito deja saldo negativo
+  // (deuda, rojo) y un abono aprobado deja saldo positivo (a favor, verde). El
+  // saldo inicial del mes es el punto de partida del desglose.
   const approvedPayments = (payments || []).filter((p) => p.status === 'aprobado');
-  const customerMovements = [
+  const nowD = new Date();
+  const monthStart = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+  const rawMovements = [
     ...debtOrders.map((o) => ({
       id: `ORD-${o.id}`,
       kind: 'deuda',
       date: new Date(o.createdAt || o.timestamp || 0),
       label: `Pedido ${o.id}`,
       detail: Array.isArray(o.items) ? o.items.map((it) => `${it.quantity}x ${it.name}`).join(', ') : '',
-      amount: Number(o.total) || 0
+      amount: -(Number(o.total) || 0)
     })),
     ...approvedPayments.map((p) => ({
       id: `PAG-${p.id}`,
@@ -10796,14 +10821,22 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
       date: new Date(p.decidedAt || p.createdAt || 0),
       label: `Abono ${p.id}`,
       detail: p.reference ? `Ref: ${p.reference}` : `Bs ${formatBs(Number(p.amountBs))}`,
-      amount: -(Number(p.amountUsd) || 0)
+      amount: Number(p.amountUsd) || 0
     }))
-  ].sort((a, b) => a.date - b.date || a.label.localeCompare(b.label));
-  let customerRunning = 0;
-  const customerTimeline = customerMovements.map((m) => {
+  ];
+  // Saldo actual en convención de extracto: deuda = negativo, saldo a favor = positivo.
+  const currentSaldo = -balance;
+  const monthMovements = rawMovements
+    .filter((m) => m.date >= monthStart)
+    .sort((a, b) => a.date - b.date || a.label.localeCompare(b.label));
+  const sumMonth = monthMovements.reduce((acc, m) => acc + m.amount, 0);
+  const saldoInicialMes = currentSaldo - sumMonth;
+  let customerRunning = saldoInicialMes;
+  const customerTimeline = monthMovements.map((m) => {
     customerRunning += m.amount;
     return { ...m, balance: customerRunning };
   });
+  const monthName = monthStart.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
 
   const handleAbono = async (e) => {
     e.preventDefault();
@@ -10842,12 +10875,6 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
     } finally {
       setSending(false);
     }
-  };
-
-  const STATUS_LABEL = {
-    pendiente: { text: 'En revisión', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/25' },
-    aprobado: { text: 'Aprobado', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25' },
-    rechazado: { text: 'Rechazado', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/25' }
   };
 
   return (
@@ -11086,12 +11113,23 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
             </div>
           )}
 
-          {/* Estado de cuenta cronológico (deudas y abonos mezclados) */}
-          {!isSaldoView && customerTimeline.length > 0 && (
+          {/* Estado de cuenta del mes: saldo inicial en el header, fecha y hora de
+              cada movimiento, y saldo final diferenciado (negativo = rojo, positivo = verde) */}
+          {customerTimeline.length > 0 && (
             <div className="space-y-2">
-              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                Estado de cuenta ({customerTimeline.length} movimientos)
-              </span>
+              <div className="rounded-2xl bg-slate-950 border border-slate-800 px-4 py-3 flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Saldo inicial · {monthName}</p>
+                  <p className={`text-lg font-black ${saldoInicialMes < 0 ? 'text-red-400' : saldoInicialMes > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    {formatUsd(saldoInicialMes)}
+                  </p>
+                </div>
+                <span className="text-[10px] text-slate-500 text-right">
+                  Estado de cuenta
+                  <br />
+                  {customerTimeline.length} movimientos
+                </span>
+              </div>
               <div className="space-y-0">
                 {customerTimeline.map((m, idx) => (
                   <div key={m.id} className="relative flex gap-3 pb-3">
@@ -11110,22 +11148,33 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                       </span>
                     </div>
                     <div className="flex-1 min-w-0 bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2">
-                      <div className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className={`font-mono font-bold ${m.kind === 'deuda' ? 'text-red-400' : 'text-emerald-300'}`}>
-                          {m.kind === 'deuda' ? '+' : '−'}{formatUsd(Math.abs(m.amount))}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-slate-200 capitalize">
+                          {m.date.getTime() ? m.date.toLocaleDateString('es-VE', { weekday: 'short', day: 'numeric', month: 'short' }) : 'Sin fecha'}
                         </span>
-                        <span className="text-slate-500">
-                          {m.date.getTime() ? m.date.toLocaleDateString('es-VE') : 'Sin fecha'}
+                        <span className="font-mono text-[10px] text-slate-500">
+                          {m.date.getTime() ? m.date.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
                       </div>
-                      <p className="text-xs font-bold text-slate-200 mt-0.5">{m.label}</p>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <p className="text-xs font-bold text-slate-200 truncate">{m.label}</p>
+                        <span className={`font-mono font-bold shrink-0 ${m.kind === 'deuda' ? 'text-red-400' : 'text-emerald-300'}`}>
+                          {m.kind === 'deuda' ? '−' : '+'}{formatUsd(Math.abs(m.amount))}
+                        </span>
+                      </div>
                       {m.detail && <p className="text-[10px] text-slate-500 truncate">{m.detail}</p>}
-                      <p className={`text-[10px] font-bold mt-1 ${m.balance > 0 ? 'text-red-300' : m.balance < 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                      <p className={`text-[10px] font-bold mt-1.5 ${m.balance < 0 ? 'text-red-300' : m.balance > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
                         Saldo: {formatUsd(m.balance)}
                       </p>
                     </div>
                   </div>
                 ))}
+              </div>
+              <div className="flex items-center justify-between px-1 pt-2 border-t border-slate-800">
+                <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Saldo del mes</span>
+                <span className={`text-lg font-black ${currentSaldo < 0 ? 'text-red-400' : currentSaldo > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  {formatUsd(currentSaldo)}
+                </span>
               </div>
             </div>
           )}
@@ -11232,35 +11281,6 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
             </form>
           )}
 
-          {/* Historial de abonos */}
-          {payments.length > 0 && (
-            <div className="space-y-2">
-              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                Historial de abonos y descuentos ({payments.length})
-              </span>
-              {payments.map((p) => (
-                <div key={p.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-mono text-cyan-400">{p.id}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${(STATUS_LABEL[p.status] || STATUS_LABEL.pendiente).cls}`}>
-                      {(STATUS_LABEL[p.status] || STATUS_LABEL.pendiente).text}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-xs text-slate-300">
-                    <span>{formatBs(Number(p.amountBs))}</span>
-                    <span className="font-bold text-white">≈ {formatUsd(Number(p.amountUsd))}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    {new Date(p.createdAt).toLocaleString('es-VE')}
-                    {p.reference ? ` · Ref ${p.reference}` : ''}
-                  </div>
-                  {p.status === 'rechazado' && p.note && (
-                    <p className="text-[10px] text-rose-300">{p.note}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0 space-y-2.5">

@@ -1080,6 +1080,7 @@ export default function App() {
     if (res.data.state) {
       setProducts(res.data.state.products || []);
       setOrders(res.data.state.orders || []);
+      if (res.data.state.customers) setAllCustomers(res.data.state.customers);
     }
     await loadPayments();
     addToast('Abono aprobado y aplicado al cliente', 'success');
@@ -1103,6 +1104,7 @@ export default function App() {
     if (res.data.state) {
       setProducts(res.data.state.products || []);
       setOrders(res.data.state.orders || []);
+      if (res.data.state.customers) setAllCustomers(res.data.state.customers);
     }
     await loadPayments();
     addToast('Abono rechazado', 'info');
@@ -1906,6 +1908,8 @@ export default function App() {
       return;
     }
     setOrders(res.data.state.orders || []);
+    // Actualizar también la lista de clientes (para que Lista Negra refleje el balance)
+    if (res.data.state.customers) setAllCustomers(res.data.state.customers);
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
     // Si el pedido pertenece al cliente actual, refrescar su perfil (balance actualizado)
     const updatedOrder = res.data.state.orders?.find((o) => o.id === orderId);

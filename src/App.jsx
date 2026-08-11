@@ -2383,6 +2383,7 @@ export default function App() {
             rate={rate}
             addToast={addToast}
             mode={debtDrawerMode}
+            headerHeight={headerHeight}
             onClose={() => setIsDebtDrawerOpen(false)}
           />
         </ErrorBoundary>
@@ -2397,6 +2398,7 @@ export default function App() {
             orders={orders}
             products={products}
             rate={rate}
+            headerHeight={headerHeight}
             onClose={() => setIsMyKioskoOpen(false)}
             onRepeatLastOrder={handleRepeatLastOrder}
           />
@@ -10763,7 +10765,7 @@ function DebtDetailModal({
 
 // Modal que el cliente ve en "Mi Cuenta": desglose de su deuda con conversión
 // a bolívares según la tasa del día.
-function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = 'deuda' }) {
+function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = 'deuda', headerHeight = 0 }) {
   const key = normalizePhoneDigits(customer.phone);
   const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
@@ -10878,9 +10880,13 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10914,7 +10920,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {isSaldoView ? (
             <div className="space-y-3">
               {walletAmount > 0 ? (
@@ -11325,6 +11331,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
             Entendido
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -12591,7 +12598,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
 
 // Dashboard personal "Mi Kiosko": resumen del cliente con gasto, pedidos,
 // productos favoritos, rachas y próximos pedidos activos.
-function MyKioskoModal({ customer, customerName, orders, products, rate, onClose, onRepeatLastOrder }) {
+function MyKioskoModal({ customer, customerName, orders, products, rate, onClose, onRepeatLastOrder, headerHeight = 0 }) {
   const customerOrders = useMemo(() => {
     if (!customer?.phone) return [];
     const key = normalizePhoneDigits(customer.phone);
@@ -12629,15 +12636,19 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
   const balance = Number(customer?.balance) || 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
-        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
-          <div>
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Icon name="zap" className="w-5 h-5 text-teal-400" />
-              Mi historial
-            </h3>
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+          <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Icon name="zap" className="w-5 h-5 text-teal-400" />
+                Mi historial
+              </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Hola {customerName?.split(' ')[0] || 'cliente'} · Tu resumen del mes
             </p>
@@ -12647,7 +12658,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Métricas principales */}
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
@@ -12728,6 +12739,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
             </Btn>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

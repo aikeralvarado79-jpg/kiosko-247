@@ -805,39 +805,6 @@ export default function App() {
     setAccessibility((a) => ({ ...a, [key]: !a[key] }));
   };
 
-  // Alertas de precio de preferidos: vigila el precio de los favoritos y
-  // notifica al cliente cuando cambia (sube o baja) entre cargas de estado.
-  const [priceWatch, setPriceWatch] = useState(loadPriceWatch);
-
-  useEffect(() => {
-    if (products.length === 0 || favorites.length === 0) return undefined;
-    const next = { ...priceWatch };
-    let changed = false;
-    favorites.forEach((id) => {
-      const p = products.find((x) => x.id === id);
-      if (!p) return;
-      const prev = next[id];
-      const cur = Number(p.price);
-      if (prev == null) {
-        next[id] = cur;
-        changed = true;
-      } else if (prev !== cur) {
-        if (cur < prev) {
-          addToast(`${p.name} bajó a ${formatUsd(cur)} 🎉`, 'success');
-        } else if (cur > prev) {
-          addToast(`${p.name} subió a ${formatUsd(cur)}`, 'warning');
-        }
-        next[id] = cur;
-        changed = true;
-      }
-    });
-    if (changed) {
-      setPriceWatch(next);
-      savePriceWatch(next);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products, favorites]);
-
   // Alto del header sticky: se pasa a la tienda para anclar el buscador justo debajo
   const headerRef = useRef(null);
   const [headerHeight, setHeaderHeight] = useState(0);
@@ -974,6 +941,39 @@ export default function App() {
       localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
     } catch {}
   }, [favorites]);
+
+  // Alertas de precio de preferidos: vigila el precio de los favoritos y
+  // notifica al cliente cuando cambia (sube o baja) entre cargas de estado.
+  const [priceWatch, setPriceWatch] = useState(loadPriceWatch);
+
+  useEffect(() => {
+    if (products.length === 0 || favorites.length === 0) return undefined;
+    const next = { ...priceWatch };
+    let changed = false;
+    favorites.forEach((id) => {
+      const p = products.find((x) => x.id === id);
+      if (!p) return;
+      const prev = next[id];
+      const cur = Number(p.price);
+      if (prev == null) {
+        next[id] = cur;
+        changed = true;
+      } else if (prev !== cur) {
+        if (cur < prev) {
+          addToast(`${p.name} bajó a ${formatUsd(cur)} 🎉`, 'success');
+        } else if (cur > prev) {
+          addToast(`${p.name} subió a ${formatUsd(cur)}`, 'warning');
+        }
+        next[id] = cur;
+        changed = true;
+      }
+    });
+    if (changed) {
+      setPriceWatch(next);
+      savePriceWatch(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, favorites]);
 
   const toggleFavorite = (id) => {
     setFavorites((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
 import L from 'leaflet';
@@ -569,11 +570,32 @@ const STATUS_LABELS = {
   cancelado: 'Cancelado'
 };
 
+// Un pedido con pago digital "pendiente" aún no debe mostrar su estatus de avance
+// (Pendiente/En prep./Listo/...): el estatus solo tiene sentido una vez validado
+// el pago (confirmado) o rechazado. Los pagos en efectivo y por cartera se
+// validan al instante, así que siempre muestran estatus.
+const needsPaymentValidation = (o) =>
+  !!o.paymentMethod &&
+  o.paymentMethod !== 'efectivo' &&
+  o.paymentMethod !== 'cartera' &&
+  o.paymentStatus === 'pendiente' &&
+  !o.credit;
+
 // Time lapse de pasos de un pedido: muestra el avance con un color distinto por
 // estatus. Retiro en tienda: Pendiente → En prep. → Listo → Retirado.
 // Delivery: Pendiente → En prep. → Listo → En camino → Entregado.
 function OrderStepsTimeline({ order, className = '' }) {
   if (!order) return null;
+  // Si el pago digital aún no está validado, no se muestran los pasos de avance:
+  // el pedido queda "congelado" hasta confirmar el pago.
+  if (needsPaymentValidation(order)) {
+    return (
+      <div className={`flex items-center justify-center gap-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-300 font-semibold ${className}`}>
+        <Icon name="clock" className="w-3.5 h-3.5 shrink-0" />
+        Esperando validación del pago
+      </div>
+    );
+  }
   const isDelivery = order.type === 'delivery';
   const steps = isDelivery
     ? [
@@ -775,13 +797,17 @@ export default function App() {
     setProducts(res.data.products || []);
     setCategories(res.data.categories || []);
     setOrders(res.data.orders || []);
+    // El estado público ya incluye customers (con balance); mantener la lista de
+    // clientes del admin sincronizada en tiempo real para que la vista previa de
+    // Lista Negra refleje los cambios sin tener que pulsar "Actualizar lista".
+    if (isAdminAuthed && Array.isArray(res.data.customers)) setAllCustomers(res.data.customers);
     if (Array.isArray(res.data.settings?.promos)) setPromos(res.data.settings.promos);
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
     hasDataRef.current = true;
     setIsLoading(false);
-  }, [clientId]);
+  }, [clientId, isAdminAuthed]);
 
   useEffect(() => {
     loadState();
@@ -1311,15 +1337,15 @@ export default function App() {
     return true;
   };
 
-  const handleAddBlacklistDebt = async ({ phone, name, items }) => {
-    const res = await api.addBlacklistDebt({ phone, name, items });
+  const handleAddBlacklistDebt = async ({ phone, name, items, description }) => {
+    const res = await api.addBlacklistDebt({ phone, name, items, description });
     if (!res.ok) {
       addToast(res.data.error || 'No se pudo registrar la deuda', 'error');
       return false;
     }
     await loadCustomers();
     await loadState({ silent: true });
-    addToast('Productos añadidos a la deuda', 'success');
+    addToast(description ? 'Deuda registrada' : 'Productos añadidos a la deuda', 'success');
     return true;
   };
 
@@ -2099,7 +2125,14 @@ export default function App() {
               <span className={`shrink-0 p-2 rounded-xl bg-slate-950/40 border border-white/10 ${meta.text}`}>
                 <Icon name={meta.icon} className="w-5 h-5" />
               </span>
-              <p className="flex-1 text-slate-100 leading-snug">{toast.message}</p>
+              <p className="flex-1 text-slate-100 leading-snug pr-2">{toast.message}</p>
+              <button
+                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                aria-label="Cerrar notificación"
+                className={`shrink-0 p-1.5 rounded-lg bg-slate-950/40 border border-white/10 ${meta.text} hover:bg-slate-950/70 transition-colors`}
+              >
+                <Icon name="x" className="w-4 h-4" />
+              </button>
               <span className={`absolute bottom-0 left-0 h-0.5 ${meta.bar} animate-toast-progress`} />
             </div>
           );
@@ -2358,6 +2391,7 @@ export default function App() {
             rate={rate}
             addToast={addToast}
             mode={debtDrawerMode}
+            headerHeight={headerHeight}
             onClose={() => setIsDebtDrawerOpen(false)}
           />
         </ErrorBoundary>
@@ -2372,6 +2406,7 @@ export default function App() {
             orders={orders}
             products={products}
             rate={rate}
+            headerHeight={headerHeight}
             onClose={() => setIsMyKioskoOpen(false)}
             onRepeatLastOrder={handleRepeatLastOrder}
           />
@@ -3785,6 +3820,7 @@ function CustomerView({
                 const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                 const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
                 const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
+                const payPending = needsPaymentValidation(o);
                 return (
                   <div
                     key={o.id}
@@ -3794,9 +3830,15 @@ function CustomerView({
                       <span className="text-xs sm:text-sm font-bold text-white">
                         Pedido <span className="text-teal-400">#{o.id}</span>
                       </span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
-                        {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
-                      </span>
+                      {payPending ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                          Pago en revisión
+                        </span>
+                      ) : (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
+                          {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
+                        </span>
+                      )}
                     </div>
                     <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
                       {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
@@ -4365,7 +4407,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
 
         <div
           key={`body-${product.id}`}
-          className={`p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+          className={`p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         >
           <div>
             <div className="flex items-center justify-between gap-2">
@@ -5293,15 +5335,22 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
                   const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
                   const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
                   const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
+                  const payPending = needsPaymentValidation(o);
                   return (
                     <div key={o.id} className={`p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border ${payRejected ? 'border-rose-500/50' : 'border-slate-700/50'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs sm:text-sm font-bold text-white">
                           Pedido <span className="text-teal-400">#{o.id}</span>
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
-                          {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
-                        </span>
+                        {payPending ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                            Pago en revisión
+                          </span>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
+                            {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
+                          </span>
+                        )}
                       </div>
                       <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
                         {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
@@ -5420,7 +5469,7 @@ function BottomTabBar({
   isAdminAuthed
 }) {
   const base =
-    'flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 flex-1 min-w-0 rounded-2xl transition-all duration-300 active:scale-95';
+    'flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 flex-[1_0_auto] min-w-[64px] max-w-[104px] rounded-2xl transition-all duration-300 active:scale-95';
   const activeTab =
     'bg-teal-500/20 text-teal-300 border border-teal-500/30 shadow-lg shadow-teal-500/10';
   const idleTab = 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 border border-transparent';
@@ -5493,7 +5542,7 @@ function BottomTabBar({
   return (
     <nav
       style={{ paddingBottom: 'max(0.4rem, env(safe-area-inset-bottom))' }}
-      className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 flex items-stretch gap-1 px-2 pt-2 pb-1 animate-screen-up"
+      className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 flex items-stretch gap-1 px-2 pt-2 pb-1 overflow-x-auto scrollbar-none animate-screen-up"
       aria-label="Navegación principal"
     >
       {tabs.map((t) => (
@@ -5950,7 +5999,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
           </button>
         </div>
 
-        <div className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1 min-h-0">
           <div className="relative">
             <input
               type="text"
@@ -6094,7 +6143,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
             </h3>
             <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${style.badge}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${style.dot} ${status === 'en_camino' ? 'animate-pulse' : ''}`} />
-              {STATUS_LABELS[status] || 'Pendiente'}
+              {needsPaymentValidation(order) ? 'Pago en revisión' : STATUS_LABELS[status] || 'Pendiente'}
             </span>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
@@ -6103,7 +6152,13 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
         </div>
 
         <div className="p-5 sm:p-6 space-y-4">
-          {/* Stepper de estados */}
+          {/* Stepper de estados: oculto hasta validar el pago digital */}
+          {needsPaymentValidation(order) ? (
+            <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
+              <Icon name="clock" className="w-4 h-4 shrink-0" />
+              Tu pedido avanza cuando el kiosko confirme el pago. Revisa el estado de tu pago abajo.
+            </div>
+          ) : (
           <div className={`grid gap-1.5 sm:gap-2 pt-1 ${order.type === 'delivery' ? 'grid-cols-5' : 'grid-cols-4'}`}>
             {steps.map((step, idx) => {
               const isPassed = idx <= currentIdx;
@@ -6118,6 +6173,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
               );
             })}
           </div>
+          )}
 
           {/* Mapa: destino + repartidor en vivo */}
           <DeliveryMap order={track} storeLocation={storeLocation} />
@@ -6414,7 +6470,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1 min-h-0">
           {/* Order Method Selector */}
           <div className="grid grid-cols-2 gap-2 sm:gap-3 p-1 sm:p-1.5 rounded-2xl bg-slate-800 border border-slate-700">
             <button
@@ -7712,16 +7768,17 @@ function AdminView({
     const sem = semaforoOf(order);
     const missingStock = lowStockInOrder(order);
     const isPinned = pinnedOrders.includes(order.id);
+    const payPending = needsPaymentValidation(order);
     return (
       <div
         key={order.id}
-        className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${st.ring}`}
+        className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${payPending ? 'border-amber-500/50' : st.ring}`}
       >
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
-              {['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
+              {!payPending && ['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
                 <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 shrink-0 ${SEM_TONES[sem.tone]}`}>
                   <Icon name="clock" className="w-3 h-3" />
                   {sem.text}
@@ -7729,12 +7786,19 @@ function AdminView({
               )}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {payPending ? (
+                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-400/40 bg-amber-500/15 text-amber-300 text-[11px] font-bold">
+                  <Icon name="clock" className="w-3 h-3" />
+                  Pago en revisión
+                </span>
+              ) : (
               <span
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
                 {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
               </span>
+              )}
               {(order.paymentMethod === 'cartera' || Number(order.walletApplied) > 0) && (
                 <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-[11px] font-bold">
                   <Icon name="wallet" className="w-3 h-3" />
@@ -7947,6 +8011,13 @@ function AdminView({
 
         {/* Status Update Controls */}
         <div className="pt-3 border-t border-slate-700/60 space-y-2">
+          {payPending ? (
+            <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
+              <Icon name="lock" className="w-3.5 h-3.5 shrink-0" />
+              Confirma o rechaza el pago arriba para poder avanzar el estado del pedido.
+            </p>
+          ) : (
+          <>
           <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
           <div className="grid grid-cols-2 gap-2">
             {[
@@ -8023,6 +8094,8 @@ function AdminView({
               <Icon name="trash" className="w-3.5 h-3.5" />
               Eliminar pedido
             </button>
+          )}
+          </>
           )}
         </div>
       </div>
@@ -9267,6 +9340,7 @@ function AdminView({
           collections={collections}
           onUpsertCollection={onUpsertCollection}
           onDeleteCollection={onDeleteCollection}
+          headerHeight={headerHeight}
         />
       )}
 
@@ -9476,14 +9550,14 @@ function AdminView({
 
       {fichaOrder && (
         <div
-          className="fixed inset-x-0 bottom-0 z-[70] overflow-y-auto animate-fade-in"
+          className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
           style={{ top: headerHeight }}
           role="dialog"
           aria-label={`Ficha del pedido ${fichaOrder.id}`}
         >
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={closeFicha} />
-          <div className="relative min-h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
-            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col">
+          <div className="relative h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
+            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col max-h-full">
               <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">
                 <div>
                   <h3 className="font-black text-white text-sm flex items-center gap-2">
@@ -9500,7 +9574,7 @@ function AdminView({
                   <Icon name="x" className="w-4 h-4" />
                 </button>
               </div>
-              <div className="p-4 sm:p-5">
+              <div className="p-4 sm:p-5 overflow-y-auto flex-1 min-h-0">
                 <OrderStepsTimeline order={fichaOrder} />
                 <div className="mt-4">
                   {renderOrderCard(fichaOrder, { inFicha: true })}
@@ -9772,30 +9846,22 @@ function BlacklistAdminView({
   onAddBlacklistDebt,
   collections,
   onUpsertCollection,
-  onDeleteCollection
+  onDeleteCollection,
+  headerHeight = 0
 }) {
-  const [phone, setPhone] = useState('');
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
   const [selectedDebtor, setSelectedDebtor] = useState(null); // customer abierto
   const [isAddProductsOpen, setIsAddProductsOpen] = useState(false);
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [isAddAmountOpen, setIsAddAmountOpen] = useState(false);
 
   const debtors = customers.filter((c) => (Number(c.balance) || 0) > 0);
 
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    const ok = await onAddToBlacklist(phone.replace(/\D/g, ''), name, amount);
-    if (ok) {
-      setPhone('');
-      setName('');
-      setAmount('');
-    }
-  };
-
-  const handleAddDebt = async ({ phone: targetPhone, name: targetName, items }) => {
-    const ok = await onAddBlacklistDebt({ phone: targetPhone, name: targetName, items });
+  const handleAddDebt = async ({ phone: targetPhone, name: targetName, items, description: targetDescription }) => {
+    const ok = await onAddBlacklistDebt({ phone: targetPhone, name: targetName, items, description: targetDescription });
     if (ok) {
       setIsAddProductsOpen(false);
+      setIsAddAmountOpen(false);
+      setIsRegisterOpen(false);
       setSelectedDebtor(null);
     }
   };
@@ -9817,11 +9883,11 @@ function BlacklistAdminView({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setIsAddProductsOpen(true)}
-            className="px-3 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-colors flex items-center gap-1.5"
+            onClick={() => setIsRegisterOpen(true)}
+            className="px-3 py-2 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 text-slate-950 text-xs font-bold hover:from-red-400 hover:to-amber-400 shadow-lg shadow-red-500/20 transition-colors flex items-center gap-1.5"
           >
             <Icon name="plus" className="w-4 h-4" />
-            Añadir productos
+            Registrar
           </button>
           <button
             onClick={onLoadCustomers}
@@ -9831,51 +9897,6 @@ function BlacklistAdminView({
           </button>
         </div>
       </div>
-
-      <form
-        onSubmit={handleAdd}
-        className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end p-4 rounded-2xl bg-slate-900 border border-slate-700/60"
-      >
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono *</label>
-          <input
-            type="tel"
-            inputMode="numeric"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="0414 1234567"
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre del deudor"
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1">Deuda (USD) *</label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-          />
-        </div>
-        <button
-          type="submit"
-          className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 text-slate-950 text-sm font-bold hover:from-red-400 hover:to-amber-400 shadow-lg shadow-red-500/20 transition-all"
-        >
-          Añadir a la lista negra
-        </button>
-      </form>
 
       {debtors.length === 0 ? (
         <p className="text-sm text-slate-500 py-8 text-center">No hay deudores registrados.</p>
@@ -9909,30 +9930,127 @@ function BlacklistAdminView({
       )}
 
       {/* Modal de detalle de deuda */}
-      {selectedDebtor && (
-        <DebtDetailModal
-          customer={selectedDebtor}
-          orders={orders}
-          rate={rate}
-          onClose={() => setSelectedDebtor(null)}
-          onClearDebt={handleClearDebt}
-          collections={collections}
-          onUpsertCollection={onUpsertCollection}
-          onDeleteCollection={onDeleteCollection}
-          payments={payments}
-        />
-      )}
+      {selectedDebtor &&
+        createPortal(
+          <DebtDetailModal
+            customer={selectedDebtor}
+            orders={orders}
+            rate={rate}
+            onClose={() => setSelectedDebtor(null)}
+            onClearDebt={handleClearDebt}
+            collections={collections}
+            onUpsertCollection={onUpsertCollection}
+            onDeleteCollection={onDeleteCollection}
+            headerHeight={headerHeight}
+            payments={payments}
+          />,
+          document.body
+        )}
 
       {/* Modal para añadir productos a la deuda de un cliente */}
-      {isAddProductsOpen && (
-        <AddDebtProductsModal
-          products={products}
-          rate={rate}
-          customers={customers}
-          onClose={() => setIsAddProductsOpen(false)}
-          onConfirm={handleAddDebt}
-        />
-      )}
+      {isAddProductsOpen &&
+        createPortal(
+          <AddDebtProductsModal
+            products={products}
+            rate={rate}
+            customers={customers}
+            onClose={() => setIsAddProductsOpen(false)}
+            onConfirm={handleAddDebt}
+            headerHeight={headerHeight}
+          />,
+          document.body
+        )}
+
+      {/* Modal de elección de registro (productos o monto) */}
+      {isRegisterOpen &&
+        createPortal(
+          <div
+            className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+            style={{ top: headerHeight }}
+          >
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsRegisterOpen(false)} />
+            <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+              <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-full flex flex-col">
+                <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+                  <div>
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Icon name="plus" className="w-5 h-5 text-amber-400" />
+                      Registrar deuda
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Elige cómo quieres cargar la deuda del cliente.
+                    </p>
+                  </div>
+                  <button onClick={() => setIsRegisterOpen(false)} className="p-2 text-slate-400 hover:text-white rounded-xl">
+                    <Icon name="x" className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-4 sm:p-6 space-y-3 overflow-y-auto flex-1 min-h-0">
+                  <button
+                    onClick={() => {
+                      setIsRegisterOpen(false);
+                      setIsAddProductsOpen(true);
+                    }}
+                    className="w-full p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-teal-500/50 text-left transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="p-2.5 rounded-xl bg-teal-500/15 text-teal-300 shrink-0">
+                        <Icon name="package" className="w-5 h-5" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-100">Añadir productos</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Elige productos del catálogo que el cliente debe (ventas presenciales o deudas viejas).
+                        </p>
+                      </div>
+                      <Icon name="chevronRight" className="w-4 h-4 text-slate-500 shrink-0" />
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsRegisterOpen(false);
+                      setIsAddAmountOpen(true);
+                    }}
+                    className="w-full p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-amber-500/50 text-left transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="p-2.5 rounded-xl bg-amber-500/15 text-amber-300 shrink-0">
+                        <Icon name="wallet" className="w-5 h-5" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-100">Registrar monto</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Carga una deuda directa en dólares con teléfono, nombre y motivo.
+                        </p>
+                      </div>
+                      <Icon name="chevronRight" className="w-4 h-4 text-slate-500 shrink-0" />
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setIsRegisterOpen(false)}
+                    className="w-full py-2.5 rounded-xl bg-slate-800 text-slate-300 text-sm font-bold hover:bg-slate-700 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Modal para registrar una deuda por monto directo (teléfono, nombre, monto, motivo) */}
+      {isAddAmountOpen &&
+        createPortal(
+          <AddDebtAmountModal
+            customers={customers}
+            rate={rate}
+            onClose={() => setIsAddAmountOpen(false)}
+            onConfirm={handleAddDebt}
+            headerHeight={headerHeight}
+          />,
+          document.body
+        )}
     </div>
   );
 }
@@ -9940,7 +10058,7 @@ function BlacklistAdminView({
 // Modal que permite registrar una deuda por productos (ventas presenciales o
 // deudas anteriores a la app). Muestra el catálogo actual y deja elegir
 // cantidades; al confirmar crea un pedido a crédito entregado para el cliente.
-function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm }) {
+function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, headerHeight = 0 }) {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [category, setCategory] = useState('Todas');
@@ -9992,9 +10110,13 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+      <div className="pointer-events-auto relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10010,7 +10132,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Cliente */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
@@ -10159,6 +10281,187 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm })
           </div>
         </div>
       </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal para registrar una deuda por monto directo en USD (teléfono, nombre,
+// monto y motivo). Al confirmar crea un pedido a crédito entregado con un
+// único ítem "Deuda manual" y la descripción como nota del pedido.
+function AddDebtAmountModal({ customers, rate, onClose, onConfirm, headerHeight = 0 }) {
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerAmount, setCustomerAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const pickCustomer = (phone) => {
+    const c = (customers || []).find((x) => normalizePhoneDigits(x.phone) === normalizePhoneDigits(phone));
+    setCustomerPhone(phone);
+    if (c) setCustomerName(c.customerName || '');
+  };
+
+  const handleConfirm = async () => {
+    const key = customerPhone.replace(/\D/g, '').slice(-11);
+    if (key.length < 7) {
+      setError('Ingresa el número de teléfono del deudor');
+      return;
+    }
+    const monto = parseAmount(customerAmount);
+    if (!monto || monto <= 0) {
+      setError('Ingresa un monto de deuda válido');
+      return;
+    }
+    setError('');
+    setSubmitting(true);
+    await onConfirm({
+      phone: key,
+      name: customerName,
+      items: [{ name: description ? `Deuda manual · ${description}` : 'Deuda manual', price: monto, quantity: 1 }],
+      description
+    });
+    setSubmitting(false);
+  };
+
+  const totalBs = usdToBs(parseAmount(customerAmount) || 0, rate?.rate || 0);
+
+  return (
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+      <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="wallet" className="w-5 h-5 text-amber-400" />
+              Registrar monto de la deuda
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Carga una deuda directa en dólares con su motivo.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Deudor (cliente registrado)</label>
+              <select
+                value=""
+                onChange={(e) => e.target.value && pickCustomer(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-amber-500 focus:outline-none"
+              >
+                <option value="">— Seleccionar deudor existente —</option>
+                {(customers || []).map((c) => (
+                  <option key={c.phone} value={c.phone}>
+                    {c.customerName || 'Cliente'} · {c.phone} · {formatUsd(Number(c.balance) || 0)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono *</label>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={customerPhone}
+                  onChange={(e) => pickCustomer(e.target.value)}
+                  placeholder="0414 1234567"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre</label>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="Nombre del deudor"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Deuda (USD) *</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={customerAmount}
+              onChange={(e) => setCustomerAmount(formatAmountBsInput(e.target.value))}
+              placeholder="0.00"
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+            />
+            {rate?.rate > 0 && totalBs > 0 && (
+              <span className="block text-[11px] text-slate-500 mt-1">
+                ≈ {formatBs(totalBs)}
+              </span>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Descripción del motivo</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ej.: Compra a crédito no registrada, préstamo, saldo de la semana…"
+              rows={2}
+              maxLength={300}
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none resize-none"
+            />
+            <span className="block text-[10px] text-slate-600 text-right">{description.length}/300</span>
+          </div>
+        </div>
+
+        {/* Pie */}
+        <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
+          {error && (
+            <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 mb-3">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
+                Total a cargar
+              </span>
+              <span className="text-lg font-black text-amber-400">
+                {formatUsd(parseAmount(customerAmount) || 0)}
+                {rate?.rate > 0 && (
+                  <span className="block text-[10px] text-slate-500">{formatBs(totalBs)}</span>
+                )}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-sm font-bold hover:bg-slate-700 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={submitting}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 text-slate-950 text-sm font-bold hover:from-red-400 hover:to-amber-400 shadow-lg shadow-red-500/20 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5"
+              >
+                <Icon name="check" className="w-4 h-4" />
+                {submitting ? 'Guardando…' : 'Registrar deuda'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </div>
     </div>
   );
 }
@@ -10174,7 +10477,8 @@ function DebtDetailModal({
   collections,
   onUpsertCollection,
   onDeleteCollection,
-  payments
+  payments,
+  headerHeight = 0
 }) {
   const [showScheduler, setShowScheduler] = useState(false);
 
@@ -10197,6 +10501,34 @@ function DebtDetailModal({
   const pendingPayments = clientPayments.filter((p) => p.status === 'pendiente');
   const rejectedPayments = clientPayments.filter((p) => p.status === 'rechazado');
 
+  // Estado de cuenta cronológico: combina deudas (pedidos a crédito entregados,
+  // +monto) y abonos aprobados (-monto) en una sola línea de tiempo ordenada por
+  // fecha, con el saldo acumulado de cada movimiento. Los movimientos sin fecha
+  // (deuda manual sin createdAt) se consideran los más antiguos.
+  const movements = [
+    ...debtOrders.map((o) => ({
+      id: `ORD-${o.id}`,
+      kind: 'deuda',
+      date: new Date(o.createdAt || o.timestamp || 0),
+      label: `Pedido ${o.id}`,
+      detail: Array.isArray(o.items) ? o.items.map((it) => `${it.quantity}x ${it.name}`).join(', ') : '',
+      amount: Number(o.total) || 0
+    })),
+    ...approvedPayments.map((p) => ({
+      id: `PAG-${p.id}`,
+      kind: 'abono',
+      date: new Date(p.decidedAt || p.createdAt || 0),
+      label: `Abono ${p.id}`,
+      detail: p.reference ? `Ref: ${p.reference}` : `Bs ${formatBs(Number(p.amountBs))}`,
+      amount: -(Number(p.amountUsd) || 0)
+    }))
+  ].sort((a, b) => a.date - b.date || a.label.localeCompare(b.label));
+  let runningBalance = 0;
+  const timeline = movements.map((m) => {
+    runningBalance += m.amount;
+    return { ...m, balance: runningBalance };
+  });
+
   const wa = formatPhoneWhatsApp(customer.phone);
 
   const accountMsg = buildAccountMessage(customer, orders);
@@ -10209,9 +10541,13 @@ function DebtDetailModal({
   const overdue = futureCollectionDue(upcoming);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+      <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10225,7 +10561,7 @@ function DebtDetailModal({
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Acciones principales */}
           <div className="grid grid-cols-2 gap-2">
             <a
@@ -10288,6 +10624,9 @@ function DebtDetailModal({
                       </span>
                     </div>
                   )) : null}
+                  {o.notes && o.notes !== 'Deuda registrada manualmente' && (
+                    <p className="text-[10px] text-slate-500 italic truncate">{o.notes}</p>
+                  )}
                   <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs">
                     <span className="text-slate-400">Total</span>
                     <span className="text-amber-400 text-right">
@@ -10301,82 +10640,126 @@ function DebtDetailModal({
               ))
             )}
           </div>
-        </div>
 
-        {/* Historial de pagos y depósitos de este cliente (agrupado) */}
-        {(approvedPayments.length > 0 || pendingPayments.length > 0 || rejectedPayments.length > 0) && (
-          <div className="p-4 sm:p-6 border-t border-slate-800 space-y-4">
-            <div className="flex items-center gap-2">
-              <Icon name="wallet" className="w-4 h-4 text-teal-400" />
-              <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                Historial de pagos ({clientPayments.length})
+          {/* Estado de cuenta cronológico (deudas y abonos mezclados) */}
+          {timeline.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
+                Estado de cuenta ({timeline.length} movimientos)
               </span>
+              <div className="space-y-0">
+                {timeline.map((m, idx) => (
+                  <div key={m.id} className="relative flex gap-3 pb-3">
+                    {idx < timeline.length - 1 && (
+                      <span className="absolute left-[7px] top-4 bottom-0 w-px bg-slate-700/60" />
+                    )}
+                    <div className="flex flex-col items-center shrink-0">
+                      <span
+                        className={`w-[15px] h-[15px] rounded-full border-2 flex items-center justify-center ${
+                          m.kind === 'deuda'
+                            ? 'bg-red-500/20 border-red-500/60'
+                            : 'bg-emerald-500/20 border-emerald-500/60'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${m.kind === 'deuda' ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0 bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className={`font-mono font-bold ${m.kind === 'deuda' ? 'text-red-400' : 'text-emerald-300'}`}>
+                          {m.kind === 'deuda' ? '+' : '−'}{formatUsd(Math.abs(m.amount))}
+                        </span>
+                        <span className="text-slate-500">
+                          {m.date.getTime() ? m.date.toLocaleDateString('es-VE') : 'Sin fecha'}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-200 mt-0.5">{m.label}</p>
+                      {m.detail && <p className="text-[10px] text-slate-500 truncate">{m.detail}</p>}
+                      <p className={`text-[10px] font-bold mt-1 ${m.balance > 0 ? 'text-red-300' : m.balance < 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                        Saldo: {formatUsd(m.balance)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="grid gap-3">
-              {approvedPayments.length > 0 && (
-                <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-emerald-300 font-bold flex items-center gap-1">
-                      <Icon name="check" className="w-3.5 h-3.5" />
-                      Abonos aprobados ({approvedPayments.length})
-                    </span>
-                    <span className="text-emerald-300 font-black">
-                      {formatUsd(approvedPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
-                    </span>
-                  </div>
-                  {approvedPayments.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
-                      <span className="text-slate-300">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
-                      <span className="font-bold text-teal-300">
-                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
+          )}
+
+          {/* Historial de pagos y depósitos de este cliente (agrupado) */}
+          {(approvedPayments.length > 0 || pendingPayments.length > 0 || rejectedPayments.length > 0) && (
+            <div className="border-t border-slate-800 pt-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <Icon name="wallet" className="w-4 h-4 text-teal-400" />
+                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                  Historial de pagos ({clientPayments.length})
+                </span>
+              </div>
+              <div className="grid gap-3">
+                {approvedPayments.length > 0 && (
+                  <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-emerald-300 font-bold flex items-center gap-1">
+                        <Icon name="check" className="w-3.5 h-3.5" />
+                        Abonos aprobados ({approvedPayments.length})
+                      </span>
+                      <span className="text-emerald-300 font-black">
+                        {formatUsd(approvedPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
                       </span>
                     </div>
-                  ))}
-                </div>
-              )}
-              {pendingPayments.length > 0 && (
-                <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-amber-300 font-bold flex items-center gap-1">
-                      <Icon name="clock" className="w-3.5 h-3.5" />
-                      Por verificar ({pendingPayments.length})
-                    </span>
-                    <span className="text-amber-300 font-black">
-                      {formatUsd(pendingPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
-                    </span>
+                    {approvedPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                        <span className="text-slate-300">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                        <span className="font-bold text-teal-300">
+                          {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                  {pendingPayments.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
-                      <span className="text-slate-400">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
-                      <span className="font-bold text-amber-300">
-                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
+                )}
+                {pendingPayments.length > 0 && (
+                  <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-amber-300 font-bold flex items-center gap-1">
+                        <Icon name="clock" className="w-3.5 h-3.5" />
+                        Por verificar ({pendingPayments.length})
+                      </span>
+                      <span className="text-amber-300 font-black">
+                        {formatUsd(pendingPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
                       </span>
                     </div>
-                  ))}
-                </div>
-              )}
-              {rejectedPayments.length > 0 && (
-                <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-rose-300 font-bold flex items-center gap-1">
-                      <Icon name="x" className="w-3.5 h-3.5" />
-                      Rechazados ({rejectedPayments.length})
-                    </span>
+                    {pendingPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                        <span className="text-slate-400">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                        <span className="font-bold text-amber-300">
+                          {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                  {rejectedPayments.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
-                      <span className="text-slate-500">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
-                      <span className="font-bold text-rose-300">
-                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
-                        {p.note && <span className="block text-[10px] text-slate-500">Nota: {p.note}</span>}
+                )}
+                {rejectedPayments.length > 0 && (
+                  <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-rose-300 font-bold flex items-center gap-1">
+                        <Icon name="x" className="w-3.5 h-3.5" />
+                        Rechazados ({rejectedPayments.length})
                       </span>
                     </div>
-                  ))}
-                </div>
-              )}
+                    {rejectedPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                        <span className="text-slate-500">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                        <span className="font-bold text-rose-300">
+                          {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
+                          {p.note && <span className="block text-[10px] text-slate-500">Nota: {p.note}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Pie */}
         <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
@@ -10398,13 +10781,14 @@ function DebtDetailModal({
           </div>
         </div>
       </div>
+      </div>
     </div>
   );
 }
 
 // Modal que el cliente ve en "Mi Cuenta": desglose de su deuda con conversión
 // a bolívares según la tasa del día.
-function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = 'deuda' }) {
+function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = 'deuda', headerHeight = 0 }) {
   const key = normalizePhoneDigits(customer.phone);
   const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
@@ -10413,7 +10797,8 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
   // pasar un pedido a entregado o al saldar la deuda). balance < 0 = saldo a favor.
   const balance = Number(customer.balance) || 0;
   const hasWallet = balance < 0;
-  const walletAmount = Math.abs(balance);
+  // Solo hay saldo "disponible" cuando el cliente tiene saldo a favor (balance < 0).
+  const walletAmount = hasWallet ? Math.abs(balance) : 0;
   const debtTotal = hasWallet ? 0 : balance;
   // 'saldo' = solo muestra el saldo disponible y el historial de abonos/descuentos.
   // 'deuda' = muestra el desglose de la deuda y permite abonar.
@@ -10427,7 +10812,6 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
   const [proof, setProof] = useState(null);
   const [sending, setSending] = useState(false);
   const [payments, setPayments] = useState([]);
-  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -10435,14 +10819,49 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
       .listPayments(key)
       .then((res) => {
         if (active && res.ok && Array.isArray(res.data)) setPayments(res.data);
-      })
-      .finally(() => {
-        if (active) setPaymentsLoaded(true);
       });
     return () => {
       active = false;
     };
   }, [key]);
+
+  // Estado de cuenta (extracto mensual): un pedido a crédito deja saldo negativo
+  // (deuda, rojo) y un abono aprobado deja saldo positivo (a favor, verde). El
+  // saldo inicial del mes es el punto de partida del desglose.
+  const approvedPayments = (payments || []).filter((p) => p.status === 'aprobado');
+  const nowD = new Date();
+  const monthStart = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+  const rawMovements = [
+    ...debtOrders.map((o) => ({
+      id: `ORD-${o.id}`,
+      kind: 'deuda',
+      date: new Date(o.createdAt || o.timestamp || 0),
+      label: `Pedido ${o.id}`,
+      detail: Array.isArray(o.items) ? o.items.map((it) => `${it.quantity}x ${it.name}`).join(', ') : '',
+      amount: -(Number(o.total) || 0)
+    })),
+    ...approvedPayments.map((p) => ({
+      id: `PAG-${p.id}`,
+      kind: 'abono',
+      date: new Date(p.decidedAt || p.createdAt || 0),
+      label: `Abono ${p.id}`,
+      detail: p.reference ? `Ref: ${p.reference}` : `Bs ${formatBs(Number(p.amountBs))}`,
+      amount: Number(p.amountUsd) || 0
+    }))
+  ];
+  // Saldo actual en convención de extracto: deuda = negativo, saldo a favor = positivo.
+  const currentSaldo = -balance;
+  const monthMovements = rawMovements
+    .filter((m) => m.date >= monthStart)
+    .sort((a, b) => a.date - b.date || a.label.localeCompare(b.label));
+  const sumMonth = monthMovements.reduce((acc, m) => acc + m.amount, 0);
+  const saldoInicialMes = currentSaldo - sumMonth;
+  let customerRunning = saldoInicialMes;
+  const customerTimeline = monthMovements.map((m) => {
+    customerRunning += m.amount;
+    return { ...m, balance: customerRunning };
+  });
+  const monthName = monthStart.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
 
   const handleAbono = async (e) => {
     e.preventDefault();
@@ -10483,16 +10902,14 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
     }
   };
 
-  const STATUS_LABEL = {
-    pendiente: { text: 'En revisión', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/25' },
-    aprobado: { text: 'Aprobado', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25' },
-    rechazado: { text: 'Rechazado', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/25' }
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10502,7 +10919,13 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
             <p className="text-xs text-slate-400 mt-0.5">
               {customer.customerName || customer.phone} ·{' '}
               {isSaldoView ? (
-                <span className="text-emerald-400 font-bold">Saldo disponible {formatUsd(walletAmount)}</span>
+                walletAmount > 0 ? (
+                  <span className="text-emerald-400 font-bold">Saldo disponible {formatUsd(walletAmount)}</span>
+                ) : balance > 0 ? (
+                  <span className="text-rose-400 font-bold">Saldo pendiente por pagar {formatUsd(balance)}</span>
+                ) : (
+                  <span className="text-slate-400 font-bold">Sin saldo a favor</span>
+                )
               ) : hasWallet ? (
                 <span className="text-emerald-400 font-bold">Saldo a favor {formatUsd(walletAmount)}</span>
               ) : (
@@ -10510,7 +10933,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
               )}
               {rate?.rate > 0 && (
                 <span className="block text-[10px] text-slate-500">
-                  {formatBs(usdToBs(isSaldoView || hasWallet ? walletAmount : debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}
+                  {formatBs(usdToBs(isSaldoView ? (walletAmount > 0 ? walletAmount : balance) : hasWallet ? walletAmount : debtTotal, rate.rate))} a Bs {Number(rate.rate).toFixed(2)}
                 </span>
               )}
             </p>
@@ -10520,7 +10943,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {isSaldoView ? (
             <div className="space-y-3">
               {walletAmount > 0 ? (
@@ -10537,14 +10960,26 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                     Al pagar tu próximo pedido elige <b>Mi Cartera</b> como método de pago para usarlo.
                   </p>
                 </div>
+              ) : balance > 0 ? (
+                <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-rose-300">
+                  <span className="text-[11px] uppercase tracking-wider text-rose-400/80 font-semibold">Saldo pendiente por pagar</span>
+                  <div className="flex items-end justify-between mt-1">
+                    <span className="text-3xl font-black text-rose-400">{formatUsd(balance)}</span>
+                    {rate?.rate > 0 && (
+                      <span className="text-[10px] text-rose-400/70">{formatBs(usdToBs(balance, rate.rate))}</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-rose-200/80 mt-2 flex items-start gap-1.5">
+                    <Icon name="alertTriangle" className="w-4 h-4 mt-0.5 shrink-0" />
+                    Tienes pedidos a cuenta por pagar. Puedes abonar desde <b>Mi deuda</b> para descontar este saldo.
+                  </p>
+                </div>
               ) : (
                 <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700">
                   <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Saldo disponible</span>
                   <div className="text-3xl font-black text-slate-500 mt-1">{formatUsd(0)}</div>
                   <p className="text-xs text-slate-400 mt-2">
-                    {balance > 0
-                      ? 'Aún no tienes saldo a favor. Tus abonos primero descuentan la deuda; el excedente queda disponible.'
-                      : 'Sin saldo a favor por el momento.'}
+                    Sin saldo a favor por el momento.
                   </p>
                 </div>
               )}
@@ -10707,6 +11142,72 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
             </div>
           )}
 
+          {/* Estado de cuenta del mes: saldo inicial en el header, fecha y hora de
+              cada movimiento, y saldo final diferenciado (negativo = rojo, positivo = verde) */}
+          {customerTimeline.length > 0 && (
+            <div className="space-y-2">
+              <div className="rounded-2xl bg-slate-950 border border-slate-800 px-4 py-3 flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Saldo inicial · {monthName}</p>
+                  <p className={`text-lg font-black ${saldoInicialMes < 0 ? 'text-red-400' : saldoInicialMes > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    {formatUsd(saldoInicialMes)}
+                  </p>
+                </div>
+                <span className="text-[10px] text-slate-500 text-right">
+                  Estado de cuenta
+                  <br />
+                  {customerTimeline.length} movimientos
+                </span>
+              </div>
+              <div className="space-y-0">
+                {customerTimeline.map((m, idx) => (
+                  <div key={m.id} className="relative flex gap-3 pb-3">
+                    {idx < customerTimeline.length - 1 && (
+                      <span className="absolute left-[7px] top-4 bottom-0 w-px bg-slate-700/60" />
+                    )}
+                    <div className="flex flex-col items-center shrink-0">
+                      <span
+                        className={`w-[15px] h-[15px] rounded-full border-2 flex items-center justify-center ${
+                          m.kind === 'deuda'
+                            ? 'bg-red-500/20 border-red-500/60'
+                            : 'bg-emerald-500/20 border-emerald-500/60'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${m.kind === 'deuda' ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0 bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-slate-200 capitalize">
+                          {m.date.getTime() ? m.date.toLocaleDateString('es-VE', { weekday: 'short', day: 'numeric', month: 'short' }) : 'Sin fecha'}
+                        </span>
+                        <span className="font-mono text-[10px] text-slate-500">
+                          {m.date.getTime() ? m.date.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <p className="text-xs font-bold text-slate-200 truncate">{m.label}</p>
+                        <span className={`font-mono font-bold shrink-0 ${m.kind === 'deuda' ? 'text-red-400' : 'text-emerald-300'}`}>
+                          {m.kind === 'deuda' ? '−' : '+'}{formatUsd(Math.abs(m.amount))}
+                        </span>
+                      </div>
+                      {m.detail && <p className="text-[10px] text-slate-500 truncate">{m.detail}</p>}
+                      <p className={`text-[10px] font-bold mt-1.5 ${m.balance < 0 ? 'text-red-300' : m.balance > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                        Saldo: {formatUsd(m.balance)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between px-1 pt-2 border-t border-slate-800">
+                <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Saldo del mes</span>
+                <span className={`text-lg font-black ${currentSaldo < 0 ? 'text-red-400' : currentSaldo > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  {formatUsd(currentSaldo)}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Formulario de abono / depósito a cartera */}
           {!isSaldoView && showAbono && (
             <form onSubmit={handleAbono} className="space-y-2.5 rounded-2xl bg-slate-950 border border-slate-700 p-4 animate-fade-in">
@@ -10809,47 +11310,30 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
             </form>
           )}
 
-          {/* Historial de abonos */}
-          {payments.length > 0 && (
-            <div className="space-y-2">
-              <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                Historial de abonos y descuentos ({payments.length})
-              </span>
-              {payments.map((p) => (
-                <div key={p.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-mono text-cyan-400">{p.id}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${(STATUS_LABEL[p.status] || STATUS_LABEL.pendiente).cls}`}>
-                      {(STATUS_LABEL[p.status] || STATUS_LABEL.pendiente).text}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-xs text-slate-300">
-                    <span>{formatBs(Number(p.amountBs))}</span>
-                    <span className="font-bold text-white">≈ {formatUsd(Number(p.amountUsd))}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    {new Date(p.createdAt).toLocaleString('es-VE')}
-                    {p.reference ? ` · Ref ${p.reference}` : ''}
-                  </div>
-                  {p.status === 'rechazado' && p.note && (
-                    <p className="text-[10px] text-rose-300">{p.note}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0 space-y-2.5">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-slate-500">
-              {isSaldoView ? 'Saldo disponible' : hasWallet ? 'Saldo a favor' : 'Total deuda'}
+              {isSaldoView
+                ? walletAmount > 0
+                  ? 'Saldo disponible'
+                  : balance > 0
+                  ? 'Saldo pendiente por pagar'
+                  : 'Saldo disponible'
+                : hasWallet
+                ? 'Saldo a favor'
+                : 'Total deuda'}
             </span>
-            <span className={`text-base font-black ${isSaldoView || hasWallet ? 'text-emerald-400' : 'text-red-400'}`}>
-              {formatUsd(isSaldoView || hasWallet ? walletAmount : debtTotal)}
+            <span
+              className={`text-base font-black ${
+                isSaldoView ? (walletAmount > 0 ? 'text-emerald-400' : balance > 0 ? 'text-red-400' : 'text-slate-400') : hasWallet ? 'text-emerald-400' : 'text-red-400'
+              }`}
+            >
+              {formatUsd(isSaldoView ? (walletAmount > 0 ? walletAmount : balance) : hasWallet ? walletAmount : debtTotal)}
               {rate?.rate > 0 && (
                 <span className="block text-[10px] font-bold text-slate-400 text-right">
-                  {formatBs(usdToBs(isSaldoView || hasWallet ? walletAmount : debtTotal, rate.rate))}
+                  {formatBs(usdToBs(isSaldoView ? (walletAmount > 0 ? walletAmount : balance) : hasWallet ? walletAmount : debtTotal, rate.rate))}
                 </span>
               )}
             </span>
@@ -10870,6 +11354,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
             Entendido
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -11270,7 +11755,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre del Producto *</label>
             <input
@@ -11800,9 +12285,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
             <h3 className="text-base sm:text-lg font-black text-white">
               Detalle del Pedido <span className="text-teal-400">#{order.id}</span>
             </h3>
-            <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${style.badge}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-              {STATUS_LABELS[order.status] || 'Pendiente'}
+            <span className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${needsPaymentValidation(order) ? 'border-amber-400/40 bg-amber-500/15 text-amber-300' : style.badge}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${needsPaymentValidation(order) ? 'bg-amber-400' : style.dot}`} />
+              {needsPaymentValidation(order) ? 'Pago en revisión' : STATUS_LABELS[order.status] || 'Pendiente'}
             </span>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
@@ -11811,6 +12296,12 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
         </div>
 
         <div className="p-5 sm:p-6 space-y-4">
+          {needsPaymentValidation(order) && (
+            <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
+              <Icon name="clock" className="w-4 h-4 shrink-0" />
+              Esperando validación del pago. El pedido avanzará al confirmarse el pago.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="bg-slate-800/60 rounded-xl p-3">
               <span className="text-slate-500 block text-[10px] font-semibold uppercase tracking-wider">Cliente</span>
@@ -12130,7 +12621,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
 
 // Dashboard personal "Mi Kiosko": resumen del cliente con gasto, pedidos,
 // productos favoritos, rachas y próximos pedidos activos.
-function MyKioskoModal({ customer, customerName, orders, products, rate, onClose, onRepeatLastOrder }) {
+function MyKioskoModal({ customer, customerName, orders, products, rate, onClose, onRepeatLastOrder, headerHeight = 0 }) {
   const customerOrders = useMemo(() => {
     if (!customer?.phone) return [];
     const key = normalizePhoneDigits(customer.phone);
@@ -12168,15 +12659,19 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
   const balance = Number(customer?.balance) || 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
-        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
-          <div>
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Icon name="zap" className="w-5 h-5 text-teal-400" />
-              Mi historial
-            </h3>
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+          <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Icon name="zap" className="w-5 h-5 text-teal-400" />
+                Mi historial
+              </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Hola {customerName?.split(' ')[0] || 'cliente'} · Tu resumen del mes
             </p>
@@ -12186,7 +12681,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Métricas principales */}
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">
@@ -12267,6 +12762,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
             </Btn>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

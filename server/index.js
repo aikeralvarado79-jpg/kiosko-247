@@ -386,13 +386,13 @@ app.post('/api/customers/blacklist', requireAdmin, async (req, res) => {
 // crea un pedido a crédito entregado y lo suma al balance del deudor.
 app.post('/api/customers/blacklist/debt', requireAdmin, async (req, res) => {
   try {
-    const { phone, name, items } = req.body || {};
+    const { phone, name, items, description } = req.body || {};
     const key = String(phone || '').replace(/\D/g, '').slice(-11);
     if (!key || key.length < 7) return res.status(400).json({ error: 'Número de teléfono inválido' });
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Selecciona al menos un producto' });
     }
-    const order = await store.addDebtToCustomer({ phone: key, customerName: name, items });
+    const order = await store.addDebtToCustomer({ phone: key, customerName: name, items, notes: description });
     if (!order) return res.status(400).json({ error: 'No se pudo registrar la deuda' });
     if (name) await store.upsertCustomer({ phone: key, customerName: name });
     res.json({ order, customer: await store.getCustomerByPhone(key), state: await store.getPublicState() });

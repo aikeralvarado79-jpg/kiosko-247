@@ -4406,7 +4406,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
 
         <div
           key={`body-${product.id}`}
-          className={`p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+          className={`p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         >
           <div>
             <div className="flex items-center justify-between gap-2">
@@ -5998,7 +5998,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
           </button>
         </div>
 
-        <div className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1 min-h-0">
           <div className="relative">
             <input
               type="text"
@@ -6469,7 +6469,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1 min-h-0">
           {/* Order Method Selector */}
           <div className="grid grid-cols-2 gap-2 sm:gap-3 p-1 sm:p-1.5 rounded-2xl bg-slate-800 border border-slate-700">
             <button
@@ -10668,82 +10668,82 @@ function DebtDetailModal({
               </div>
             </div>
           )}
-        </div>
 
-        {/* Historial de pagos y depósitos de este cliente (agrupado) */}
-        {(approvedPayments.length > 0 || pendingPayments.length > 0 || rejectedPayments.length > 0) && (
-          <div className="p-4 sm:p-6 border-t border-slate-800 space-y-4">
-            <div className="flex items-center gap-2">
-              <Icon name="wallet" className="w-4 h-4 text-teal-400" />
-              <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                Historial de pagos ({clientPayments.length})
-              </span>
+          {/* Historial de pagos y depósitos de este cliente (agrupado) */}
+          {(approvedPayments.length > 0 || pendingPayments.length > 0 || rejectedPayments.length > 0) && (
+            <div className="border-t border-slate-800 pt-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <Icon name="wallet" className="w-4 h-4 text-teal-400" />
+                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                  Historial de pagos ({clientPayments.length})
+                </span>
+              </div>
+              <div className="grid gap-3">
+                {approvedPayments.length > 0 && (
+                  <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-emerald-300 font-bold flex items-center gap-1">
+                        <Icon name="check" className="w-3.5 h-3.5" />
+                        Abonos aprobados ({approvedPayments.length})
+                      </span>
+                      <span className="text-emerald-300 font-black">
+                        {formatUsd(approvedPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
+                      </span>
+                    </div>
+                    {approvedPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                        <span className="text-slate-300">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                        <span className="font-bold text-teal-300">
+                          {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {pendingPayments.length > 0 && (
+                  <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-amber-300 font-bold flex items-center gap-1">
+                        <Icon name="clock" className="w-3.5 h-3.5" />
+                        Por verificar ({pendingPayments.length})
+                      </span>
+                      <span className="text-amber-300 font-black">
+                        {formatUsd(pendingPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
+                      </span>
+                    </div>
+                    {pendingPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                        <span className="text-slate-400">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                        <span className="font-bold text-amber-300">
+                          {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {rejectedPayments.length > 0 && (
+                  <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-rose-300 font-bold flex items-center gap-1">
+                        <Icon name="x" className="w-3.5 h-3.5" />
+                        Rechazados ({rejectedPayments.length})
+                      </span>
+                    </div>
+                    {rejectedPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
+                        <span className="text-slate-500">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
+                        <span className="font-bold text-rose-300">
+                          {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
+                          {p.note && <span className="block text-[10px] text-slate-500">Nota: {p.note}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="grid gap-3">
-              {approvedPayments.length > 0 && (
-                <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-emerald-300 font-bold flex items-center gap-1">
-                      <Icon name="check" className="w-3.5 h-3.5" />
-                      Abonos aprobados ({approvedPayments.length})
-                    </span>
-                    <span className="text-emerald-300 font-black">
-                      {formatUsd(approvedPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
-                    </span>
-                  </div>
-                  {approvedPayments.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
-                      <span className="text-slate-300">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
-                      <span className="font-bold text-teal-300">
-                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {pendingPayments.length > 0 && (
-                <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-amber-300 font-bold flex items-center gap-1">
-                      <Icon name="clock" className="w-3.5 h-3.5" />
-                      Por verificar ({pendingPayments.length})
-                    </span>
-                    <span className="text-amber-300 font-black">
-                      {formatUsd(pendingPayments.reduce((s, p) => s + Number(p.amountUsd || 0), 0))}
-                    </span>
-                  </div>
-                  {pendingPayments.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
-                      <span className="text-slate-400">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
-                      <span className="font-bold text-amber-300">
-                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {rejectedPayments.length > 0 && (
-                <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-rose-300 font-bold flex items-center gap-1">
-                      <Icon name="x" className="w-3.5 h-3.5" />
-                      Rechazados ({rejectedPayments.length})
-                    </span>
-                  </div>
-                  {rejectedPayments.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1">
-                      <span className="text-slate-500">{new Date(p.createdAt).toLocaleDateString('es-VE')}</span>
-                      <span className="font-bold text-rose-300">
-                        {formatUsd(p.amountUsd)} ({formatBs(Number(p.amountBs))})
-                        {p.note && <span className="block text-[10px] text-slate-500">Nota: {p.note}</span>}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Pie */}
         <div className="p-4 sm:p-6 border-t border-slate-800 shrink-0">
@@ -11739,7 +11739,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre del Producto *</label>
             <input

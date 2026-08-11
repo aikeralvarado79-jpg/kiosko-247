@@ -2124,7 +2124,14 @@ export default function App() {
               <span className={`shrink-0 p-2 rounded-xl bg-slate-950/40 border border-white/10 ${meta.text}`}>
                 <Icon name={meta.icon} className="w-5 h-5" />
               </span>
-              <p className="flex-1 text-slate-100 leading-snug">{toast.message}</p>
+              <p className="flex-1 text-slate-100 leading-snug pr-2">{toast.message}</p>
+              <button
+                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                aria-label="Cerrar notificación"
+                className={`shrink-0 p-1.5 rounded-lg bg-slate-950/40 border border-white/10 ${meta.text} hover:bg-slate-950/70 transition-colors`}
+              >
+                <Icon name="x" className="w-4 h-4" />
+              </button>
               <span className={`absolute bottom-0 left-0 h-0.5 ${meta.bar} animate-toast-progress`} />
             </div>
           );
@@ -5461,7 +5468,7 @@ function BottomTabBar({
   isAdminAuthed
 }) {
   const base =
-    'flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 flex-1 min-w-0 rounded-2xl transition-all duration-300 active:scale-95';
+    'flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 flex-[1_0_auto] min-w-[64px] max-w-[104px] rounded-2xl transition-all duration-300 active:scale-95';
   const activeTab =
     'bg-teal-500/20 text-teal-300 border border-teal-500/30 shadow-lg shadow-teal-500/10';
   const idleTab = 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 border border-transparent';
@@ -5534,7 +5541,7 @@ function BottomTabBar({
   return (
     <nav
       style={{ paddingBottom: 'max(0.4rem, env(safe-area-inset-bottom))' }}
-      className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 flex items-stretch gap-1 px-2 pt-2 pb-1 animate-screen-up"
+      className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 flex items-stretch gap-1 px-2 pt-2 pb-1 overflow-x-auto scrollbar-none animate-screen-up"
       aria-label="Navegación principal"
     >
       {tabs.map((t) => (
@@ -9566,7 +9573,7 @@ function AdminView({
                   <Icon name="x" className="w-4 h-4" />
                 </button>
               </div>
-              <div className="p-4 sm:p-5 overflow-y-auto">
+              <div className="p-4 sm:p-5 overflow-y-auto flex-1 min-h-0">
                 <OrderStepsTimeline order={fichaOrder} />
                 <div className="mt-4">
                   {renderOrderCard(fichaOrder, { inFicha: true })}
@@ -10109,7 +10116,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, h
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Cliente */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
@@ -10327,7 +10334,7 @@ function AddDebtAmountModal({ customers, rate, onClose, onConfirm, headerHeight 
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">Deudor (cliente registrado)</label>
@@ -10538,7 +10545,7 @@ function DebtDetailModal({
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Acciones principales */}
           <div className="grid grid-cols-2 gap-2">
             <a

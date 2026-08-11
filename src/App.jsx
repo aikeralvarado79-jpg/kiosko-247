@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
 import L from 'leaflet';
@@ -9929,112 +9930,127 @@ function BlacklistAdminView({
       )}
 
       {/* Modal de detalle de deuda */}
-      {selectedDebtor && (
-        <DebtDetailModal
-          customer={selectedDebtor}
-          orders={orders}
-          rate={rate}
-          onClose={() => setSelectedDebtor(null)}
-          onClearDebt={handleClearDebt}
-          collections={collections}
-          onUpsertCollection={onUpsertCollection}
-          onDeleteCollection={onDeleteCollection}
-          headerHeight={headerHeight}
-          payments={payments}
-        />
-      )}
+      {selectedDebtor &&
+        createPortal(
+          <DebtDetailModal
+            customer={selectedDebtor}
+            orders={orders}
+            rate={rate}
+            onClose={() => setSelectedDebtor(null)}
+            onClearDebt={handleClearDebt}
+            collections={collections}
+            onUpsertCollection={onUpsertCollection}
+            onDeleteCollection={onDeleteCollection}
+            headerHeight={headerHeight}
+            payments={payments}
+          />,
+          document.body
+        )}
 
       {/* Modal para añadir productos a la deuda de un cliente */}
-      {isAddProductsOpen && (
-        <AddDebtProductsModal
-          products={products}
-          rate={rate}
-          customers={customers}
-          onClose={() => setIsAddProductsOpen(false)}
-          onConfirm={handleAddDebt}
-          headerHeight={headerHeight}
-        />
-      )}
+      {isAddProductsOpen &&
+        createPortal(
+          <AddDebtProductsModal
+            products={products}
+            rate={rate}
+            customers={customers}
+            onClose={() => setIsAddProductsOpen(false)}
+            onConfirm={handleAddDebt}
+            headerHeight={headerHeight}
+          />,
+          document.body
+        )}
 
       {/* Modal de elección de registro (productos o monto) */}
-      {isRegisterOpen && (
-        <div
-          className="fixed inset-x-0 bottom-0 z-[70] overflow-y-auto animate-fade-in"
-          style={{ top: headerHeight }}
-        >
-          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsRegisterOpen(false)} />
-          <div className="relative min-h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-            <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up p-5 sm:p-6 space-y-3">
-            <div>
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Icon name="plus" className="w-5 h-5 text-amber-400" />
-                Registrar deuda
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Elige cómo quieres cargar la deuda del cliente.
-              </p>
+      {isRegisterOpen &&
+        createPortal(
+          <div
+            className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+            style={{ top: headerHeight }}
+          >
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsRegisterOpen(false)} />
+            <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+              <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-full flex flex-col">
+                <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+                  <div>
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Icon name="plus" className="w-5 h-5 text-amber-400" />
+                      Registrar deuda
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Elige cómo quieres cargar la deuda del cliente.
+                    </p>
+                  </div>
+                  <button onClick={() => setIsRegisterOpen(false)} className="p-2 text-slate-400 hover:text-white rounded-xl">
+                    <Icon name="x" className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-4 sm:p-6 space-y-3 overflow-y-auto flex-1 min-h-0">
+                  <button
+                    onClick={() => {
+                      setIsRegisterOpen(false);
+                      setIsAddProductsOpen(true);
+                    }}
+                    className="w-full p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-teal-500/50 text-left transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="p-2.5 rounded-xl bg-teal-500/15 text-teal-300 shrink-0">
+                        <Icon name="package" className="w-5 h-5" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-100">Añadir productos</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Elige productos del catálogo que el cliente debe (ventas presenciales o deudas viejas).
+                        </p>
+                      </div>
+                      <Icon name="chevronRight" className="w-4 h-4 text-slate-500 shrink-0" />
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsRegisterOpen(false);
+                      setIsAddAmountOpen(true);
+                    }}
+                    className="w-full p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-amber-500/50 text-left transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="p-2.5 rounded-xl bg-amber-500/15 text-amber-300 shrink-0">
+                        <Icon name="wallet" className="w-5 h-5" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-100">Registrar monto</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Carga una deuda directa en dólares con teléfono, nombre y motivo.
+                        </p>
+                      </div>
+                      <Icon name="chevronRight" className="w-4 h-4 text-slate-500 shrink-0" />
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setIsRegisterOpen(false)}
+                    className="w-full py-2.5 rounded-xl bg-slate-800 text-slate-300 text-sm font-bold hover:bg-slate-700 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
             </div>
-            <button
-              onClick={() => {
-                setIsRegisterOpen(false);
-                setIsAddProductsOpen(true);
-              }}
-              className="w-full p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-teal-500/50 text-left transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <span className="p-2.5 rounded-xl bg-teal-500/15 text-teal-300 shrink-0">
-                  <Icon name="package" className="w-5 h-5" />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-slate-100">Añadir productos</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Elige productos del catálogo que el cliente debe (ventas presenciales o deudas viejas).
-                  </p>
-                </div>
-                <Icon name="chevronRight" className="w-4 h-4 text-slate-500 shrink-0" />
-              </div>
-            </button>
-            <button
-              onClick={() => {
-                setIsRegisterOpen(false);
-                setIsAddAmountOpen(true);
-              }}
-              className="w-full p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-amber-500/50 text-left transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <span className="p-2.5 rounded-xl bg-amber-500/15 text-amber-300 shrink-0">
-                  <Icon name="wallet" className="w-5 h-5" />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-slate-100">Registrar monto</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Carga una deuda directa en dólares con teléfono, nombre y motivo.
-                  </p>
-                </div>
-                <Icon name="chevronRight" className="w-4 h-4 text-slate-500 shrink-0" />
-              </div>
-            </button>
-            <button
-              onClick={() => setIsRegisterOpen(false)}
-              className="w-full py-2.5 rounded-xl bg-slate-800 text-slate-300 text-sm font-bold hover:bg-slate-700 transition-all"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* Modal para registrar una deuda por monto directo (teléfono, nombre, monto, motivo) */}
-      {isAddAmountOpen && (
-        <AddDebtAmountModal
-          customers={customers}
-          rate={rate}
-          onClose={() => setIsAddAmountOpen(false)}
-          onConfirm={handleAddDebt}
-          headerHeight={headerHeight}
-        />
-      )}
+      {isAddAmountOpen &&
+        createPortal(
+          <AddDebtAmountModal
+            customers={customers}
+            rate={rate}
+            onClose={() => setIsAddAmountOpen(false)}
+            onConfirm={handleAddDebt}
+            headerHeight={headerHeight}
+          />,
+          document.body
+        )}
     </div>
   );
 }

@@ -73,6 +73,18 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
       barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
       star: <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />,
       wallet: <path d="M21 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2M21 12h-5a2 2 0 0 0 0 4h5a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1z" />,
+      type: <path d="M4 7V4h16v3M9 20h6M12 4v16" />,
+      contrast: <><circle cx="12" cy="12" r="9" /><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor" stroke="none" /></>,
+      scan: <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />,
+      cube: <path d="m21 16-9 5-9-5V8l9-5 9 5v8zM3 8l9 5 9-5M12 13v8" />,
+      chat: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+      headphones: <path d="M3 18v-6a9 9 0 0 1 18 0v6M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />,
+      gift: <path d="M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />,
+      camera: <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" />,
+      navigation: <path d="M3 11 22 2l-9 19-2-8-8-2z" />,
+      download: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />,
+      radio: <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4M16.2 7.8c2.3 2.3 2.3 6.1 0 8.4M19.1 4.9C23 8.8 23 15.2 19.1 19.1M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+      percent: <path d="M19 5 5 19M6.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17.5 20a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />,
     };
 
   return (
@@ -559,6 +571,58 @@ const loadFavorites = () => {
   }
 };
 
+// ------------------------------------------------------------------
+//  Modo Accesibilidad "Fácil de Ver": texto grande y alto contraste
+// ------------------------------------------------------------------
+const ACCESS_KEY = 'kiosko_accessibility';
+const ACCESS_TEXT_CLASS = 'accessible-text';
+const ACCESS_CONTRAST_CLASS = 'accessible-contrast';
+
+const loadAccessibility = () => {
+  try {
+    const raw = localStorage.getItem(ACCESS_KEY);
+    const p = raw ? JSON.parse(raw) : {};
+    return { text: Boolean(p.text), contrast: Boolean(p.contrast) };
+  } catch {
+    return { text: false, contrast: false };
+  }
+};
+
+const applyAccessibility = (acc) => {
+  try {
+    document.documentElement.classList.toggle(ACCESS_TEXT_CLASS, acc.text);
+    document.documentElement.classList.toggle(ACCESS_CONTRAST_CLASS, acc.contrast);
+  } catch {}
+};
+
+const saveAccessibility = (acc) => {
+  try {
+    localStorage.setItem(ACCESS_KEY, JSON.stringify(acc));
+  } catch {}
+};
+
+// ------------------------------------------------------------------
+//  Alertas de Precio de Preferidos: registra el último precio conocido
+//  de cada favorito y detecta cambios para notificar al cliente.
+// ------------------------------------------------------------------
+const PRICE_WATCH_KEY = 'kiosko_price_watch';
+
+const loadPriceWatch = () => {
+  try {
+    const raw = localStorage.getItem(PRICE_WATCH_KEY);
+    const p = raw ? JSON.parse(raw) : {};
+    return p && typeof p === 'object' ? p : {};
+  } catch {
+    return {};
+  }
+};
+
+const savePriceWatch = (watch) => {
+  try {
+    localStorage.setItem(PRICE_WATCH_KEY, JSON.stringify(watch));
+  } catch {}
+};
+
 const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'en_camino', 'entregado'];
 
 const STATUS_LABELS = {
@@ -728,6 +792,51 @@ export default function App() {
   }, [theme]);
 
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+
+  // Modo Accesibilidad "Fácil de Ver": texto grande + alto contraste
+  const [accessibility, setAccessibility] = useState(loadAccessibility);
+
+  useEffect(() => {
+    applyAccessibility(accessibility);
+    saveAccessibility(accessibility);
+  }, [accessibility]);
+
+  const toggleAccessibility = (key) => {
+    setAccessibility((a) => ({ ...a, [key]: !a[key] }));
+  };
+
+  // Alertas de precio de preferidos: vigila el precio de los favoritos y
+  // notifica al cliente cuando cambia (sube o baja) entre cargas de estado.
+  const [priceWatch, setPriceWatch] = useState(loadPriceWatch);
+
+  useEffect(() => {
+    if (products.length === 0 || favorites.length === 0) return undefined;
+    const next = { ...priceWatch };
+    let changed = false;
+    favorites.forEach((id) => {
+      const p = products.find((x) => x.id === id);
+      if (!p) return;
+      const prev = next[id];
+      const cur = Number(p.price);
+      if (prev == null) {
+        next[id] = cur;
+        changed = true;
+      } else if (prev !== cur) {
+        if (cur < prev) {
+          addToast(`${p.name} bajó a ${formatUsd(cur)} 🎉`, 'success');
+        } else if (cur > prev) {
+          addToast(`${p.name} subió a ${formatUsd(cur)}`, 'warning');
+        }
+        next[id] = cur;
+        changed = true;
+      }
+    });
+    if (changed) {
+      setPriceWatch(next);
+      savePriceWatch(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, favorites]);
 
   // Alto del header sticky: se pasa a la tienda para anclar el buscador justo debajo
   const headerRef = useRef(null);
@@ -1035,6 +1144,9 @@ export default function App() {
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
   const [voiceItems, setVoiceItems] = useState([]);
   const [voiceLoading, setVoiceLoading] = useState(false);
+
+  // Asistente IA "Don Aiker"
+  const [isAikerOpen, setIsAikerOpen] = useState(false);
 
   // Carrito compartido (dueño e invitado)
   const [myShare, setMyShare] = useState(() => {
@@ -2201,6 +2313,32 @@ export default function App() {
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="w-5 h-5" />
           </button>
 
+          {/* Modo Accesibilidad "Fácil de Ver" */}
+          <button
+            onClick={() => toggleAccessibility('text')}
+            className={`p-2 sm:p-2.5 rounded-2xl border shrink-0 transition-all ${
+              accessibility.text
+                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                : 'bg-slate-800/90 border-slate-700/80 text-slate-200 hover:border-amber-500/50 hover:text-amber-400'
+            }`}
+            aria-label="Alternar letra grande (modo fácil de ver)"
+            title={accessibility.text ? 'Letra grande activada' : 'Activar letra grande'}
+          >
+            <Icon name="type" className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => toggleAccessibility('contrast')}
+            className={`hidden sm:flex p-2 sm:p-2.5 rounded-2xl border shrink-0 transition-all ${
+              accessibility.contrast
+                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                : 'bg-slate-800/90 border-slate-700/80 text-slate-200 hover:border-amber-500/50 hover:text-amber-400'
+            }`}
+            aria-label="Alternar alto contraste"
+            title={accessibility.contrast ? 'Alto contraste activado' : 'Activar alto contraste'}
+          >
+            <Icon name="contrast" className="w-5 h-5" />
+          </button>
+
           {/* Customer identity chip */}
           {activeView === 'customer' && savedCustomer?.customerName && (
             <button
@@ -2674,6 +2812,36 @@ export default function App() {
 
       {/* Tour tutorial para usuarios nuevos */}
       {showTour && <NewUserTour onClose={() => setShowTour(false)} />}
+
+      {/* Botón flotante del Asistente IA "Don Aiker" */}
+      {activeView === 'customer' && (
+        <button
+          onClick={() => setIsAikerOpen(true)}
+          className={`fixed right-3 sm:right-5 z-[55] p-3 sm:p-3.5 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white shadow-2xl shadow-indigo-500/40 border border-white/20 hover:scale-110 hover:shadow-indigo-500/60 active:scale-95 transition-all animate-glow-pulse ${
+            cartCount > 0
+              ? 'bottom-[10.5rem] sm:bottom-20'
+              : 'bottom-[4.8rem] sm:bottom-5'
+          }`}
+          aria-label="Abrir Asistente IA Don Aiker"
+          title="Asistente IA Don Aiker"
+        >
+          <Icon name="chat" className="w-5 h-5 sm:w-6 sm:h-6" />
+        </button>
+      )}
+
+      {/* Asistente IA "Don Aiker" */}
+      {isAikerOpen && (
+        <AikerAssistant
+          customer={customerProfile}
+          customerOrders={customerOrders}
+          products={products}
+          promos={promos}
+          rate={rate}
+          savedCustomer={savedCustomer}
+          headerHeight={headerHeight}
+          onClose={() => setIsAikerOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -3478,6 +3646,40 @@ function CustomerView({
     );
   }, [customerOrders, allProducts, savedCustomer?.customerName]);
 
+  // Radar de Ofertas "Novedades": combina productos nuevos, por agotarse
+  // y los más pedidos por este cliente, sin repetir, en orden de prioridad.
+  const radarProducts = useMemo(() => {
+    if (!Array.isArray(allProducts) || allProducts.length === 0) return [];
+    const freq = {};
+    (customerOrders || []).forEach((o) =>
+      (o.items || []).forEach((it) => {
+        freq[it.id] = (freq[it.id] || 0) + (Number(it.quantity) || 0);
+      })
+    );
+    const seen = new Set();
+    const list = [];
+    const push = (p, tag) => {
+      if (!p || seen.has(p.id)) return;
+      seen.add(p.id);
+      list.push({ product: p, tag });
+    };
+    (allProducts || [])
+      .filter(isNewProduct)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .forEach((p) => push(p, 'Nuevo'));
+    (allProducts || [])
+      .filter((p) => p.runOutDays != null && p.runOutDays > 0 && p.runOutDays <= 3)
+      .sort((a, b) => a.runOutDays - b.runOutDays)
+      .forEach((p) => push(p, 'Se agota'));
+    Object.entries(freq)
+      .map(([id, qty]) => ({ p: (allProducts || []).find((x) => x.id === id), qty }))
+      .filter((x) => x.p)
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 6)
+      .forEach((x) => push(x.p, 'Frecuente'));
+    return list.slice(0, 12);
+  }, [allProducts, customerOrders]);
+
   // La barra inferior (móvil) pide expandir y scrollear a Mis Pedidos o Mi Cuenta
   useEffect(() => {
     if (!focusSection) return;
@@ -3622,6 +3824,73 @@ function CustomerView({
             <span className="hidden min-[360px]:inline">Agregar</span>
           </Btn>
         </div>
+      )}
+
+      {/* Radar de Ofertas "Novedades": nuevos, por agotar y frecuentes */}
+      {radarProducts.length > 0 && (
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                <Icon name="radio" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-white">Radar de Novedades</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400">Lo que se mueve hoy en la tienda</p>
+              </div>
+            </div>
+            <span className="px-2 py-1 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase tracking-wider border border-amber-500/20 animate-pulse">
+              en vivo
+            </span>
+          </div>
+
+          <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+            {radarProducts.map(({ product, tag }) => (
+              <article
+                key={product.id}
+                className="snap-start shrink-0 w-40 sm:w-44 rounded-2xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-amber-500/50 hover:-translate-y-0.5 transition-all"
+              >
+                <div className="relative">
+                  <img
+                    src={product.image}
+                    alt={product.name}
+                    loading="lazy"
+                    className="w-full h-24 sm:h-28 object-cover bg-slate-900"
+                  />
+                  <span
+                    className={`absolute top-2 left-2 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
+                      tag === 'Nuevo'
+                        ? 'bg-teal-500/90 text-slate-950 border-teal-400'
+                        : tag === 'Se agota'
+                          ? 'bg-rose-500/90 text-white border-rose-400'
+                          : 'bg-indigo-500/90 text-white border-indigo-400'
+                    }`}
+                  >
+                    {tag}
+                  </span>
+                </div>
+                <div className="p-2.5 flex flex-col gap-1.5 flex-1">
+                  <h4 className="text-xs font-bold text-white truncate">{product.name}</h4>
+                  <p className="text-[11px] text-slate-400 line-clamp-1">
+                    {formatSize(product) || product.category || 'Artículo'}
+                  </p>
+                  <div className="mt-auto flex items-center justify-between gap-1">
+                    <span className="text-xs sm:text-sm font-extrabold text-teal-400">
+                      {formatUsd(product.price)}
+                    </span>
+                    <button
+                      onClick={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
+                      className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 border border-teal-500/40 hover:bg-teal-500 hover:text-slate-950 transition-all active:scale-90"
+                      aria-label={`Agregar ${product.name}`}
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Mi Cuenta: saldo pendiente del cliente reconocido */}
@@ -4126,6 +4395,23 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   const runOutSoon = !isOut && product.runOutDays != null && product.runOutDays > 0 && product.runOutDays <= 2;
   const [justAdded, setJustAdded] = useState(false);
 
+  // Vitrina 3D: efecto de inclinación (tilt) al pasar/arrastrar sobre la tarjeta.
+  const cardRef = useRef(null);
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const handleTilt = (e) => {
+    if (reducedMotion || !cardRef.current) return;
+    const rect = cardRef.current.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width - 0.5;
+    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    setTilt({ rx: -py * 10, ry: px * 12 });
+  };
+  const resetTilt = () => {
+    if (reducedMotion) return;
+    setTilt({ rx: 0, ry: 0 });
+  };
+
   const handleAdd = (e) => {
     setJustAdded(true);
     setTimeout(() => setJustAdded(false), 1200);
@@ -4133,7 +4419,18 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   };
 
   return (
-    <div className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl overflow-hidden hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm">
+    <div
+      ref={cardRef}
+      onMouseMove={handleTilt}
+      onMouseLeave={resetTilt}
+      style={{
+        transform: reducedMotion
+          ? undefined
+          : `perspective(900px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) translateZ(0)`,
+        transition: 'transform 180ms ease-out, box-shadow 300ms, border-color 300ms, translate 300ms'
+      }}
+      className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl overflow-hidden hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm tilt-3d"
+    >
       <div onClick={onOpenDetail} className="cursor-pointer relative overflow-hidden aspect-square sm:aspect-[4/3] bg-slate-900">
         <img
           src={product.image}
@@ -4246,9 +4543,152 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   );
 }
 
+// KAPSULA AR: overlay a pantalla completa con la cámara del dispositivo y un HUD
+// flotante del producto (imagen, precio, stock, categoría). Usa getUserMedia
+// cuando hay permiso; si no, muestra un fondo AR simulado con el producto.
+function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
+  const videoRef = useRef(null);
+  const [camOk, setCamOk] = useState(false);
+  const [camError, setCamError] = useState(false);
+  const [qty, setQty] = useState(1);
+  const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
+  const isOut = avail <= 0;
+
+  useEffect(() => {
+    let stream = null;
+    let alive = true;
+    const start = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        if (alive) setCamError(true);
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        if (!alive) return;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setCamOk(true);
+      } catch {
+        if (alive) setCamError(true);
+      }
+    };
+    start();
+    return () => {
+      alive = false;
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-black flex flex-col animate-fade-in">
+      {/* Cámara (o fondo AR simulado si no hay permiso) */}
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        {camOk ? (
+          <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" muted playsInline />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-fuchsia-950 via-slate-950 to-indigo-950">
+            <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'radial-gradient(circle at 20% 30%, rgba(217,70,239,0.35), transparent 40%), radial-gradient(circle at 80% 70%, rgba(99,102,241,0.35), transparent 45%)' }} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-[11px] text-fuchsia-200/70 px-4 text-center">
+                {camError ? 'Sin acceso a cámara · Mostrando vista aumentada simulada' : 'Iniciando cámara…'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Scan line AR */}
+        <div className="absolute inset-x-0 top-1/2 h-0.5 bg-fuchsia-400/70 shadow-[0_0_18px_rgba(217,70,239,0.9)] animate-ar-scan pointer-events-none" />
+
+        {/* Marco de anclaje */}
+        <div className="absolute inset-x-8 top-6 bottom-24 border border-fuchsia-400/30 rounded-3xl pointer-events-none">
+          <div className="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-2 border-l-2 border-fuchsia-400 rounded-tl-3xl animate-ar-pulse" />
+          <div className="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-2 border-r-2 border-fuchsia-400 rounded-tr-3xl animate-ar-pulse" />
+          <div className="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-2 border-l-2 border-fuchsia-400 rounded-bl-3xl animate-ar-pulse" />
+          <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-2 border-r-2 border-fuchsia-400 rounded-br-3xl animate-ar-pulse" />
+        </div>
+
+        {/* Producto flotante "anclado" */}
+        <div className="absolute left-1/2 top-6 -translate-x-1/2 w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-slate-950/50 border border-fuchsia-400/50 overflow-hidden shadow-2xl shadow-fuchsia-500/30 animate-float">
+          <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+          <span className="absolute inset-0 bg-gradient-to-tr from-transparent via-transparent to-fuchsia-400/20" />
+        </div>
+
+        {/* HUD chips */}
+        <div className="absolute top-8 right-8 space-y-2 text-right">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-950/70 border border-emerald-400/40 text-emerald-300 text-[10px] font-bold backdrop-blur-md">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> TARGET LOCK
+          </span>
+          <span className="block px-2.5 py-1.5 rounded-full bg-slate-950/70 border border-fuchsia-400/40 text-fuchsia-200 text-[10px] font-bold backdrop-blur-md">
+            {product.category}
+          </span>
+        </div>
+      </div>
+
+      {/* Barra inferior de información */}
+      <div className="shrink-0 bg-slate-950/95 border-t border-fuchsia-500/20 backdrop-blur-xl p-4 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm sm:text-base font-bold text-white truncate">{product.name}</h3>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-lg font-black text-fuchsia-300">{formatUsd(product.price)}</span>
+              {rate?.rate > 0 && (
+                <span className="text-[11px] text-slate-400">{formatBs(usdToBs(product.price, rate.rate))}</span>
+              )}
+            </div>
+            <span className={`text-[10px] font-bold mt-1 inline-block ${isOut ? 'text-rose-400' : 'text-emerald-400'}`}>
+              {isOut ? 'AGOTADO' : `${avail} en stock`}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setQty((q) => Math.max(1, q - 1))}
+              className="p-2 rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 transition-all active:scale-90"
+              aria-label="Disminuir cantidad"
+            >
+              <Icon name="minus" className="w-4 h-4" />
+            </button>
+            <span className="min-w-8 text-center text-lg font-black text-white">{qty}</span>
+            <button
+              onClick={() => setQty((q) => q + 1)}
+              className="p-2 rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 transition-all active:scale-90"
+              aria-label="Aumentar cantidad"
+            >
+              <Icon name="plus" className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={onClose}
+            className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold transition-all flex items-center justify-center gap-1.5"
+          >
+            <Icon name="x" className="w-4 h-4" /> Salir
+          </button>
+          <button
+            onClick={() => {
+              onAddToCart(qty, undefined);
+              onClose();
+            }}
+            disabled={isOut}
+            className="py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-indigo-500 text-white text-sm font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-1.5 active:scale-95"
+          >
+            <Icon name="plus" className="w-4 h-4" /> Agregar {formatUsd(product.price * qty)}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, onAddToCart, isFavorite, onToggleFavorite, onNavigate }) {
   const [quantity, setQuantity] = useState(1);
   const [showFullscreen, setShowFullscreen] = useState(false);
+  const [showAr, setShowAr] = useState(false);
   const [touchX, setTouchX] = useState(null);
   const [slideDir, setSlideDir] = useState('right');
   const isOut = product.stock <= 0 || product.reserved >= product.stock;
@@ -4352,6 +4792,16 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             aria-label="Ver imagen en pantalla completa"
           >
             <Icon name="maximize" className="w-5 h-5" />
+          </button>
+
+          {/* Botón KAPSULA AR: vista aumentada del producto */}
+          <button
+            onClick={() => setShowAr(true)}
+            className="absolute bottom-3 right-14 sm:right-14 z-20 p-2 rounded-xl bg-gradient-to-tr from-fuchsia-600/80 to-indigo-600/80 backdrop-blur-md border border-fuchsia-400/40 text-white hover:border-fuchsia-300/70 hover:from-fuchsia-500 hover:to-indigo-500 transition-all active:scale-90 animate-glow-pulse"
+            aria-label="Ver en KAPSULA AR"
+            title="KAPSULA AR"
+          >
+            <Icon name="camera" className="w-5 h-5" />
           </button>
 
           {/* Paginación de la misma marca */}
@@ -4534,6 +4984,11 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             )}
           </div>
         </div>
+      )}
+
+      {/* KAPSULA AR: vista aumentada del producto sobre la cámara del dispositivo */}
+      {showAr && (
+        <KapsulaArModal product={product} rate={rate} onClose={() => setShowAr(false)} onAddToCart={onAddToCart} />
       )}
     </div>
   );
@@ -5620,6 +6075,44 @@ const makePinIcon = (color, label) =>
 // Mapa interactivo (Leaflet + OpenStreetMap, sin API key) para la entrega a
 // domicilio. Muestra el comercio (origen), el destino del cliente, la posición
 // en vivo del repartidor y el camino sugerido repartidor → destino (OSRM).
+
+// ETA Predictivo: calcula la distancia en línea recta entre el repartidor y el
+// destino y estima el tiempo de llegada asumiendo una velocidad promedio de
+// moto/delivery urbano (~20 km/h). Se refresca con cada actualización del rastreo.
+function EtaEstimate({ cLat, cLng, dLat, dLng }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const km = haversineKm(cLat, cLng, dLat, dLng);
+  const kmRoad = km * 1.3; // factor por caminos (no línea recta)
+  const minutes = Math.max(1, Math.round((kmRoad / 20) * 60));
+  const eta = new Date(now + minutes * 60000);
+  return (
+    <div className="grid grid-cols-3 gap-2 text-center">
+      <div className="rounded-xl bg-slate-900/60 border border-teal-500/20 p-2.5">
+        <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-semibold">Distancia</span>
+        <span className="block text-lg font-black text-white mt-0.5">
+          {km.toFixed(1)}<span className="text-[10px] font-semibold text-slate-400 ml-0.5">km</span>
+        </span>
+      </div>
+      <div className="rounded-xl bg-slate-900/60 border border-teal-500/20 p-2.5">
+        <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-semibold">Llegada</span>
+        <span className="block text-lg font-black text-teal-300 mt-0.5">
+          {eta.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+        </span>
+      </div>
+      <div className="rounded-xl bg-slate-900/60 border border-teal-500/20 p-2.5">
+        <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-semibold">Tiempo</span>
+        <span className="block text-lg font-black text-white mt-0.5">
+          ~{minutes}<span className="text-[10px] font-semibold text-slate-400 ml-0.5">min</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function DeliveryMap({ order, storeLocation }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -6199,6 +6692,25 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
             {order.address && <p className="text-slate-400">Destino: <span className="text-white font-bold">{order.address}</span></p>}
             <p className="text-slate-500">La posición se actualiza automáticamente cada 5 segundos.</p>
           </div>
+
+          {/* ETA Predictivo: distancia y hora estimada de llegada del repartidor */}
+          {status === 'en_camino' && courierLive && track?.courier_lat != null && track?.courier_lng != null && order?.lat != null && order?.lng != null && (
+            <div className="rounded-xl bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-cyan-500/10 border border-teal-500/25 p-3.5 animate-fade-in">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon name="navigation" className="w-4 h-4 text-teal-400" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-teal-300">ETA Predictivo</span>
+              </div>
+              <EtaEstimate
+                cLat={Number(track.courier_lat)}
+                cLng={Number(track.courier_lng)}
+                dLat={Number(order.lat)}
+                dLng={Number(order.lng)}
+              />
+              <p className="text-[10px] text-slate-500 mt-2">
+                Estimado según distancia y ritmo promedio de reparto; puede variar por tráfico.
+              </p>
+            </div>
+          )}
 
           {/* Chat del pedido con la tienda */}
           <div className="rounded-2xl bg-slate-800/60 border border-slate-700 overflow-hidden">
@@ -10863,6 +11375,26 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
   });
   const monthName = monthStart.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
 
+  // Fiado Digital: tope de crédito derivado del historial (1.5x la mayor deuda
+  // registrada, mínimo $10, redondeado a $5) y % de uso actual.
+  const fiadoTope = useMemo(() => {
+    const amounts = debtOrders.map((o) => Number(o.total) || 0);
+    const mayor = Math.max(balance, ...amounts);
+    const raw = Math.max(10, mayor * 1.5);
+    return Math.ceil(raw / 5) * 5;
+  }, [balance, debtOrders]);
+  const fiadoUso = fiadoTope > 0 ? Math.min(100, (Math.abs(balance) / fiadoTope) * 100) : 0;
+
+  // Abono rápido 1-toque: rellena el monto en Bs (según el % del total a pagar).
+  const quickAbono = (pct) => {
+    if (!(rate?.rate > 0) || !(balance > 0)) return;
+    const montoUsd = (balance * pct) / 100;
+    const montoBs = montoUsd * Number(rate.rate);
+    setAmountBs(formatAmountBsInput(montoBs.toFixed(2).replace('.', ',')));
+    setShowAbono(true);
+    addToast(`Monto listo: abonar ${pct}% (${formatUsd(montoUsd)})`, 'success');
+  };
+
   const handleAbono = async (e) => {
     e.preventDefault();
     if (sending) return;
@@ -11097,6 +11629,65 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
 
           {!isSaldoView && !hasWallet && (
             <div className="space-y-2">
+              {/* Billetera Fiado Digital: tope de crédito + abonos rápidos 1-toque */}
+              {balance > 0 && fiadoTope > 0 && (
+                <div className="rounded-2xl bg-gradient-to-br from-indigo-500/15 via-slate-900 to-teal-500/10 border border-indigo-500/30 p-4 animate-fade-in">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                      <Icon name="wallet" className="w-4 h-4" /> Billetera Fiado
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Tope <b className="text-teal-400">{formatUsd(fiadoTope)}</b>
+                    </span>
+                  </div>
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="text-slate-300">Uso del fiado</span>
+                      <span className={`font-black ${fiadoUso >= 85 ? 'text-rose-400' : fiadoUso >= 60 ? 'text-amber-400' : 'text-teal-400'}`}>
+                        {Math.round(fiadoUso)}% · {formatUsd(Math.abs(balance))}
+                      </span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-700 ${
+                          fiadoUso >= 85
+                            ? 'bg-gradient-to-r from-rose-500 to-orange-500'
+                            : fiadoUso >= 60
+                              ? 'bg-gradient-to-r from-amber-500 to-orange-400'
+                              : 'bg-gradient-to-r from-teal-500 to-emerald-400'
+                        }`}
+                        style={{ width: `${Math.max(4, fiadoUso)}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1.5">
+                      {fiadoUso >= 85
+                        ? 'Estás cerca del tope. Considera abonar para liberar tu fiado.'
+                        : fiadoUso >= 60
+                          ? 'Has usado buena parte de tu fiado. Abona para seguir comprando a cuenta.'
+                          : 'Tu fiado tiene espacio disponible para tus próximos pedidos.'}
+                    </p>
+                  </div>
+                  {rate?.rate > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <span className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Abono rápido</span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[25, 50, 100].map((pct) => (
+                          <button
+                            key={pct}
+                            onClick={() => quickAbono(pct)}
+                            className="py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200 hover:border-teal-500/60 hover:text-teal-300 transition-all active:scale-95"
+                          >
+                            {pct}%
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        Toca el % y completa con tu comprobante para aplicar el abono al instante.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
               <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
                 <span>Detalle de la deuda ({debtOrders.length} pedidos)</span>
                 <span className="text-red-400 font-black text-sm">{formatUsd(debtTotal)}</span>
@@ -12272,6 +12863,86 @@ function PaymentStatusCard({ order, isBenefited, onOrderUpdated, addToast }) {
   );
 }
 
+// Factura QR 360: genera el QR de la factura del pedido (vía API pública de QR)
+// y lo presenta con un giro 3D al hacer tap, mostrando el resumen por detrás.
+function FacturaQr360({ order, rate }) {
+  const [flipped, setFlipped] = useState(false);
+  const lines = [
+    `Factura Kiosko 24/7`,
+    `Pedido #${order.id}`,
+    `Fecha: ${order.timestamp || '—'}`,
+    ...(Array.isArray(order.items) ? order.items.map((it) => `${it.quantity}x ${it.name}`) : []),
+    `Total: ${formatUsd(order.total)}`
+  ];
+  const qrData = encodeURIComponent(lines.join('\n'));
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${qrData}`;
+  const reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  return (
+    <div className="rounded-2xl bg-slate-800/40 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+          <Icon name="scan" className="w-4 h-4 text-teal-400" /> Factura QR 360
+        </span>
+        <span className="px-1.5 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[9px] font-bold uppercase tracking-wider">
+          {flipped ? 'Resumen' : 'Escaneable'}
+        </span>
+      </div>
+
+      <div className="perspective-800" onClick={() => !reducedMotion && setFlipped((f) => !f)}>
+        <div
+          className="relative w-full aspect-[3/4] max-h-72 mx-auto preserve-3d cursor-pointer transition-transform duration-500"
+          style={{ transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
+        >
+          {/* Frente: QR */}
+          <div className="absolute inset-0 backface-hidden rounded-2xl bg-slate-900 border border-slate-700 flex flex-col items-center justify-center gap-3 p-4">
+            <img
+              src={qrUrl}
+              alt={`Código QR de la factura #${order.id}`}
+              className="w-44 h-44 rounded-xl bg-white p-2"
+              loading="lazy"
+            />
+            <p className="text-[11px] text-slate-400 text-center">
+              Escanea para ver tu factura del pedido #{order.id}.
+              {!reducedMotion && <span className="block text-teal-400 mt-1">Toca para girar y ver el resumen</span>}
+            </p>
+          </div>
+          {/* Reverso: resumen */}
+          <div
+            className="absolute inset-0 backface-hidden rounded-2xl bg-gradient-to-br from-teal-950/60 to-slate-900 border border-teal-500/30 flex flex-col justify-between p-4"
+            style={{ transform: 'rotateY(180deg)' }}
+          >
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-teal-400 font-bold">Empresas Alvarados</p>
+              <p className="text-[10px] text-slate-400">Kiosko 24/7 · Resumen de factura</p>
+            </div>
+            <div className="space-y-1.5 my-2 max-h-28 overflow-y-auto scrollbar-none">
+              {(order.items || []).map((it, i) => (
+                <div key={i} className="flex justify-between text-[11px]">
+                  <span className="text-slate-300 truncate pr-2">{it.quantity}x {it.name}</span>
+                  <span className="text-white font-bold shrink-0">{formatUsd(it.price * it.quantity)}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="border-t border-slate-700 pt-2 flex justify-between items-center">
+                <span className="text-[11px] text-slate-400">Total</span>
+                <span className="text-base font-black text-teal-300">
+                  {formatUsd(order.total)}
+                  {rate?.rate > 0 && (
+                    <span className="block text-[10px] text-teal-400/70 text-right">{formatBs(usdToBs(order.total, rate.rate))}</span>
+                  )}
+                </span>
+              </div>
+              <p className="text-[9px] text-slate-500 mt-2">Pedido #{order.id} · {order.timestamp}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast }) {
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
@@ -12368,6 +13039,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
               </span>
             </div>
           </div>
+
+          {/* Factura QR 360: código QR con la factura completa y giro 3D */}
+          <FacturaQr360 order={order} rate={rate} />
 
           {order.notes && (
             <div className="rounded-xl bg-slate-800/60 p-3 text-xs">
@@ -13179,4 +13853,223 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
     </div>
   );
 }
+
+// ============================================================================
+// Asistente IA "Don Aiker": chat que responde con datos reales del negocio
+// (deuda, pedidos, promos, tasa, productos) usando reglas locales sin API.
+// ============================================================================
+function AikerAssistant({
+  customer,
+  customerOrders,
+  products,
+  promos,
+  rate,
+  savedCustomer,
+  headerHeight = 0,
+  onClose
+}) {
+  const [messages, setMessages] = useState([
+    {
+      from: 'ai',
+      text: '¡Hola! Soy Don Aiker, el asistente del kiosko. Pregúntame por tu deuda, tus pedidos, promos activas o la tasa del día. 😊'
+    }
+  ]);
+  const [input, setInput] = useState('');
+  const [thinking, setThinking] = useState(false);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, thinking]);
+
+  // Respuestas rápidas sugeridas
+  const quickReplies = ['¿Cuánto debo?', '¿Dónde está mi pedido?', 'Promos activas', '¿Cuál es la tasa?'];
+
+  const balance = Number(customer?.balance) || 0;
+  const name = customer?.customerName?.split(' ')[0] || savedCustomer?.customerName?.split(' ')[0] || 'cliente';
+
+  const myOrders = (customerOrders || []).filter((o) =>
+    customer ? normalizePhoneDigits(o.phone) === normalizePhoneDigits(customer.phone) : true
+  );
+  const activePromos = (promos || []).filter((p) => p.active);
+
+  const answer = (q) => {
+    const t = q.toLowerCase();
+    // Saludos
+    if (/hola|buenas|saludos|hey|qué tal|que tal|^hi|^hello/.test(t)) {
+      return `¡Hola${name !== 'cliente' ? `, ${name}` : ''}! Soy Don Aiker 🤖 ¿En qué te ayudo hoy? Puedo contarte tu deuda, el estado de tus pedidos, las promos activas o la tasa del día.`;
+    }
+    // Deuda / saldo / fiado
+    if (/deuda|debo|adeudo|saldo|fiado|cr[eé]dito|c[uú]anto pag|deber|pendiente/.test(t)) {
+      if (!customer) {
+        return 'Aún no estás identificado. Identifícate con tu número para ver tu deuda y saldo a favor.';
+      }
+      if (balance > 0) {
+        return `Tienes ${formatUsd(balance)} de deuda pendiente. Puedes abonar desde "Mi deuda" en tu cuenta. ${
+          rate?.rate > 0 ? `Equivale a ${formatBs(usdToBs(balance, rate.rate))} a la tasa del día (Bs ${Number(rate.rate).toFixed(2)}).` : ''
+        }`;
+      }
+      if (balance < 0) {
+        return `Tienes ${formatUsd(Math.abs(balance))} a tu favor en tu cartera 🎉. Al pagar tu próximo pedido elige "Mi Cartera" para usarlo.`;
+      }
+      return '¡Estás al día! No tienes deudas pendientes ni saldo a favor.';
+    }
+    // Pedidos / rastreo
+    if (/pedido|orden|rastr|d[oó]nde est[aá]|en camino|entrega|estado/.test(t)) {
+      if (myOrders.length === 0) {
+        return 'Aún no tienes pedidos registrados con tu número. ¡Haz tu primer pedido en la tienda!';
+      }
+      const pending = myOrders.find((o) => !['entregado', 'cancelado'].includes(o.status));
+      if (pending) {
+        return `Tu último pedido ${pending.id} está ${pending.status === 'pendiente' ? 'pendiente de confirmar' : pending.status === 'preparando' ? 'en preparación' : pending.status === 'en_camino' ? 'en camino 🛵' : pending.status}. Puedes verlo en "Mis Pedidos" o seguir el rastreo en vivo.`;
+      }
+      const latest = myOrders[0];
+      return `Tu último pedido ${latest.id} fue entregado ✅. Puedes repetirlo desde "Mis Pedidos".`;
+    }
+    // Promos / ofertas
+    if (/promo|oferta|descuento|rebaja|especial|combos|barato/.test(t)) {
+      if (activePromos.length === 0) {
+        return 'Hoy no hay promos activas, pero te recomiendo revisar el Radar de Novedades por los productos nuevos.';
+      }
+      const lines = activePromos.map((p, i) => `${i + 1}. ${p.title}${p.subtitle ? ` — ${p.subtitle}` : ''}`).join('\n');
+      return `¡Hay ${activePromos.length} promo${activePromos.length > 1 ? 's' : ''} activa${activePromos.length > 1 ? 's' : ''}! 🎉\n${lines}`;
+    }
+    // Tasa / dólar / bolívar
+    if (/tasa|d[oó]lar|dolar|bol[ií]var|bs|bcv|divisa|cambio/.test(t)) {
+      if (rate?.rate > 0) {
+        return `La tasa del día es Bs ${Number(rate.rate).toFixed(2)} por dólar. Por ejemplo, $10 serían ${formatBs(usdToBs(10, rate.rate))}.`;
+      }
+      return 'Aún no tenemos la tasa del día disponible. Intenta de nuevo en unos minutos.';
+    }
+    // Productos / catálogo
+    if (/qu[eé] venden|producto|c[aá]talogo|tienes|disponible|vendes|hay de/.test(t)) {
+      if (!Array.isArray(products) || products.length === 0) return 'Ahora mismo el catálogo está cargando. Intenta en un momento.';
+      const cats = [...new Set(products.map((p) => p.category || 'Otros'))];
+      return `Tenemos ${products.length} productos disponibles en ${cats.length} categoría${cats.length > 1 ? 's' : ''}: ${cats.slice(0, 6).join(', ')}. Busca en la barra superior o navega por categorías.`;
+    }
+    // Horario / abierto
+    if (/horario|abierto|hora|cu[aá]ndo|abren|cierran/.test(t)) {
+      return 'Estamos abiertos ahora mismo ⏰ con atención rápida. Puedes pedir para retirar en el kiosko o para entrega.';
+    }
+    // Producto específico (busca coincidencia en nombres)
+    const product = (products || []).find((p) => t.includes(p.name.toLowerCase().split(' ')[0]));
+    if (product) {
+      return `"${product.name}" está disponible a ${formatUsd(product.price)}${
+        product.stock > 0 ? ` con ${Math.max(0, Number(product.stock) - Number(product.reserved || 0))} unidades en stock` : ', agotado por ahora'
+      }. Puedes agregarlo tocando "+" en su tarjeta.`;
+    }
+    // Agradecimiento
+    if (/gracias|genial|perfecto|excelente|muchas gracias/.test(t)) {
+      return `¡Con gusto${name !== 'cliente' ? `, ${name}` : ''}! Recuerda que puedes pedir con voz tocando el micrófono del buscador 🎤.`;
+    }
+    // Fallback
+    return 'Todavía estoy aprendiendo. Pregúntame por: tu deuda, tus pedidos, las promos activas, la tasa del día o los productos del catálogo.';
+  };
+
+  const send = (text) => {
+    const q = (text ?? input).trim();
+    if (!q || thinking) return;
+    setMessages((m) => [...m, { from: 'user', text: q }]);
+    setInput('');
+    setThinking(true);
+    setTimeout(() => {
+      setMessages((m) => [...m, { from: 'ai', text: answer(q) }]);
+      setThinking(false);
+    }, 650);
+  };
+
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-[75] overflow-hidden animate-fade-in" style={{ top: headerHeight }}>
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+          <div className="p-4 border-b border-slate-800 flex items-center gap-3 shrink-0 bg-gradient-to-r from-indigo-950/60 to-slate-900">
+            <span className="relative p-2.5 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-500/30 shrink-0 animate-glow-pulse">
+              <Icon name="chat" className="w-5 h-5" />
+              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-900" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                Don Aiker
+                <span className="px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[9px] font-bold uppercase tracking-wider border border-indigo-500/30">IA</span>
+              </h3>
+              <p className="text-[11px] text-slate-400 truncate">Asistente del kiosko · responde con datos en vivo</p>
+            </div>
+            <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl" aria-label="Cerrar asistente">
+              <Icon name="x" className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div ref={scrollRef} className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0 bg-slate-950/40">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.from === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+                {m.from === 'ai' && (
+                  <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
+                    <Icon name="chat" className="w-3.5 h-3.5" />
+                  </span>
+                )}
+                <div
+                  className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed whitespace-pre-line ${
+                    m.from === 'user'
+                      ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-semibold rounded-br-md'
+                      : 'bg-slate-800 border border-slate-700 text-slate-200 rounded-bl-md'
+                  }`}
+                >
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {thinking && (
+              <div className="flex justify-start animate-fade-in">
+                <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
+                  <Icon name="chat" className="w-3.5 h-3.5" />
+                </span>
+                <div className="px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-sm rounded-bl-md flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '120ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '240ms' }} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 border-t border-slate-800 shrink-0 space-y-2 bg-slate-900">
+            <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
+              {quickReplies.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => send(r)}
+                  className="shrink-0 px-2.5 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-[11px] text-slate-300 hover:border-indigo-500/60 hover:text-indigo-300 transition-all active:scale-95"
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') send();
+                }}
+                placeholder="Pregúntale a Don Aiker..."
+                className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+              />
+              <button
+                onClick={() => send()}
+                disabled={thinking || !input.trim()}
+                className="p-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 text-white disabled:opacity-40 transition-all active:scale-90"
+                aria-label="Enviar mensaje"
+              >
+                <Icon name="navigation" className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 

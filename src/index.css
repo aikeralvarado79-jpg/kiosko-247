@@ -283,3 +283,87 @@ html.light .bg-slate-950\/80.text-teal-300 { color: #5eead4; }
 html.light .bg-gradient-to-r.from-white {
   background-image: linear-gradient(to right, #0f172a, #334155 50%, #0d9488);
 }
+
+/* ------------------------------------------------------------------ */
+/*  Modo Accesibilidad "Fácil de Ver"                                    */
+/*  html.accessible-text: tipografía más grande                          */
+/*  html.accessible-contrast: alto contraste y menos opacidades          */
+/* ------------------------------------------------------------------ */
+html.accessible-text {
+  font-size: 112.5%;
+}
+html.accessible-text .text-\[10px\] { font-size: 0.75rem; }
+html.accessible-text .text-\[11px\] { font-size: 0.8125rem; }
+html.accessible-text .text-xs { font-size: 0.875rem; }
+html.accessible-text .text-sm { font-size: 0.9375rem; }
+html.accessible-text button, html.accessible-text a, html.accessible-text input, html.accessible-text select, html.accessible-text textarea {
+  letter-spacing: 0.01em;
+}
+html.accessible-contrast {
+  --contrast-boost: 1;
+}
+html.accessible-contrast body {
+  font-weight: 500;
+}
+html.accessible-contrast .text-slate-400 { color: #94a3b8; }
+html.accessible-contrast .text-slate-500 { color: #94a3b8; }
+html.accessible-contrast .border-slate-700, html.accessible-contrast .border-slate-800 {
+  border-color: rgba(148, 163, 184, 0.6);
+}
+html.accessible-contrast button, html.accessible-contrast [role="button"] {
+  outline-offset: 2px;
+}
+html.accessible-contrast button:focus-visible, html.accessible-contrast a:focus-visible, html.accessible-contrast input:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* Respetar reducción de movimiento del sistema */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  KAPSULA AR — retícula y chips flotantes sobre la cámara             */
+/* ------------------------------------------------------------------ */
+@keyframes ar-scan {
+  0% { transform: translateY(-40%); opacity: 0.9; }
+  50% { opacity: 1; }
+  100% { transform: translateY(40%); opacity: 0.9; }
+}
+.animate-ar-scan { animation: ar-scan 2.4s ease-in-out infinite; }
+@keyframes ar-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.5); }
+  50% { transform: scale(1.06); box-shadow: 0 0 0 10px rgba(45, 212, 191, 0); }
+}
+.animate-ar-pulse { animation: ar-pulse 1.6s ease-in-out infinite; }
+
+/* Producto "anclado" flotando sobre la cámara AR */
+@keyframes float {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-8px); }
+}
+.animate-float { animation: float 3.2s ease-in-out infinite; }
+
+/* ------------------------------------------------------------------ */
+/*  Vitrina 3D — transform 3D de la imagen con perspectiva              */
+/* ------------------------------------------------------------------ */
+.perspective-800 { perspective: 900px; }
+.preserve-3d { transform-style: preserve-3d; }
+.backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.tilt-3d {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease;
+  will-change: transform;
+}
+
+/* Micro-interacción: pulso del botón agregar al carrito */
+@keyframes add-pulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+.animate-add-pulse { animation: add-pulse 0.4s ease-out both; }

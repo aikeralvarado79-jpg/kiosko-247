@@ -112,16 +112,16 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
   );
 };
 
-// Logo de marca: monograma "24" con rayo (tienda abierta día y noche) sobre un
-// sello redondeado. Gradiente propio (no depende del tema) para que el logo se
+// Logo de marca: carrito de compras de kiosko (venta y entrega) sobre un sello
+// redondeado con gradiente propio (no depende del tema) para que el logo se
 // reconozca igual en modo claro y oscuro.
 const BrandLogo = ({ className = 'w-9 h-9' }) => (
   <span
     className={`inline-flex items-center justify-center rounded-2xl bg-gradient-to-tr from-teal-500 via-emerald-500 to-cyan-400 shadow-lg shadow-teal-500/25 ring-2 ring-white/15 shrink-0 select-none ${className}`}
     aria-hidden="true"
   >
-    <svg viewBox="0 0 24 24" className="w-[62%] h-[62%] fill-slate-950" xmlns="http://www.w3.org/2000/svg">
-      <path d="M13 2 4.5 13.5h5L10.5 22 19.5 9.5h-5.5L13 2z" />
+    <svg viewBox="0 0 24 24" className="w-[66%] h-[66%] fill-slate-950" xmlns="http://www.w3.org/2000/svg">
+      <path d="M2 3h2.5l2.4 12.2a2 2 0 0 0 1.98 1.62h9.8a2 2 0 0 0 1.97-1.6L22 7H5.6M9 20a1.4 1.4 0 1 0 0-2.8A1.4 1.4 0 0 0 9 20zM17 20a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8z" />
     </svg>
   </span>
 );
@@ -633,26 +633,27 @@ const SEM_TONES = {
   rose: 'bg-rose-500/15 text-rose-300 border-rose-500/40'
 };
 
-// Identidad visual por categoría: cada categoría tiene su color (pill/badge),
-// su tono sólido (estado activo) y su icono. El fallback genérico cubre
-// categorías nuevas sin necesidad de editar el código.
+// Identidad visual por categoría: cada categoría tiene su color (chip sólido y
+// oscuro para legibilidad sobre cualquier imagen), su tono sólido (estado
+// activo en los filtros) y su icono. El fallback genérico cubre categorías
+// nuevas sin necesidad de editar el código.
 const CATEGORY_IDENTITY = {
-  comida: { chip: 'bg-amber-500/15 text-amber-300 border-amber-500/40', solid: 'bg-amber-400 text-slate-950', icon: 'burger' },
-  confitería: { chip: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40', solid: 'bg-fuchsia-400 text-slate-950', icon: 'candy' },
-  golosinas: { chip: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40', solid: 'bg-fuchsia-400 text-slate-950', icon: 'candy' },
-  snacks: { chip: 'bg-orange-500/15 text-orange-300 border-orange-500/40', solid: 'bg-orange-400 text-slate-950', icon: 'chips' },
-  bebidas: { chip: 'bg-sky-500/15 text-sky-300 border-sky-500/40', solid: 'bg-sky-400 text-slate-950', icon: 'cup' },
-  lácteos: { chip: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/40', solid: 'bg-indigo-400 text-slate-950', icon: 'milk' },
-  lacteos: { chip: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/40', solid: 'bg-indigo-400 text-slate-950', icon: 'milk' },
-  higiene: { chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40', solid: 'bg-emerald-400 text-slate-950', icon: 'spray' },
-  farmacia: { chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40', solid: 'bg-emerald-400 text-slate-950', icon: 'spray' },
-  limpieza: { chip: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40', solid: 'bg-cyan-400 text-slate-950', icon: 'spray' },
-  panadería: { chip: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/40', solid: 'bg-yellow-400 text-slate-950', icon: 'burger' },
-  helados: { chip: 'bg-violet-500/15 text-violet-300 border-violet-500/40', solid: 'bg-violet-400 text-slate-950', icon: 'iceCream' },
-  postres: { chip: 'bg-pink-500/15 text-pink-300 border-pink-500/40', solid: 'bg-pink-400 text-slate-950', icon: 'iceCream' },
-  pizza: { chip: 'bg-rose-500/15 text-rose-300 border-rose-500/40', solid: 'bg-rose-400 text-slate-950', icon: 'pizza' }
+  comida: { chip: 'bg-amber-500 text-slate-950 border-amber-400', solid: 'bg-amber-400 text-slate-950', accent: 'text-amber-400', icon: 'burger' },
+  confitería: { chip: 'bg-fuchsia-500 text-white border-fuchsia-400', solid: 'bg-fuchsia-400 text-slate-950', accent: 'text-fuchsia-400', icon: 'candy' },
+  golosinas: { chip: 'bg-fuchsia-500 text-white border-fuchsia-400', solid: 'bg-fuchsia-400 text-slate-950', accent: 'text-fuchsia-400', icon: 'candy' },
+  snacks: { chip: 'bg-orange-500 text-slate-950 border-orange-400', solid: 'bg-orange-400 text-slate-950', accent: 'text-orange-400', icon: 'chips' },
+  bebidas: { chip: 'bg-sky-500 text-slate-950 border-sky-400', solid: 'bg-sky-400 text-slate-950', accent: 'text-sky-400', icon: 'cup' },
+  lácteos: { chip: 'bg-indigo-500 text-white border-indigo-400', solid: 'bg-indigo-400 text-slate-950', accent: 'text-indigo-400', icon: 'milk' },
+  lacteos: { chip: 'bg-indigo-500 text-white border-indigo-400', solid: 'bg-indigo-400 text-slate-950', accent: 'text-indigo-400', icon: 'milk' },
+  higiene: { chip: 'bg-emerald-500 text-slate-950 border-emerald-400', solid: 'bg-emerald-400 text-slate-950', accent: 'text-emerald-400', icon: 'spray' },
+  farmacia: { chip: 'bg-emerald-500 text-slate-950 border-emerald-400', solid: 'bg-emerald-400 text-slate-950', accent: 'text-emerald-400', icon: 'spray' },
+  limpieza: { chip: 'bg-cyan-500 text-slate-950 border-cyan-400', solid: 'bg-cyan-400 text-slate-950', accent: 'text-cyan-400', icon: 'spray' },
+  panadería: { chip: 'bg-yellow-500 text-slate-950 border-yellow-400', solid: 'bg-yellow-400 text-slate-950', accent: 'text-yellow-400', icon: 'burger' },
+  helados: { chip: 'bg-violet-500 text-white border-violet-400', solid: 'bg-violet-400 text-slate-950', accent: 'text-violet-400', icon: 'iceCream' },
+  postres: { chip: 'bg-pink-500 text-white border-pink-400', solid: 'bg-pink-400 text-slate-950', accent: 'text-pink-400', icon: 'iceCream' },
+  pizza: { chip: 'bg-rose-500 text-white border-rose-400', solid: 'bg-rose-400 text-slate-950', accent: 'text-rose-400', icon: 'pizza' }
 };
-const CATEGORY_FALLBACK = { chip: 'bg-teal-500/15 text-teal-300 border-teal-500/40', solid: 'bg-teal-400 text-slate-950', icon: 'layers' };
+const CATEGORY_FALLBACK = { chip: 'bg-teal-600 text-white border-teal-500', solid: 'bg-teal-400 text-slate-950', accent: 'text-teal-400', icon: 'layers' };
 const categoryIdentity = (name) => {
   const key = String(name || '').toLowerCase().trim();
   return CATEGORY_IDENTITY[key] || CATEGORY_FALLBACK;
@@ -3880,9 +3881,9 @@ function CustomerView({
       </div>
       </RevealOnScroll>
 
-      {/* Vitrina "Los más pedidos": 3-5 estrellas en carrusel a pantalla ancha */}
+      {/* Vitrina "Los más pedidos": carrusel horizontal, SOLO en móviles (lg:hidden) */}
       {topSellers.length > 0 && (
-        <RevealOnScroll delay={80}>
+        <RevealOnScroll delay={80} className="lg:hidden">
         <section className="animate-fade-in">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -3914,7 +3915,7 @@ function CustomerView({
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 img-load-fade"
                     onLoad={(e) => e.currentTarget.classList.add('is-loaded')}
                   />
-                  <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-medium border`}>
+                  <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
                     <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
                     {product.category}
                   </span>
@@ -4560,18 +4561,18 @@ function CustomerView({
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-2xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-300 border shrink-0 ${
+                  className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-300 border-2 shrink-0 ${
                     active
                       ? isFav
                         ? 'bg-rose-400 text-slate-950 border-rose-300 shadow-lg shadow-rose-500/25 scale-105'
-                        : `${id.solid} border-transparent shadow-lg scale-105`
-                      : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
+                        : `${id.solid} border-white/40 shadow-lg scale-105`
+                      : `bg-slate-800/80 text-slate-200 border-slate-600/80 hover:bg-slate-700/70 hover:text-white`
                   }`}
                 >
                   {isFav ? (
                     <Icon name="heart" className={`w-3.5 h-3.5 ${active ? 'fill-current' : ''}`} />
                   ) : (
-                    <Icon name={id.icon} className="w-3.5 h-3.5" />
+                    <Icon name={id.icon} className={`w-3.5 h-3.5 ${active ? '' : id.accent}`} />
                   )}
                   {isFav ? `Favoritos (${favorites.length})` : cat}
                 </button>
@@ -4603,13 +4604,9 @@ function CustomerView({
           <p className="text-slate-500 text-xs">Intenta cambiar la categoría o limpiar el término de búsqueda.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6 lg:gap-8">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
           {products.map((product, idx) => (
-            <RevealOnScroll
-              key={product.id}
-              delay={Math.min(idx, 8) * 60}
-              className={idx === 0 ? 'lg:col-span-2 lg:row-span-2' : ''}
-            >
+            <RevealOnScroll key={product.id} delay={Math.min(idx, 8) * 60}>
               <ProductCard
                 product={product}
                 rate={rate}
@@ -4617,7 +4614,6 @@ function CustomerView({
                 onToggleFavorite={() => onToggleFavorite(product.id)}
                 onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
                 onOpenDetail={() => onOpenProductModal(product)}
-                featured={idx === 0}
               />
             </RevealOnScroll>
           ))}
@@ -4627,7 +4623,7 @@ function CustomerView({
   );
 }
 
-function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite, featured = false }) {
+function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite }) {
   const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
   const isOut = avail <= 0;
   const isLow = avail > 0 && avail <= 5;
@@ -4692,11 +4688,6 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${imgLoaded ? 'is-loaded' : 'img-load-fade'}`}
           loading="lazy"
         />
-        {featured && (
-          <span className="absolute bottom-2.5 left-2.5 sm:bottom-4 sm:left-4 inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg sm:rounded-xl bg-teal-500/90 text-slate-950 font-black text-[10px] sm:text-xs uppercase tracking-wider shadow-lg shadow-teal-500/30">
-            <Icon name="star" className="w-3.5 h-3.5" /> Destacado
-          </span>
-        )}
         <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1">
           {isNewProduct(product) && !wasNewProductViewed(product.id) && (
             <span
@@ -4711,7 +4702,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
               {product.brand}
             </span>
           )}
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-medium border`}>
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
             <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
             {product.category}
           </span>
@@ -4758,7 +4749,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div>
           <h3
             onClick={onOpenDetail}
-            className={`font-display text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1 ${featured ? 'text-base sm:text-2xl' : 'text-sm sm:text-base'}`}
+            className="font-display text-sm sm:text-base text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1"
           >
             {product.name}
           </h3>
@@ -4778,7 +4769,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
             <PriceCountUp
               value={product.price}
               rate={rate}
-              className={`font-display font-black tracking-tight text-white ${featured ? 'text-2xl sm:text-4xl' : 'text-base sm:text-lg'}`}
+              className="font-display font-black tracking-tight text-white text-base sm:text-lg"
               bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
             />
           </div>
@@ -5063,7 +5054,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             className="w-full h-full object-cover"
           />
           <div className="absolute top-4 left-4 sm:left-4">
-            <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-xs font-semibold border`}>
+            <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-xs font-bold border shadow-sm`}>
               <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
               {product.category}
             </span>

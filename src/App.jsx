@@ -5194,7 +5194,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
       {/* Imagen + full screen + paginación de la marca */}
       <div
         key={`img-${product.id}`}
-        className={`relative h-40 sm:h-56 bg-slate-950 shrink-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+        className={`relative flex-1 min-h-32 sm:min-h-44 bg-slate-950 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
@@ -5268,7 +5268,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
 
         <div
           key={`body-${product.id}`}
-          className={`p-4 sm:p-6 flex flex-col overflow-y-auto flex-1 min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+          className={`p-4 sm:p-6 flex flex-col overflow-y-auto min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         >
           <div className="mb-5 sm:mb-6">
             <div className="flex items-center justify-between gap-2">
@@ -5320,7 +5320,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             )}
           </div>
 
-          <div className="mt-auto">
+          <div>
           <Btn
             onClick={(e) => {
               onAddToCart(quantity, e.currentTarget.getBoundingClientRect());

@@ -165,6 +165,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
       chips: <path d="M6 21h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM2 9h2M2 15h2M20 9h2M20 15h2M12 7v10" />,
       pizza: <path d="M12 2 4 7l8 15 8-15-8-5zM12 2v5M4 7h16M9 7l3 6 3-6M12 13v9" />,
       iceCream: <path d="M12 2a5 5 0 0 1 5 5c0 1.5-.5 2.5-1 3.5h-8C7.5 9.5 7 8.5 7 7a5 5 0 0 1 5-5zM8 11h8l-2.5 10a2 2 0 0 1-3 0L8 11z" />,
+      calculator: <path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM6 6h12M9.5 13.5v6M6.5 16.5h6M17 12.5v5M14.75 15h4.5" />,
     };
 
   return (
@@ -1036,6 +1037,10 @@ export default function App() {
   const [rate, setRate] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+
+  // Calculadora flotante de conversión $ ⇄ Bs: botón fijo que abre un panel no modal.
+  const [calcOpen, setCalcOpen] = useState(false);
+  const toggleCalc = () => setCalcOpen((v) => !v);
 
   // true cuando ya se cargaron datos en esta sesión. Se usa para que el ETag de
   // /api/state solo se envíe en recargas posteriores (polling), nunca en la carga
@@ -2629,8 +2634,9 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tasa BCV del día + Calculadora */}
+      {/* Tasa BCV del día + Calculadora flotante (botón fijo; en móvil se abre desde la barra inferior) */}
       <RateBanner rate={rate} />
+      {activeView === 'customer' && <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} />}
 
       {/* Main Container */}
       <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
@@ -2662,9 +2668,6 @@ export default function App() {
             customerOrders={customerOrders}
             orders={orders}
             customerProfile={customerProfile}
-            onViewOrderDetail={(order) => setOrderDetailOrder(order)}
-            onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
-            onTrackLiveOrder={(order) => setLiveTrackingOrder(order)}
             storeLocation={storeLocation}
             favorites={favorites}
             onToggleFavorite={toggleFavorite}
@@ -3004,6 +3007,8 @@ export default function App() {
         cartCount={cartCount}
         hasCustomer={Boolean(savedCustomer)}
         isAdmin={isCurrentAdmin || isAdminAuthed}
+        calcOpen={calcOpen}
+        onToggleCalc={toggleCalc}
         onOpenCart={() => {
           setActiveView('customer');
           setIsCartOpen(true);
@@ -3851,9 +3856,6 @@ function CustomerView({
   customerOrders,
   orders,
   customerProfile,
-  onViewOrderDetail,
-  onRequestCancelOrder,
-  onTrackLiveOrder,
   storeLocation,
   favorites,
   onToggleFavorite,
@@ -3865,12 +3867,9 @@ function CustomerView({
   guestAdded
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [showMyOrders, setShowMyOrders] = useState(false);
-  const [myOrdersPage, setMyOrdersPage] = useState(1);
-  const [orderDateFilter, setOrderDateFilter] = useState({ preset: 'all', date: null });
-  const [showCalendar, setShowCalendar] = useState(false);
   const [promoIdx, setPromoIdx] = useState(0);
-  const PAGE_SIZE = 5;
+  // Recorrido Horizontal: apagado por defecto; el usuario lo enciende con el switch.
+  const [shelvesEnabled, setShelvesEnabled] = useState(false);
 
   // Carrusel de promos con autoplay (solo cuando hay más de una activa)
   const activePromos = promos.filter((p) => p.active);
@@ -3893,34 +3892,6 @@ function CustomerView({
       )
       .slice(0, 6);
   }, [allProducts, searchQuery]);
-
-  const filteredOrders = useMemo(() => {
-    const now = new Date();
-    const todayStart = startOfDay(now);
-    const dow = (todayStart.getDay() + 6) % 7; // 0 = Monday
-    const thisMon = new Date(todayStart); thisMon.setDate(thisMon.getDate() - dow);
-    const thisSun = new Date(thisMon); thisSun.setDate(thisSun.getDate() + 6);
-    const lastMon = new Date(thisMon); lastMon.setDate(lastMon.getDate() - 7);
-    const lastSun = new Date(thisMon); lastSun.setDate(lastSun.getDate() - 1);
-
-    return customerOrders.filter((o) => {
-      const d = parseOrderDate(o);
-      if (isNaN(d)) return true;
-      switch (orderDateFilter.preset) {
-        case 'today': return startOfDay(d).getTime() === todayStart.getTime();
-        case 'thisWeek': return d >= thisMon && d <= thisSun;
-        case 'lastWeek': return d >= lastMon && d <= lastSun;
-        case 'day': return orderDateFilter.date && toYMD(d) === orderDateFilter.date;
-        default: return true;
-      }
-    });
-  }, [customerOrders, orderDateFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
-  const safePage = Math.min(myOrdersPage, totalPages);
-  const pagedOrders = filteredOrders.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-
-  useEffect(() => { setMyOrdersPage(1); }, [orderDateFilter]);
 
   // Producto habitual del cliente que esté por agotarse: alerta proactiva para
   // reponerlo antes de que se acabe. Basado en su historial de pedidos.
@@ -4040,18 +4011,16 @@ function CustomerView({
     };
   }, [reducedMotionHero]);
 
-  // La barra inferior (móvil) pide expandir y scrollear a Mis Pedidos o Mi Cuenta
+  // La barra inferior (móvil) pide expandir y scrollear a Mi Cuenta (Mis Pedidos viven en el drawer)
   useEffect(() => {
     if (!focusSection) return;
     const timer = setTimeout(() => {
-      const id = focusSection === 'orders' ? 'pedidos-seccion' : 'cuenta-seccion';
-      if (focusSection === 'orders') setShowMyOrders(true);
       if (focusSection === 'account') onOpenDebt?.('saldo');
-      const el = document.getElementById(id);
+      const el = document.getElementById('cuenta-seccion');
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
     return () => clearTimeout(timer);
-  }, [focusSection]);
+  }, [focusSection, onOpenDebt]);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
@@ -4109,116 +4078,6 @@ function CustomerView({
         </div>
       </div>
       </RevealOnScroll>
-
-      {/* Recorrido virtual del kiosko: estantes interactivos por categoría */}
-      {!searchQuery.trim() && shelfGroups.length > 0 && (
-        <RevealOnScroll delay={40}>
-        <section className="animate-fade-in">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
-                <Icon name="store" className="w-4 h-4 sm:w-5 sm:h-5" />
-              </span>
-              <div>
-                <h3 className="text-sm sm:text-base font-bold text-white">Recorrido del kiosko</h3>
-                <p className="text-[11px] sm:text-xs text-slate-400">
-                  Estantes interactivos · pasá de góndola en góndola como en el kiosko
-                </p>
-              </div>
-            </div>
-            <span className="px-2 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase tracking-wider border border-indigo-500/20">
-              visita virtual
-            </span>
-          </div>
-
-          <div className="estantes-scene space-y-3.5 sm:space-y-4">
-            {shelfGroups.map((shelf, idx) => (
-              <Shelf
-                key={shelf.category}
-                category={shelf.category}
-                items={shelf.items}
-                floor={idx + 1}
-                isActive={selectedCategory === shelf.category}
-                onAddToCart={onAddToCart}
-                onOpenProductModal={onOpenProductModal}
-                onSelectCategory={() => setSelectedCategory(shelf.category)}
-              />
-            ))}
-          </div>
-        </section>
-        </RevealOnScroll>
-      )}
-
-      {/* Vitrina "Los más pedidos": carrusel horizontal, SOLO en móviles (lg:hidden) */}
-      {topSellers.length > 0 && (
-        <RevealOnScroll delay={80} className="lg:hidden">
-        <section className="animate-fade-in">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400">
-                <Icon name="star" className="w-4 h-4 sm:w-5 sm:h-5" />
-              </span>
-              <div>
-                <h3 className="font-display text-base sm:text-lg font-extrabold text-white">Los más pedidos</h3>
-                <p className="text-[11px] sm:text-xs text-slate-400">Los favoritos que vuelan del kiosko</p>
-              </div>
-            </div>
-            <span className="px-2 py-1 rounded-full bg-teal-500/10 text-teal-400 text-[10px] font-bold uppercase tracking-wider border border-teal-500/20">
-              top ventas
-            </span>
-          </div>
-
-          <div className="flex gap-3 sm:gap-5 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
-            {topSellers.map((product) => (
-              <article
-                key={product.id}
-                onClick={onOpenProductModal ? () => onOpenProductModal(product) : undefined}
-                className="snap-start shrink-0 w-[70vw] min-[480px]:w-[320px] sm:w-[340px] rounded-2xl sm:rounded-3xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-teal-500/50 hover:shadow-2xl hover:shadow-teal-500/10 hover:-translate-y-1 transition-all duration-300 cursor-pointer"
-              >
-                <div className="relative aspect-[16/10] bg-slate-900">
-                  <ProductImg
-                    product={product}
-                    alt={product.name}
-                    loading="lazy"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                  <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
-                    <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
-                    {product.category}
-                  </span>
-                </div>
-                <div className="p-3 sm:p-4 flex flex-col gap-1.5 flex-1">
-                  <h4 className="font-display text-sm sm:text-base font-extrabold text-white truncate">{product.name}</h4>
-                  <p className="text-[11px] text-slate-400 line-clamp-1">
-                    {formatSize(product) || product.brand || 'Artículo'}
-                  </p>
-                  <div className="mt-auto pt-2 flex items-end justify-between gap-2 border-t border-slate-700/50">
-                    <div className="min-w-0">
-                      <PriceCountUp
-                        value={product.price}
-                        rate={rate}
-                        className="font-display text-xl sm:text-2xl font-black tracking-tight text-white"
-                        bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
-                      />
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAddToCart(product, 1, e.currentTarget.getBoundingClientRect());
-                      }}
-                      className="shrink-0 p-2.5 rounded-xl bg-teal-500 text-slate-950 hover:bg-teal-400 transition-all active:scale-90 shadow-lg shadow-teal-500/20"
-                      aria-label={`Agregar ${product.name}`}
-                    >
-                      <Icon name="plus" className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-        </RevealOnScroll>
-      )}
 
       {/* Promos Carousel */}
       {activePromos.length > 0 && (
@@ -4316,73 +4175,6 @@ function CustomerView({
         </div>
       )}
 
-      {/* Radar de Ofertas "Novedades": nuevos, por agotar y frecuentes */}
-      {radarProducts.length > 0 && (
-        <section className="animate-fade-in">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
-                <Icon name="radio" className="w-4 h-4 sm:w-5 sm:h-5" />
-              </span>
-              <div>
-                <h3 className="text-sm sm:text-base font-bold text-white">Radar de Novedades</h3>
-                <p className="text-[11px] sm:text-xs text-slate-400">Lo que se mueve hoy en la tienda</p>
-              </div>
-            </div>
-            <span className="px-2 py-1 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase tracking-wider border border-amber-500/20 animate-pulse">
-              en vivo
-            </span>
-          </div>
-
-          <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
-            {radarProducts.map(({ product, tag }) => (
-              <article
-                key={product.id}
-                className="snap-start shrink-0 w-40 sm:w-44 rounded-2xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-amber-500/50 hover:-translate-y-0.5 transition-all"
-              >
-                <div className="relative">
-                  <ProductImg
-                    product={product}
-                    alt={product.name}
-                    loading="lazy"
-                    className="w-full h-24 sm:h-28 object-cover bg-slate-900"
-                  />
-                  <span
-                    className={`absolute top-2 left-2 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
-                      tag === 'Nuevo'
-                        ? 'bg-teal-500/90 text-slate-950 border-teal-400'
-                        : tag === 'Se agota'
-                          ? 'bg-rose-500/90 text-white border-rose-400'
-                          : 'bg-indigo-500/90 text-white border-indigo-400'
-                    }`}
-                  >
-                    {tag}
-                  </span>
-                </div>
-                <div className="p-2.5 flex flex-col gap-1.5 flex-1">
-                  <h4 className="text-xs font-bold text-white truncate">{product.name}</h4>
-                  <p className="text-[11px] text-slate-400 line-clamp-1">
-                    {formatSize(product) || product.category || 'Artículo'}
-                  </p>
-                  <div className="mt-auto flex items-center justify-between gap-1">
-                    <span className="text-xs sm:text-sm font-extrabold text-teal-400">
-                      {formatUsd(product.price)}
-                    </span>
-                    <button
-                      onClick={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
-                      className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 border border-teal-500/40 hover:bg-teal-500 hover:text-slate-950 transition-all active:scale-90"
-                      aria-label={`Agregar ${product.name}`}
-                    >
-                      <Icon name="plus" className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* Mi Cuenta: saldo pendiente del cliente reconocido */}
       {savedCustomer?.customerName && customerProfile && (
         <div id="cuenta-seccion" className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
@@ -4478,178 +4270,6 @@ function CustomerView({
               Mi saldo
             </Btn>
           </div>
-        </div>
-      )}
-
-      {/* Mis Pedidos: historial del cliente reconocido */}
-      {savedCustomer?.customerName && customerOrders.length > 0 && (
-        <div id="pedidos-seccion" className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
-          <button
-            onClick={() => setShowMyOrders((v) => !v)}
-            className="w-full p-3 sm:p-4 flex items-center gap-3 hover:bg-slate-800/80 transition-colors text-left"
-          >
-            <span className="p-2 sm:p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 shrink-0">
-              <Icon name="package" className="w-4 h-4 sm:w-5 sm:h-5" />
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-sm sm:text-base font-bold text-white">Mis Pedidos</span>
-              <span className="block text-[11px] sm:text-xs text-slate-400 truncate">
-                {customerOrders.length} pedido{customerOrders.length !== 1 ? 's' : ''}
-                {customerProfile && customerProfile.addresses?.length > 0 ? ' · direcciones guardadas' : ''}
-              </span>
-            </span>
-            <span className={`p-1.5 rounded-lg bg-slate-700/50 text-slate-300 transition-transform duration-300 ${showMyOrders ? 'rotate-180' : ''}`}>
-              <Icon name="minus" className="w-3.5 h-3.5" />
-            </span>
-          </button>
-
-          {showMyOrders && (
-            <div className="px-3 sm:px-4 pb-3 sm:pb-4 space-y-2 sm:space-y-2.5 animate-fade-in">
-              {/* Filtro de fecha + Paginación */}
-              <div className="space-y-3">
-                {/* Chips rápidos + selector fecha */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {[
-                      { key: 'all', label: 'Todos' },
-                      { key: 'today', label: 'Hoy' },
-                      { key: 'thisWeek', label: 'Esta semana' },
-                      { key: 'lastWeek', label: 'Semana anterior' }
-                    ].map((f) => (
-                      <button
-                        key={f.key}
-                        onClick={() => { setOrderDateFilter({ preset: f.key, date: null }); setMyOrdersPage(1); }}
-                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
-                          orderDateFilter.preset === f.key
-                            ? 'bg-teal-500 text-slate-950 shadow-sm'
-                            : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-700/60'
-                        }`}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowCalendar(!showCalendar)}
-                      className="px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-300 text-[11px] font-medium hover:bg-slate-700/60 flex items-center gap-1.5"
-                    >
-                      <Icon name="filter" className="w-3.5 h-3.5" />
-                      {orderDateFilter.preset === 'day' && orderDateFilter.date
-                        ? orderDateFilter.date
-                        : 'Calendario'}
-                    </button>
-                    {showCalendar && (
-                      <MiniCalendar
-                        value={orderDateFilter.date}
-                        onChange={(d) => { setOrderDateFilter({ preset: 'day', date: d }); setMyOrdersPage(1); }}
-                        onClose={() => setShowCalendar(false)}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {/* Paginación */}
-                <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
-                  <span>
-                    Mostrando {pagedOrders.length > 0 ? ((myOrdersPage - 1) * PAGE_SIZE + 1) : 0}–{Math.min(myOrdersPage * PAGE_SIZE, filteredOrders.length)} de {filteredOrders.length}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setMyOrdersPage(p => Math.max(1, p - 1))}
-                      disabled={myOrdersPage === 1}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
-                    >
-                      <Icon name="minus" className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="px-2 font-semibold text-white">{myOrdersPage} / {totalPages}</span>
-                    <button
-                      onClick={() => setMyOrdersPage(p => Math.min(totalPages, p + 1))}
-                      disabled={myOrdersPage === totalPages}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
-                    >
-                      <Icon name="plus" className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Lista paginada */}
-              {pagedOrders.map((o) => {
-                const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
-                const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
-                const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
-                const payPending = needsPaymentValidation(o);
-                return (
-                  <div
-                    key={o.id}
-                    className={`p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border ${payRejected ? 'border-rose-500/50' : 'border-slate-700/50'}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs sm:text-sm font-bold text-white">
-                        Pedido <span className="text-teal-400">#{o.id}</span>
-                      </span>
-                      {payPending ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-500/40 text-amber-300">
-                          Pago en revisión
-                        </span>
-                      ) : (
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
-                          {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
-                      {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
-                    </p>
-                    {(o.paymentMethod === 'cartera' || Number(o.walletApplied) > 0) && (
-                      <p className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-[10px] font-bold">
-                        <Icon name="wallet" className="w-3 h-3" />
-                        Pagado con cartera
-                      </p>
-                    )}
-                    <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
-                      {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
-                    </p>
-                    {payRejected && (
-                      <div className="mt-2 flex items-start gap-1.5 rounded-xl bg-rose-500/10 border border-rose-500/40 p-2 text-[11px] text-rose-200/90">
-                        <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0 text-rose-400" />
-                        <span>Tu pago fue rechazado. Suministra otro comprobante
-                          {customerProfile?.isBenefited ? ' o pásalo a tu cuenta' : ''} en Ver detalle.</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 mt-2.5">
-                      <button
-                        onClick={() => onViewOrderDetail(o)}
-                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-1"
-                      >
-                        <Icon name="eye" className="w-3 h-3" />
-                        Ver detalle
-                      </button>
-                      {o.type === 'delivery' && o.status !== 'cancelado' && o.status !== 'entregado' && (
-                        <button
-                          onClick={() => onTrackLiveOrder(o)}
-                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1"
-                        >
-                          <Icon name="mapPin" className="w-3 h-3" />
-                          Rastrear
-                        </button>
-                      )}
-                      {cancellable && (
-                        <button
-                          onClick={() => onRequestCancelOrder(o)}
-                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1"
-                        >
-                          <Icon name="x" className="w-3 h-3" />
-                          Cancelar
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
@@ -4863,6 +4483,201 @@ function CustomerView({
         </div>
       </div>
 
+      {/* Recorrido Horizontal: estantes interactivos por categoría. Apagado por defecto;
+        el switch lo enciende. Tocar una góndola filtra; tocar de nuevo vuelve a Todas. */}
+      {!searchQuery.trim() && shelfGroups.length > 0 && (
+        <RevealOnScroll delay={40}>
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={`p-2 rounded-xl border transition-colors ${shelvesEnabled ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-400' : 'bg-slate-800/60 border-slate-700/60 text-slate-500'}`}>
+                <Icon name="store" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-bold text-white">Recorrido Horizontal</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+                  Estantes interactivos · pasá de góndola en góndola como en el kiosko
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShelvesEnabled((v) => !v)}
+              role="switch"
+              aria-checked={shelvesEnabled}
+              aria-label="Activar o desactivar el Recorrido Horizontal"
+              className={`shrink-0 inline-flex items-center gap-2 px-2.5 py-1.5 rounded-full border text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 ${
+                shelvesEnabled
+                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
+                  : 'bg-slate-800/60 border-slate-700/60 text-slate-400'
+              }`}
+            >
+              <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${shelvesEnabled ? 'bg-indigo-500' : 'bg-slate-600'}`}>
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${shelvesEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+              </span>
+              {shelvesEnabled ? 'Encendido' : 'Apagado'}
+            </button>
+          </div>
+
+          {shelvesEnabled && (
+          <div className="estantes-scene space-y-3.5 sm:space-y-4">
+            {shelfGroups.map((shelf, idx) => (
+              <Shelf
+                key={shelf.category}
+                category={shelf.category}
+                items={shelf.items}
+                floor={idx + 1}
+                isActive={selectedCategory === shelf.category}
+                onAddToCart={onAddToCart}
+                onOpenProductModal={onOpenProductModal}
+                onSelectCategory={() =>
+                  setSelectedCategory((cur) => (cur === shelf.category ? 'Todas' : shelf.category))
+                }
+              />
+            ))}
+          </div>
+          )}
+        </section>
+        </RevealOnScroll>
+      )}
+
+      {/* Vitrina "Los más pedidos": carrusel horizontal, SOLO en móviles (lg:hidden) */}
+      {topSellers.length > 0 && (
+        <RevealOnScroll delay={80} className="lg:hidden">
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400">
+                <Icon name="star" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div>
+                <h3 className="font-display text-base sm:text-lg font-extrabold text-white">Los más pedidos</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400">Los favoritos que vuelan del kiosko</p>
+              </div>
+            </div>
+            <span className="px-2 py-1 rounded-full bg-teal-500/10 text-teal-400 text-[10px] font-bold uppercase tracking-wider border border-teal-500/20">
+              top ventas
+            </span>
+          </div>
+
+          <div className="flex gap-3 sm:gap-5 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+            {topSellers.map((product) => (
+              <article
+                key={product.id}
+                onClick={onOpenProductModal ? () => onOpenProductModal(product) : undefined}
+                className="snap-start shrink-0 w-[70vw] min-[480px]:w-[320px] sm:w-[340px] rounded-2xl sm:rounded-3xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-teal-500/50 hover:shadow-2xl hover:shadow-teal-500/10 hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+              >
+                <div className="relative aspect-[16/10] bg-slate-900">
+                  <ProductImg
+                    product={product}
+                    alt={product.name}
+                    loading="lazy"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
+                    <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
+                    {product.category}
+                  </span>
+                </div>
+                <div className="p-3 sm:p-4 flex flex-col gap-1.5 flex-1">
+                  <h4 className="font-display text-sm sm:text-base font-extrabold text-white truncate">{product.name}</h4>
+                  <p className="text-[11px] text-slate-400 line-clamp-1">
+                    {formatSize(product) || product.brand || 'Artículo'}
+                  </p>
+                  <div className="mt-auto pt-2 flex items-end justify-between gap-2 border-t border-slate-700/50">
+                    <div className="min-w-0">
+                      <PriceCountUp
+                        value={product.price}
+                        rate={rate}
+                        className="font-display text-xl sm:text-2xl font-black tracking-tight text-white"
+                        bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
+                      />
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(product, 1, e.currentTarget.getBoundingClientRect());
+                      }}
+                      className="shrink-0 p-2.5 rounded-xl bg-teal-500 text-slate-950 hover:bg-teal-400 transition-all active:scale-90 shadow-lg shadow-teal-500/20"
+                      aria-label={`Agregar ${product.name}`}
+                    >
+                      <Icon name="plus" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+        </RevealOnScroll>
+      )}
+
+      {/* Radar de Ofertas "Novedades": nuevos, por agotar y frecuentes */}
+      {radarProducts.length > 0 && (
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                <Icon name="radio" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-white">Radar de Novedades</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400">Lo que se mueve hoy en la tienda</p>
+              </div>
+            </div>
+            <span className="px-2 py-1 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase tracking-wider border border-amber-500/20 animate-pulse">
+              en vivo
+            </span>
+          </div>
+
+          <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+            {radarProducts.map(({ product, tag }) => (
+              <article
+                key={product.id}
+                className="snap-start shrink-0 w-40 sm:w-44 rounded-2xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-amber-500/50 hover:-translate-y-0.5 transition-all"
+              >
+                <div className="relative">
+                  <ProductImg
+                    product={product}
+                    alt={product.name}
+                    loading="lazy"
+                    className="w-full h-24 sm:h-28 object-cover bg-slate-900"
+                  />
+                  <span
+                    className={`absolute top-2 left-2 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
+                      tag === 'Nuevo'
+                        ? 'bg-teal-500/90 text-slate-950 border-teal-400'
+                        : tag === 'Se agota'
+                          ? 'bg-rose-500/90 text-white border-rose-400'
+                          : 'bg-indigo-500/90 text-white border-indigo-400'
+                    }`}
+                  >
+                    {tag}
+                  </span>
+                </div>
+                <div className="p-2.5 flex flex-col gap-1.5 flex-1">
+                  <h4 className="text-xs font-bold text-white truncate">{product.name}</h4>
+                  <p className="text-[11px] text-slate-400 line-clamp-1">
+                    {formatSize(product) || product.category || 'Artículo'}
+                  </p>
+                  <div className="mt-auto flex items-center justify-between gap-1">
+                    <span className="text-xs sm:text-sm font-extrabold text-teal-400">
+                      {formatUsd(product.price)}
+                    </span>
+                    <button
+                      onClick={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
+                      className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 border border-teal-500/40 hover:bg-teal-500 hover:text-slate-950 transition-all active:scale-90"
+                      aria-label={`Agregar ${product.name}`}
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Product Grid */}
       {products.length === 0 ? (
         <div className="text-center py-16 bg-slate-800/30 rounded-3xl border border-slate-800 space-y-3">
@@ -4982,7 +4797,8 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
             {category}
           </span>
           <span className="block text-[10px] text-slate-500 truncate">
-            {items.length} producto{items.length !== 1 ? 's' : ''} · tocá la góndola para verla
+            {items.length} producto{items.length !== 1 ? 's' : ''} ·{' '}
+            {isActive ? 'tocá de nuevo para mostrar todas' : 'tocá la góndola para filtrar'}
           </span>
         </span>
         <span className="shrink-0 text-[10px] font-mono text-slate-500 bg-slate-900/50 border border-slate-700/60 px-1.5 py-0.5 rounded-md">
@@ -5046,6 +4862,116 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
         <div className="shelf-lip" />
       </div>
     </article>
+  );
+}
+
+// Calculadora flotante: botón fijo (solo escritorio; en móvil se abre desde la
+// barra inferior) que despliega un panel no modal de conversión $ ⇄ Bs. El panel
+// tiene pointer-events solo sobre sí mismo: no bloquea la navegación ni el scroll.
+function CalcFab({ open, onToggle, rate }) {
+  const [usdInput, setUsdInput] = useState('');
+  const [bsInput, setBsInput] = useState('');
+  const r = rate?.rate || 0;
+
+  const handleUsd = (value) => {
+    const v = value.replace(/[^\d.,]/g, '');
+    setUsdInput(v);
+    const num = parseAmount(v);
+    setBsInput(Number.isFinite(num) ? formatAmount(num * r) : '');
+  };
+
+  const handleBs = (value) => {
+    const v = value.replace(/[^\d.,]/g, '');
+    setBsInput(v);
+    const num = parseAmount(v);
+    setUsdInput(Number.isFinite(num) && r > 0 ? formatAmount(num / r) : '');
+  };
+
+  return (
+    <>
+      {/* Botón fijo: solo escritorio (en móvil el acceso vive en la barra inferior) */}
+      <button
+        onClick={onToggle}
+        aria-label={open ? 'Cerrar calculadora' : 'Abrir calculadora'}
+        aria-expanded={open}
+        className={`hidden sm:flex fixed right-5 bottom-6 z-[46] p-3.5 rounded-2xl shadow-xl border backdrop-blur-md transition-all active:scale-90 ${
+          open
+            ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-teal-500/30'
+            : 'bg-slate-800/90 text-teal-300 border-teal-500/40 shadow-teal-500/10 hover:bg-slate-800'
+        }`}
+      >
+        <Icon name="calculator" className="w-5 h-5 sm:w-6 sm:h-6" />
+      </button>
+
+      {/* Panel flotante no modal: no cubre toda la pantalla y deja navegar de fondo */}
+      {open && (
+        <div
+          className="fixed right-3 sm:right-5 bottom-[4.75rem] sm:bottom-24 z-[46] w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-scale-up"
+        >
+          <div className="flex items-center justify-between px-3.5 pt-3 pb-1">
+            <span className="text-xs font-black text-white flex items-center gap-1.5 min-w-0">
+              <Icon name="calculator" className="w-4 h-4 text-teal-400 shrink-0" />
+              <span className="truncate">
+                Calculadora · tasa {r ? r.toLocaleString('es-AR') : '—'} Bs
+              </span>
+            </span>
+            <button
+              onClick={onToggle}
+              aria-label="Cerrar calculadora"
+              className="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
+            >
+              <Icon name="x" className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="px-3.5 pb-3.5 space-y-2">
+            <div>
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                US$ (divisas)
+              </span>
+              <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-2">
+                <Icon name="dollarSign" className="w-4 h-4 text-teal-400 shrink-0" />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={usdInput}
+                  onChange={(e) => handleUsd(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center text-slate-600">
+              <Icon name="refresh" className="w-4 h-4 rotate-90" />
+            </div>
+
+            <div>
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                Bs (bolívares)
+              </span>
+              <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-2">
+                <span className="text-teal-300 font-bold text-sm shrink-0">Bs</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={bsInput}
+                  onChange={(e) => handleBs(e.target.value)}
+                  placeholder="0,00"
+                  className="w-full bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {r > 0 && (
+              <p className="text-[10px] text-slate-500">
+                Calculado a la tasa BCV del día ({rate?.source}). Toque fuera o la X para cerrar.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -6406,7 +6332,9 @@ function BottomTabBar({
   pendingOrders,
   pendingPayments,
   onLogout,
-  isAdminAuthed
+  isAdminAuthed,
+  calcOpen,
+  onToggleCalc
 }) {
   const base =
     'flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 flex-[1_0_auto] min-w-[64px] max-w-[104px] rounded-2xl transition-all duration-300 active:scale-95';
@@ -6420,6 +6348,13 @@ function BottomTabBar({
       label: 'Tienda',
       icon: 'home',
       onClick: onGoStore,
+      badge: null
+    },
+    {
+      key: 'calc',
+      label: 'Calculadora',
+      icon: 'calculator',
+      onClick: onToggleCalc,
       badge: null
     },
     {
@@ -6473,6 +6408,7 @@ function BottomTabBar({
   const isTabActive = (t) => {
     if (activeView === 'admin' && isAdminAuthed) return adminTab === t.key;
     if (t.key === 'cart') return cartCount > 0;
+    if (t.key === 'calc') return calcOpen;
     return customerTab === t.key;
   };
 

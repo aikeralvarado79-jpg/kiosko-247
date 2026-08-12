@@ -4632,23 +4632,6 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   const [justAdded, setJustAdded] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
 
-  // Vitrina 3D: efecto de inclinación (tilt) al pasar/arrastrar sobre la tarjeta.
-  const cardRef = useRef(null);
-  const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
-  const reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  const handleTilt = (e) => {
-    if (reducedMotion || !cardRef.current) return;
-    const rect = cardRef.current.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / rect.width - 0.5;
-    const py = (e.clientY - rect.top) / rect.height - 0.5;
-    setTilt({ rx: -py * 10, ry: px * 12 });
-  };
-  const resetTilt = () => {
-    if (reducedMotion) return;
-    setTilt({ rx: 0, ry: 0 });
-  };
-
   const handleAdd = (e) => {
     setJustAdded(true);
     setTimeout(() => setJustAdded(false), 1200);
@@ -4657,29 +4640,9 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
 
   return (
     <div
-      ref={cardRef}
-      onMouseMove={handleTilt}
-      onMouseLeave={resetTilt}
-      style={{
-        transform: reducedMotion
-          ? undefined
-          : `perspective(900px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) translateZ(0)`,
-        transformStyle: 'preserve-3d',
-        transition: 'transform 180ms ease-out, box-shadow 300ms, border-color 300ms, translate 300ms'
-      }}
-      className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 active:scale-[0.97] flex flex-col justify-between backdrop-blur-sm tilt-3d"
+      className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm"
     >
-      {/* Contenido plano: se contra-rota para que solo el marco de la tarjeta se incline */}
-      <div
-        className="flex flex-col flex-1 overflow-hidden rounded-2xl sm:rounded-3xl"
-        style={{
-          transform: reducedMotion
-            ? undefined
-            : `rotateX(${-tilt.rx}deg) rotateY(${-tilt.ry}deg)`,
-          transformStyle: 'preserve-3d',
-          transition: 'transform 180ms ease-out'
-        }}
-      >
+      <div className="flex flex-col flex-1 overflow-hidden rounded-2xl sm:rounded-3xl">
       <div onClick={onOpenDetail} className="cursor-pointer relative overflow-hidden aspect-square sm:aspect-[4/3] bg-slate-900">
         <img
           src={product.image}
@@ -4793,176 +4756,9 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   );
 }
 
-// KAPSULA AR: overlay a pantalla completa con la cámara del dispositivo y un HUD
-// flotante del producto (imagen, precio, stock, categoría). Usa getUserMedia
-// cuando hay permiso; si no, muestra un fondo AR simulado con el producto.
-function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const [camOk, setCamOk] = useState(false);
-  const [camError, setCamError] = useState(false);
-  const [imgOk, setImgOk] = useState(Boolean(product.image));
-  const [qty, setQty] = useState(1);
-  const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
-  const isOut = avail <= 0;
-
-  useEffect(() => {
-    let alive = true;
-    const start = async () => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        if (alive) setCamError(true);
-        return;
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false
-        });
-        if (!alive) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-        setCamOk(true);
-      } catch {
-        if (alive) setCamError(true);
-      }
-    };
-    start();
-    return () => {
-      alive = false;
-      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
-
-  // El <video> se monta recién cuando camOk = true; aquí sí existe el nodo,
-  // así que conectamos el stream capturado al elemento para que no quede negro.
-  useEffect(() => {
-    if (!camOk || !videoRef.current || !streamRef.current) return;
-    videoRef.current.srcObject = streamRef.current;
-    videoRef.current.play().catch(() => {});
-  }, [camOk]);
-
-  return (
-    <div className="fixed inset-0 z-[80] bg-black flex flex-col animate-fade-in">
-      {/* Cámara (o fondo AR simulado si no hay permiso) */}
-      <div className="relative flex-1 min-h-0 overflow-hidden">
-        {camOk ? (
-          <video ref={videoRef} autoPlay muted playsInline className="absolute inset-0 w-full h-full object-cover" />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-fuchsia-950 via-slate-950 to-indigo-950">
-            <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'radial-gradient(circle at 20% 30%, rgba(217,70,239,0.35), transparent 40%), radial-gradient(circle at 80% 70%, rgba(99,102,241,0.35), transparent 45%)' }} />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-[11px] text-fuchsia-200/70 px-4 text-center">
-                {camError ? 'Sin acceso a cámara · Mostrando vista aumentada simulada' : 'Iniciando cámara…'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Scan line AR */}
-        <div className="absolute inset-x-0 top-1/2 h-0.5 bg-fuchsia-400/70 shadow-[0_0_18px_rgba(217,70,239,0.9)] animate-ar-scan pointer-events-none" />
-
-        {/* Marco de anclaje */}
-        <div className="absolute inset-x-8 top-6 bottom-24 border border-fuchsia-400/30 rounded-3xl pointer-events-none">
-          <div className="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-2 border-l-2 border-fuchsia-400 rounded-tl-3xl animate-ar-pulse" />
-          <div className="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-2 border-r-2 border-fuchsia-400 rounded-tr-3xl animate-ar-pulse" />
-          <div className="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-2 border-l-2 border-fuchsia-400 rounded-bl-3xl animate-ar-pulse" />
-          <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-2 border-r-2 border-fuchsia-400 rounded-br-3xl animate-ar-pulse" />
-        </div>
-
-        {/* Producto flotante "anclado" */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[55%] w-44 h-44 sm:w-56 sm:h-56 rounded-full bg-slate-950/55 border-2 border-fuchsia-400/70 overflow-hidden shadow-2xl shadow-fuchsia-500/40 animate-float">
-          {imgOk ? (
-            <img src={product.image} alt={product.name} className="w-full h-full object-cover" onError={() => setImgOk(false)} draggable={false} />
-          ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-fuchsia-900/60 to-indigo-900/60 p-4 text-center">
-              <Icon name="package" className="w-10 h-10 text-fuchsia-300/80" />
-              <span className="text-[11px] font-bold text-white leading-tight line-clamp-2">{product.name || 'Producto'}</span>
-            </div>
-          )}
-          <span className="absolute inset-0 bg-gradient-to-tr from-transparent via-transparent to-fuchsia-400/20 pointer-events-none" />
-        </div>
-
-        {/* Leyenda: qué es KAPSULA AR */}
-        <div className="absolute inset-x-0 bottom-4 flex justify-center px-6">
-          <span className="text-center text-[11px] font-semibold text-fuchsia-100/90 bg-slate-950/60 backdrop-blur-md border border-fuchsia-400/30 rounded-full px-3.5 py-1.5">
-            Apunta la cámara: esta es una vista previa aumentada del producto en tu entorno.
-          </span>
-        </div>
-
-        {/* HUD chips */}
-        <div className="absolute top-8 right-8 space-y-2 text-right">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-950/70 border border-emerald-400/40 text-emerald-300 text-[10px] font-bold backdrop-blur-md">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> TARGET LOCK
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-950/70 border border-fuchsia-400/40 text-fuchsia-200 text-[10px] font-bold backdrop-blur-md">
-            <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
-            {product.category}
-          </span>
-        </div>
-      </div>
-
-      {/* Barra inferior de información */}
-      <div className="shrink-0 bg-slate-950/95 border-t border-fuchsia-500/20 backdrop-blur-xl p-4 space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <h3 className="text-sm sm:text-base font-bold text-white truncate">{product.name}</h3>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-lg font-black text-fuchsia-300">{formatUsd(product.price)}</span>
-              {rate?.rate > 0 && (
-                <span className="text-[11px] text-slate-400">{formatBs(usdToBs(product.price, rate.rate))}</span>
-              )}
-            </div>
-            <span className={`text-[10px] font-bold mt-1 inline-block ${isOut ? 'text-rose-400' : 'text-emerald-400'}`}>
-              {isOut ? 'AGOTADO' : `${avail} en stock`}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setQty((q) => Math.max(1, q - 1))}
-              className="p-2 rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 transition-all active:scale-90"
-              aria-label="Disminuir cantidad"
-            >
-              <Icon name="minus" className="w-4 h-4" />
-            </button>
-            <span className="min-w-8 text-center text-lg font-black text-white">{qty}</span>
-            <button
-              onClick={() => setQty((q) => q + 1)}
-              className="p-2 rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 transition-all active:scale-90"
-              aria-label="Aumentar cantidad"
-            >
-              <Icon name="plus" className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={onClose}
-            className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold transition-all flex items-center justify-center gap-1.5"
-          >
-            <Icon name="x" className="w-4 h-4" /> Salir
-          </button>
-          <button
-            onClick={() => {
-              onAddToCart(qty, undefined);
-              onClose();
-            }}
-            disabled={isOut}
-            className="py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-indigo-500 text-white text-sm font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-1.5 active:scale-95"
-          >
-            <Icon name="plus" className="w-4 h-4" /> Agregar {formatUsd(product.price * qty)}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, onAddToCart, isFavorite, onToggleFavorite, onNavigate }) {
   const [quantity, setQuantity] = useState(1);
   const [showFullscreen, setShowFullscreen] = useState(false);
-  const [showAr, setShowAr] = useState(false);
   const [touchX, setTouchX] = useState(null);
   const [slideDir, setSlideDir] = useState('right');
   const isOut = product.stock <= 0 || product.reserved >= product.stock;
@@ -5067,16 +4863,6 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             aria-label="Ver imagen en pantalla completa"
           >
             <Icon name="maximize" className="w-5 h-5" />
-          </button>
-
-          {/* Botón KAPSULA AR: vista aumentada del producto */}
-          <button
-            onClick={() => setShowAr(true)}
-            className="absolute bottom-3 right-14 sm:right-14 z-20 p-2 rounded-xl bg-gradient-to-tr from-fuchsia-600/80 to-indigo-600/80 backdrop-blur-md border border-fuchsia-400/40 text-white hover:border-fuchsia-300/70 hover:from-fuchsia-500 hover:to-indigo-500 transition-all active:scale-90 animate-glow-pulse"
-            aria-label="Ver en KAPSULA AR"
-            title="KAPSULA AR"
-          >
-            <Icon name="camera" className="w-5 h-5" />
           </button>
 
           {/* Paginación de la misma marca */}
@@ -5259,11 +5045,6 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             )}
           </div>
         </div>
-      )}
-
-      {/* KAPSULA AR: vista aumentada del producto sobre la cámara del dispositivo */}
-      {showAr && (
-        <KapsulaArModal product={product} rate={rate} onClose={() => setShowAr(false)} onAddToCart={onAddToCart} />
       )}
     </div>
   );

@@ -369,3 +369,127 @@ html.light .bg-gradient-to-r.from-white {
 /* Fade-in del arte de producto al terminar de cargar la imagen */
 .img-load-fade { opacity: 0; transition: opacity 0.45s ease; }
 .img-load-fade.is-loaded { opacity: 1; }
+
+/* ------------------------------------------------------------------ */
+/*  Estantes interactivos — visita virtual del kiosko                   */
+/*  "3D lite": anaqueles con perspectiva, leve rotateX/Y al pasar y    */
+/*  productos parados sobre el borde del estante. Sin librerías.       */
+/* ------------------------------------------------------------------ */
+.estantes-scene { perspective: 1400px; }
+
+.shelf-card {
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.shelf-card:hover {
+  transform: rotateY(-1.2deg) translateZ(2px);
+}
+
+/* Panel del anaquel: el tablero donde se apoyan los productos */
+.shelf-panel {
+  position: relative;
+  perspective: 700px;
+  transform: rotateX(3deg);
+  transform-origin: center top;
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+.shelf-card:hover .shelf-panel { transform: rotateX(0deg); }
+
+/* Item individual: ancho compacto, encaja en el scroll horizontal */
+.shelf-item {
+  width: 104px;
+  scroll-snap-align: start;
+  flex-shrink: 0;
+  perspective: 520px;
+  transform-style: preserve-3d;
+}
+@media (min-width: 640px) {
+  .shelf-item { width: 124px; }
+}
+
+/* Producto "parado" sobre el anaquel */
+.shelf-product {
+  position: relative;
+  height: 108px;
+  cursor: pointer;
+  transform-style: preserve-3d;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.shelf-item:nth-child(n) { animation: shelf-item-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: var(--sdel, 0ms); }
+@media (hover: hover) {
+  .shelf-item:hover .shelf-product { transform: translateY(-7px) rotateY(7deg) scale(1.05); }
+}
+
+/* Entrada escalonada de los productos del estante */
+@keyframes shelf-item-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.shelf-product__art {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid rgb(51 65 85 / 0.75);
+  background: linear-gradient(180deg, rgb(15 23 42 / 0.92), rgb(30 41 59 / 0.55));
+  box-shadow: 0 12px 20px -10px rgb(2 6 23 / 0.75);
+}
+.shelf-product__img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Reflejo de "cristal" en el frente del producto */
+.shelf-product__art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, rgb(255 255 255 / 0.16) 0%, transparent 34%);
+  pointer-events: none;
+}
+
+/* Sombra elíptica bajo el producto, "apoyada" en el tablero */
+.shelf-product__shadow {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 76%;
+  height: 10px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgb(2 6 23 / 0.55) 0%, transparent 72%);
+  filter: blur(1px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .shelf-item:hover .shelf-product__shadow { opacity: 0.5; transform: translateX(-50%) scaleX(0.72); }
+}
+
+/* Borde frontal del estante (la tira que sostiene los productos) */
+.shelf-lip {
+  position: relative;
+  height: 10px;
+  border-radius: 7px;
+  background: linear-gradient(180deg, rgb(71 85 105 / 0.95), rgb(30 41 59 / 0.95));
+  box-shadow: 0 -1px 0 rgb(226 232 240 / 0.07), 0 10px 16px -8px rgb(2 6 23 / 0.6);
+}
+
+/* Indicador del piso activo */
+.shelf-card.is-active { border-color: rgb(99 102 241 / 0.55); }
+.shelf-card.is-active .shelf-lip {
+  background: linear-gradient(180deg, rgb(99 102 241 / 0.85), rgb(67 56 202 / 0.9));
+}
+
+/* Modo claro: los anaqueles usan madera clara para que no se pierdan */
+html.light .shelf-lip {
+  background: linear-gradient(180deg, rgb(203 213 225 / 0.98), rgb(148 163 184 / 0.95));
+  box-shadow: 0 -1px 0 rgb(15 23 42 / 0.08), 0 8px 14px -8px rgb(15 23 42 / 0.25);
+}
+html.light .shelf-product__art {
+  background: linear-gradient(180deg, rgb(248 250 252 / 0.96), rgb(226 232 240 / 0.7));
+  border-color: rgb(148 163 184 / 0.7);
+  box-shadow: 0 12px 20px -12px rgb(15 23 42 / 0.25);
+}
+html.light .shelf-product__shadow { background: radial-gradient(ellipse at center, rgb(15 23 42 / 0.28) 0%, transparent 72%); }

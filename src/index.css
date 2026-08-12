@@ -282,6 +282,15 @@ html.light .bg-rose-600.text-white {
   color: #ffffff;
 }
 
+/* Chips de categoría sólidos de color oscuro: texto blanco legible en modo claro */
+html.light .bg-fuchsia-500.text-white,
+html.light .bg-indigo-500.text-white,
+html.light .bg-violet-500.text-white,
+html.light .bg-pink-500.text-white,
+html.light .bg-teal-600.text-white {
+  color: #ffffff;
+}
+
 /* Superficies oscuras que conservan su oscuridad y su texto claro */
 /* Barra de carrito flotante (bg-slate-950/90) */
 html.light .bg-slate-950\/90 :is(.text-white, .text-slate-300, .text-slate-400) { color: #e2e8f0; }

@@ -3996,6 +3996,22 @@ function CustomerView({
     return ranked.slice(0, 5).map((x) => x.p);
   }, [allProducts, orders]);
 
+  // Estantes del recorrido virtual: agrupa los productos visibles por categoría,
+  // en el orden de las categorías de la tienda (máx. 6 pisos × 8 ítems).
+  const shelfGroups = useMemo(() => {
+    if (!Array.isArray(products) || products.length === 0) return [];
+    const byCat = {};
+    products.forEach((p) => {
+      const c = p.category || 'Otros';
+      (byCat[c] = byCat[c] || []).push(p);
+    });
+    const order = [...new Set([...categories, ...Object.keys(byCat)])];
+    return order
+      .filter((c) => byCat[c] && byCat[c].length > 0)
+      .map((c) => ({ category: c, items: byCat[c].slice(0, 8) }))
+      .slice(0, 6);
+  }, [products, categories]);
+
   // Efecto parallax del hero: la foto de fondo se desplaza más lento que el scroll.
   const heroRef = useRef(null);
   const [heroOffset, setHeroOffset] = useState(0);
@@ -4093,6 +4109,45 @@ function CustomerView({
         </div>
       </div>
       </RevealOnScroll>
+
+      {/* Recorrido virtual del kiosko: estantes interactivos por categoría */}
+      {!searchQuery.trim() && shelfGroups.length > 0 && (
+        <RevealOnScroll delay={40}>
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
+                <Icon name="store" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-white">Recorrido del kiosko</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400">
+                  Estantes interactivos · pasá de góndola en góndola como en el kiosko
+                </p>
+              </div>
+            </div>
+            <span className="px-2 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase tracking-wider border border-indigo-500/20">
+              visita virtual
+            </span>
+          </div>
+
+          <div className="estantes-scene space-y-3.5 sm:space-y-4">
+            {shelfGroups.map((shelf, idx) => (
+              <Shelf
+                key={shelf.category}
+                category={shelf.category}
+                items={shelf.items}
+                floor={idx + 1}
+                isActive={selectedCategory === shelf.category}
+                onAddToCart={onAddToCart}
+                onOpenProductModal={onOpenProductModal}
+                onSelectCategory={() => setSelectedCategory(shelf.category)}
+              />
+            ))}
+          </div>
+        </section>
+        </RevealOnScroll>
+      )}
 
       {/* Vitrina "Los más pedidos": carrusel horizontal, SOLO en móviles (lg:hidden) */}
       {topSellers.length > 0 && (
@@ -4890,6 +4945,107 @@ function ProductImg({ product, image, name, brand, alt, className = '', loading 
       className={`img-load-fade ${className || ''}`}
       {...imgProps}
     />
+  );
+}
+
+// Estante interactivo: un anaquel (categoría) con los productos "de pie" sobre
+// el borde, en fila horizontal scrolleable con leve 3D al pasar el cursor.
+// Tocar el producto abre el detalle; el botón lo suma al carrito al instante.
+function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductModal, onSelectCategory }) {
+  const id = categoryIdentity(category);
+  const [justAddedId, setJustAddedId] = useState(null);
+
+  const handleAdd = (product, e) => {
+    if (justAddedId === product.id) return;
+    setJustAddedId(product.id);
+    setTimeout(() => setJustAddedId((cur) => (cur === product.id ? null : cur)), 1200);
+    haptic(8);
+    onAddToCart(product, 1, e.currentTarget.getBoundingClientRect());
+  };
+
+  return (
+    <article
+      className={`shelf-card rounded-2xl sm:rounded-3xl bg-slate-800/50 border backdrop-blur-sm transition-colors ${
+        isActive ? 'is-active border-indigo-500/50' : 'border-slate-700/60 hover:border-slate-600'
+      }`}
+    >
+      {/* Cabecera del anaquel: pisando la góndola se filtra esa categoría */}
+      <button
+        onClick={onSelectCategory}
+        className="w-full px-3 sm:px-4 pt-2.5 pb-1 flex items-center gap-2 min-w-0 text-left group"
+      >
+        <span className={`p-1.5 rounded-lg ${id.solid} shrink-0 shadow-sm`}>
+          <Icon name={id.icon} className="w-3.5 h-3.5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs sm:text-sm font-bold text-white truncate group-hover:text-indigo-300 transition-colors">
+            {category}
+          </span>
+          <span className="block text-[10px] text-slate-500 truncate">
+            {items.length} producto{items.length !== 1 ? 's' : ''} · tocá la góndola para verla
+          </span>
+        </span>
+        <span className="shrink-0 text-[10px] font-mono text-slate-500 bg-slate-900/50 border border-slate-700/60 px-1.5 py-0.5 rounded-md">
+          piso {String(floor).padStart(2, '0')}
+        </span>
+      </button>
+
+      {/* Tablero del estante con los productos en fila */}
+      <div className="shelf-panel mt-2 px-3 sm:px-4 pb-3 pt-1">
+        <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-3 px-3 pt-1 pb-2">
+          {items.map((p, i) => {
+            const avail = Math.max(0, Number(p.stock) - Number(p.reserved || 0));
+            const out = avail <= 0;
+            return (
+              <div key={p.id} className="shelf-item" style={{ ['--sdel']: `${Math.min(i, 6) * 55}ms` }}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenProductModal(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onOpenProductModal(p);
+                    }
+                  }}
+                  aria-label={`Ver ${p.name}`}
+                  className="shelf-product"
+                >
+                  <div className="shelf-product__art">
+                    <ProductImg product={p} alt={p.name} loading="lazy" className="shelf-product__img" />
+                  </div>
+                  <span className="shelf-product__shadow" />
+                </div>
+                <div className="mt-2 space-y-1">
+                  <p className="truncate text-[10px] sm:text-[11px] font-semibold text-slate-200">{p.name}</p>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className={`min-w-0 text-[11px] sm:text-xs font-extrabold ${out ? 'text-slate-500 line-through' : 'text-teal-400'}`}>
+                      {formatUsd(p.price)}
+                    </span>
+                    <button
+                      onClick={(e) => handleAdd(p, e)}
+                      disabled={out}
+                      aria-label={`Agregar ${p.name}`}
+                      className={`shrink-0 p-1.5 rounded-lg transition-all active:scale-90 disabled:opacity-40 disabled:pointer-events-none ${
+                        justAddedId === p.id
+                          ? 'bg-emerald-500 text-slate-950 animate-add-pulse'
+                          : 'bg-teal-500/20 text-teal-300 border border-teal-500/40 hover:bg-teal-500 hover:text-slate-950'
+                      }`}
+                    >
+                      <Icon name={justAddedId === p.id ? 'check' : 'plus'} className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {out && (
+                    <span className="block text-[9px] text-rose-400 font-bold">Agotado</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="shelf-lip" />
+      </div>
+    </article>
   );
 }
 

@@ -85,6 +85,14 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
       download: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />,
       radio: <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4M16.2 7.8c2.3 2.3 2.3 6.1 0 8.4M19.1 4.9C23 8.8 23 15.2 19.1 19.1M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
       percent: <path d="M19 5 5 19M6.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17.5 20a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />,
+      burger: <path d="M3 11h18a9 9 0 0 0-18 0zM3 15h18M7 11l.01.01M12 11l.01.01M17 11l.01.01M5 19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2M6 15a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2" />,
+      cup: <path d="M8 2v3M16 2v3M3 5h18M4 8h16l-1.5 12a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2L4 8zM7 14a5 5 0 0 0 10 0" />,
+      milk: <path d="M8 2h8v3l-1.5 2V21a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V7L8 5V2zM10 10h4M10 14h4M10 18h4" />,
+      candy: <path d="M7.5 6.5 4 4l2.5-2.5C7.5 2.5 7.5 5 7.5 6.5zM12.5 17.5 16 20l-2.5 2.5c-1-1-1-3.5-1-5zM6 6l12 12c1.5-1.5 1-4 0-6.5-2.5-1-5-1.5-6.5 0L6 6zM16 20 8 12M4 4l8 8" />,
+      spray: <path d="M9 4h6a2 2 0 0 1 2 2v2M9 4a2 2 0 0 0-2 2v2m2-4h6M7 8h10v12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V8zM17 6l3-3M14 6l1-1" />,
+      chips: <path d="M6 21h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM2 9h2M2 15h2M20 9h2M20 15h2M12 7v10" />,
+      pizza: <path d="M12 2 4 7l8 15 8-15-8-5zM12 2v5M4 7h16M9 7l3 6 3-6M12 13v9" />,
+      iceCream: <path d="M12 2a5 5 0 0 1 5 5c0 1.5-.5 2.5-1 3.5h-8C7.5 9.5 7 8.5 7 7a5 5 0 0 1 5-5zM8 11h8l-2.5 10a2 2 0 0 1-3 0L8 11z" />,
     };
 
   return (
@@ -101,6 +109,111 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     >
       {icons[name] || <circle cx="12" cy="12" r="10" />}
     </svg>
+  );
+};
+
+// Logo de marca: carrito de compras de kiosko (venta y entrega) sobre un sello
+// redondeado con gradiente propio (no depende del tema) para que el logo se
+// reconozca igual en modo claro y oscuro.
+const BrandLogo = ({ className = 'w-9 h-9' }) => (
+  <span
+    className={`inline-flex items-center justify-center rounded-2xl bg-gradient-to-tr from-teal-500 via-emerald-500 to-cyan-400 shadow-lg shadow-teal-500/25 ring-2 ring-white/15 shrink-0 select-none ${className}`}
+    aria-hidden="true"
+  >
+    <svg viewBox="0 0 24 24" className="w-[66%] h-[66%] fill-slate-950" xmlns="http://www.w3.org/2000/svg">
+      <path d="M2 3h2.5l2.4 12.2a2 2 0 0 0 1.98 1.62h9.8a2 2 0 0 0 1.97-1.6L22 7H5.6M9 20a1.4 1.4 0 1 0 0-2.8A1.4 1.4 0 0 0 9 20zM17 20a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8z" />
+    </svg>
+  </span>
+);
+
+// Reveal on scroll: aplica reveal-on-scroll al envolver un bloque y activa la
+// clase is-revealed cuando entra al viewport. Respeto total a prefers-reduced-motion.
+const RevealOnScroll = ({ children, className = '', delay = 0, as: Tag = 'div', ...props }) => {
+  const ref = useRef(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    if (
+      typeof matchMedia !== 'undefined' &&
+      matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      setVisible(true);
+      return undefined;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            io.disconnect();
+          }
+        });
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -36px 0px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <Tag
+      ref={ref}
+      className={`reveal-on-scroll ${visible ? 'is-revealed' : ''} ${className}`.trim()}
+      style={{ '--reveal-delay': `${delay}ms`, ...props.style }}
+      {...props}
+    >
+      {children}
+    </Tag>
+  );
+};
+
+// Precio con count-up: anima el número del valor anterior al nuevo en ~0.5s.
+// Sin animación si el usuario prefiere reducir el movimiento del sistema.
+const useCountUp = (value, duration = 500) => {
+  const [display, setDisplay] = useState(value);
+  const [animKey, setAnimKey] = useState(0);
+
+  useEffect(() => {
+    const prev = display;
+    if (Number(display) === Number(value)) return undefined;
+    let raf = 0;
+    const start = performance.now();
+    const from = Number(prev) || 0;
+    const to = Number(value) || 0;
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(from + (to - from) * eased);
+      if (t < 1) raf = requestAnimationFrame(step);
+      else setAnimKey((k) => k + 1);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, duration]);
+
+  return { display, animKey };
+};
+
+// Precio con count-up listo para usarse junto a los helpers formatUsd/formatBs.
+const PriceCountUp = ({ value, rate, className = '', bsClass = '', donate = false }) => {
+  const { display, animKey } = useCountUp(value);
+  return (
+    <div className={`animate-price-pop ${className}`} key={`pc-${animKey}`}>
+      <span className="block">{formatUsd(display)}</span>
+      {rate?.rate > 0 && (
+        <span className={`block mt-0.5 truncate ${bsClass}`}>
+          {formatBs(usdToBs(display, rate.rate))}
+        </span>
+      )}
+      {donate && (
+        <span className="block text-[9px] text-slate-500 uppercase tracking-wide mt-0.5">
+          precio actualizado
+        </span>
+      )}
+    </div>
   );
 };
 
@@ -520,6 +633,32 @@ const SEM_TONES = {
   rose: 'bg-rose-500/15 text-rose-300 border-rose-500/40'
 };
 
+// Identidad visual por categoría: cada categoría tiene su color (chip sólido y
+// oscuro para legibilidad sobre cualquier imagen), su tono sólido (estado
+// activo en los filtros) y su icono. El fallback genérico cubre categorías
+// nuevas sin necesidad de editar el código.
+const CATEGORY_IDENTITY = {
+  comida: { chip: 'bg-amber-500 text-slate-950 border-amber-400', solid: 'bg-amber-400 text-slate-950', accent: 'text-amber-400', icon: 'burger' },
+  confitería: { chip: 'bg-fuchsia-500 text-white border-fuchsia-400', solid: 'bg-fuchsia-400 text-slate-950', accent: 'text-fuchsia-400', icon: 'candy' },
+  golosinas: { chip: 'bg-fuchsia-500 text-white border-fuchsia-400', solid: 'bg-fuchsia-400 text-slate-950', accent: 'text-fuchsia-400', icon: 'candy' },
+  snacks: { chip: 'bg-orange-500 text-slate-950 border-orange-400', solid: 'bg-orange-400 text-slate-950', accent: 'text-orange-400', icon: 'chips' },
+  bebidas: { chip: 'bg-sky-500 text-slate-950 border-sky-400', solid: 'bg-sky-400 text-slate-950', accent: 'text-sky-400', icon: 'cup' },
+  lácteos: { chip: 'bg-indigo-500 text-white border-indigo-400', solid: 'bg-indigo-400 text-slate-950', accent: 'text-indigo-400', icon: 'milk' },
+  lacteos: { chip: 'bg-indigo-500 text-white border-indigo-400', solid: 'bg-indigo-400 text-slate-950', accent: 'text-indigo-400', icon: 'milk' },
+  higiene: { chip: 'bg-emerald-500 text-slate-950 border-emerald-400', solid: 'bg-emerald-400 text-slate-950', accent: 'text-emerald-400', icon: 'spray' },
+  farmacia: { chip: 'bg-emerald-500 text-slate-950 border-emerald-400', solid: 'bg-emerald-400 text-slate-950', accent: 'text-emerald-400', icon: 'spray' },
+  limpieza: { chip: 'bg-cyan-500 text-slate-950 border-cyan-400', solid: 'bg-cyan-400 text-slate-950', accent: 'text-cyan-400', icon: 'spray' },
+  panadería: { chip: 'bg-yellow-500 text-slate-950 border-yellow-400', solid: 'bg-yellow-400 text-slate-950', accent: 'text-yellow-400', icon: 'burger' },
+  helados: { chip: 'bg-violet-500 text-white border-violet-400', solid: 'bg-violet-400 text-slate-950', accent: 'text-violet-400', icon: 'iceCream' },
+  postres: { chip: 'bg-pink-500 text-white border-pink-400', solid: 'bg-pink-400 text-slate-950', accent: 'text-pink-400', icon: 'iceCream' },
+  pizza: { chip: 'bg-rose-500 text-white border-rose-400', solid: 'bg-rose-400 text-slate-950', accent: 'text-rose-400', icon: 'pizza' }
+};
+const CATEGORY_FALLBACK = { chip: 'bg-teal-600 text-white border-teal-500', solid: 'bg-teal-400 text-slate-950', accent: 'text-teal-400', icon: 'layers' };
+const categoryIdentity = (name) => {
+  const key = String(name || '').toLowerCase().trim();
+  return CATEGORY_IDENTITY[key] || CATEGORY_FALLBACK;
+};
+
 const playChime = (() => {
   let ctx = null;
   const note = (freq, start, dur, type = 'sine', gain = 0.12) => {
@@ -920,7 +1059,7 @@ export default function App() {
         changed = true;
       } else if (prev !== cur) {
         if (cur < prev) {
-          addToast(`${p.name} bajó a ${formatUsd(cur)} 🎉`, 'success');
+          addToast(`${p.name} bajó a ${formatUsd(cur)}`, 'success');
         } else if (cur > prev) {
           addToast(`${p.name} subió a ${formatUsd(cur)}`, 'warning');
         }
@@ -2162,7 +2301,7 @@ export default function App() {
       } else if (status === 'en_camino') {
         addToast(`¡Tu pedido ${trackedOrder.id} está en camino!`, 'warning');
       } else if (status === 'entregado') {
-        addToast(`¡Tu pedido ${trackedOrder.id} fue entregado! 🎉`, 'success');
+        addToast(`¡Tu pedido ${trackedOrder.id} fue entregado!`, 'success');
       } else if (status === 'cancelado') {
         addToast(`Tu pedido ${trackedOrder.id} fue cancelado.`, 'error');
       }
@@ -2183,7 +2322,7 @@ export default function App() {
         if (o.status === 'en_camino') {
           addToast(`¡Tu pedido ${o.id} está en camino!`, 'warning');
         } else if (o.status === 'entregado') {
-          addToast(`¡Tu pedido ${o.id} fue entregado! 🎉`, 'success');
+          addToast(`¡Tu pedido ${o.id} fue entregado!`, 'success');
         } else if (o.status === 'cancelado') {
           addToast(`Tu pedido ${o.id} fue cancelado.`, 'error');
         }
@@ -2226,11 +2365,9 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 ring-2 ring-white/10 shrink-0 animate-glow-pulse">
-              <Icon name="store" className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
+            <BrandLogo className="w-10 h-10 sm:w-11 sm:h-11" />
             <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate">
+              <h1 className="font-display text-lg sm:text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate">
                 Empresas Alvarados
               </h1>
               <span className="hidden sm:flex text-xs text-teal-400/90 font-medium items-center gap-1.5">
@@ -2725,7 +2862,11 @@ export default function App() {
         style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
         className="mt-auto border-t border-slate-800/80 bg-slate-950/60 pt-5 pb-20 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500"
       >
-        <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
+        <div className="inline-flex items-center gap-1.5 mb-1.5">
+          <BrandLogo className="w-5 h-5 !rounded-lg" />
+          <span className="font-display font-bold text-slate-300 text-xs tracking-wide">Kiosko 24/7 · Empresas Alvarados</span>
+        </div>
+        <p>Abierto todo el día, todos los días. Pedí, pagá y retirá sin filas o recibí en tu puerta.</p>
       </footer>
 
       {/* Banner de notificaciones push (solo cliente identificado y permiso sin decidir) */}
@@ -2817,7 +2958,7 @@ function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
         <p className="text-[11px] sm:text-xs font-bold uppercase tracking-[0.35em] text-teal-200/80 mb-3 animate-welcome-pop">
           {tag}
         </p>
-        <h2 className="text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
+        <h2 className="font-display text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
           {name}
         </h2>
         <p className="text-xs sm:text-sm text-teal-100/70 animate-welcome-pop">
@@ -3626,6 +3767,50 @@ function CustomerView({
     return list.slice(0, 12);
   }, [allProducts, customerOrders]);
 
+  // Vitrina "Los más pedidos": top de ventas globales derivado de los pedidos reales
+  // (no requiere campo featured en la base). Si aún no hay pedidos, cae a stock alto.
+  const topSellers = useMemo(() => {
+    if (!Array.isArray(allProducts) || allProducts.length === 0) return [];
+    const demand = {};
+    (orders || []).forEach((o) =>
+      (o.items || []).forEach((it) => {
+        demand[it.id] = (demand[it.id] || 0) + (Number(it.quantity) || 0);
+      })
+    );
+    const ranked = allProducts
+      .map((p) => ({ p, qty: demand[p.id] || 0 }))
+      .sort((a, b) => b.qty - a.qty || Number(b.p.stock || 0) - Number(a.p.stock || 0));
+    return ranked.slice(0, 5).map((x) => x.p);
+  }, [allProducts, orders]);
+
+  // Efecto parallax del hero: la foto de fondo se desplaza más lento que el scroll.
+  const heroRef = useRef(null);
+  const [heroOffset, setHeroOffset] = useState(0);
+  const reducedMotionHero =
+    typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  useEffect(() => {
+    if (reducedMotionHero) return undefined;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const el = heroRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > window.innerHeight) return;
+        setHeroOffset(Math.max(-60, Math.min(60, r.top * -0.22)));
+      });
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [reducedMotionHero]);
+
   // La barra inferior (móvil) pide expandir y scrollear a Mis Pedidos o Mi Cuenta
   useEffect(() => {
     if (!focusSection) return;
@@ -3641,23 +3826,44 @@ function CustomerView({
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
-      {/* Compact Hero Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 animate-gradient-x border border-slate-700/60 p-4 sm:p-8 shadow-2xl backdrop-blur-md">
-        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-5">
-          <div className="space-y-2 sm:space-y-3 max-w-xl">
-            <span className="px-2.5 sm:px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
-              ⚡ Pedidos al momento
+      {/* Hero editorial: foto real del producto estrella con efecto parallax */}
+      <RevealOnScroll>
+      <div
+        ref={heroRef}
+        className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-700/60 shadow-2xl min-h-[300px] sm:min-h-[340px]"
+      >
+        {/* Foto de fondo (más alta que el contenedor para permitir el parallax) */}
+        {topSellers[0]?.image ? (
+          <div
+            className="absolute inset-x-0 -top-16 -bottom-16 bg-cover bg-center will-change-transform"
+            style={{
+              backgroundImage: `url(${topSellers[0].image.replace('w=500', 'w=1600')})`,
+              transform: reducedMotionHero ? undefined : `translate3d(0, ${heroOffset}px, 0)`
+            }}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-teal-900/60 via-slate-900 to-indigo-950/70" />
+        )}
+        {/* Overlay oscuro para legibilidad del texto */}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-slate-950/20" />
+        <div className="absolute inset-0 bg-gradient-to-r from-teal-950/60 via-transparent to-transparent" />
+
+        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 sm:gap-6 p-5 sm:p-10 pt-8 sm:pt-14 min-h-[300px] sm:min-h-[340px]">
+          <div className="space-y-3 max-w-xl">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-500/25 text-teal-200 border border-teal-400/40 text-[10px] sm:text-xs font-semibold uppercase tracking-wider backdrop-blur-md">
+              <Icon name="zap" className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              Pedidos al momento
             </span>
-            <h2 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h2 className="font-display text-3xl sm:text-5xl font-black text-white tracking-tight leading-tight">
               ¿Qué se te antoja hoy?
             </h2>
-            <p className="hidden sm:block text-slate-300 text-sm leading-relaxed">
+            <p className="hidden sm:block text-slate-200 text-sm leading-relaxed max-w-md">
               Explora nuestros antojos, bebidas frías y snacks. Paga y retira sin hacer filas o recibe en tu puerta.
             </p>
           </div>
 
           {/* Tasa BCV card */}
-          <div className="w-full sm:w-auto shrink-0 p-3 sm:p-4 rounded-2xl bg-slate-950/60 border border-teal-500/30 backdrop-blur-md">
+          <div className="w-full sm:w-auto shrink-0 p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-teal-500/30 backdrop-blur-md shadow-lg">
             <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
               <Icon name="dollarSign" className="w-3.5 h-3.5 text-teal-400" />
               Tasa BCV
@@ -3672,9 +3878,80 @@ function CustomerView({
             )}
           </div>
         </div>
-        {/* Decorative graphic background */}
-        <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
       </div>
+      </RevealOnScroll>
+
+      {/* Vitrina "Los más pedidos": carrusel horizontal, SOLO en móviles (lg:hidden) */}
+      {topSellers.length > 0 && (
+        <RevealOnScroll delay={80} className="lg:hidden">
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400">
+                <Icon name="star" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div>
+                <h3 className="font-display text-base sm:text-lg font-extrabold text-white">Los más pedidos</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400">Los favoritos que vuelan del kiosko</p>
+              </div>
+            </div>
+            <span className="px-2 py-1 rounded-full bg-teal-500/10 text-teal-400 text-[10px] font-bold uppercase tracking-wider border border-teal-500/20">
+              top ventas
+            </span>
+          </div>
+
+          <div className="flex gap-3 sm:gap-5 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+            {topSellers.map((product) => (
+              <article
+                key={product.id}
+                onClick={onOpenProductModal ? () => onOpenProductModal(product) : undefined}
+                className="snap-start shrink-0 w-[70vw] min-[480px]:w-[320px] sm:w-[340px] rounded-2xl sm:rounded-3xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-teal-500/50 hover:shadow-2xl hover:shadow-teal-500/10 hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+              >
+                <div className="relative aspect-[16/10] bg-slate-900">
+                  <img
+                    src={product.image}
+                    alt={product.name}
+                    loading="lazy"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 img-load-fade"
+                    onLoad={(e) => e.currentTarget.classList.add('is-loaded')}
+                  />
+                  <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
+                    <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
+                    {product.category}
+                  </span>
+                </div>
+                <div className="p-3 sm:p-4 flex flex-col gap-1.5 flex-1">
+                  <h4 className="font-display text-sm sm:text-base font-extrabold text-white truncate">{product.name}</h4>
+                  <p className="text-[11px] text-slate-400 line-clamp-1">
+                    {formatSize(product) || product.brand || 'Artículo'}
+                  </p>
+                  <div className="mt-auto pt-2 flex items-end justify-between gap-2 border-t border-slate-700/50">
+                    <div className="min-w-0">
+                      <PriceCountUp
+                        value={product.price}
+                        rate={rate}
+                        className="font-display text-xl sm:text-2xl font-black tracking-tight text-white"
+                        bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
+                      />
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(product, 1, e.currentTarget.getBoundingClientRect());
+                      }}
+                      className="shrink-0 p-2.5 rounded-xl bg-teal-500 text-slate-950 hover:bg-teal-400 transition-all active:scale-90 shadow-lg shadow-teal-500/20"
+                      aria-label={`Agregar ${product.name}`}
+                    >
+                      <Icon name="plus" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+        </RevealOnScroll>
+      )}
 
       {/* Promos Carousel */}
       {activePromos.length > 0 && (
@@ -4274,21 +4551,33 @@ function CustomerView({
         </div>
 
         <div className="space-y-2.5">
-          {/* Category Pills */}
+          {/* Category Pills: cada categoría tiene su color e icono de identidad */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {['Todas', 'Favoritos', ...categories].map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3.5 sm:px-4 py-2 rounded-2xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-300 border shrink-0 ${
-                  selectedCategory === cat
-                    ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20 scale-105'
-                    : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
-                }`}
-              >
-                {cat === 'Favoritos' ? `❤ Favoritos (${favorites.length})` : cat}
-              </button>
-            ))}
+            {['Todas', 'Favoritos', ...categories].map((cat) => {
+              const isFav = cat === 'Favoritos';
+              const id = isFav ? null : categoryIdentity(cat);
+              const active = selectedCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-300 border-2 shrink-0 ${
+                    active
+                      ? isFav
+                        ? 'bg-rose-400 text-slate-950 border-rose-300 shadow-lg shadow-rose-500/25 scale-105'
+                        : `${id.solid} border-white/40 shadow-lg scale-105`
+                      : `bg-slate-800/80 text-slate-200 border-slate-600/80 hover:bg-slate-700/70 hover:text-white`
+                  }`}
+                >
+                  {isFav ? (
+                    <Icon name="heart" className={`w-3.5 h-3.5 ${active ? 'fill-current' : ''}`} />
+                  ) : (
+                    <Icon name={id.icon} className={`w-3.5 h-3.5 ${active ? '' : id.accent}`} />
+                  )}
+                  {isFav ? `Favoritos (${favorites.length})` : cat}
+                </button>
+              );
+            })}
           </div>
 
           {/* Sort Selector */}
@@ -4298,11 +4587,11 @@ function CustomerView({
             className="w-full px-3 py-2.5 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-xs font-semibold text-slate-300 focus:border-teal-500 focus:outline-none"
             aria-label="Ordenar productos"
           >
-            <option value="relevancia">✨ Ordenar: Relevancia</option>
-            <option value="popular">🔥 Más vendidos</option>
-            <option value="precio-asc">💲 Precio: menor a mayor</option>
-            <option value="precio-desc">💲 Precio: mayor a menor</option>
-            <option value="stock">📦 Mayor stock</option>
+            <option value="relevancia">Ordenar: Relevancia</option>
+            <option value="popular">Más vendidos</option>
+            <option value="precio-asc">Precio: menor a mayor</option>
+            <option value="precio-desc">Precio: mayor a menor</option>
+            <option value="stock">Mayor stock</option>
           </select>
         </div>
       </div>
@@ -4316,16 +4605,17 @@ function CustomerView({
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
-          {products.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              rate={rate}
-              isFavorite={favorites.includes(product.id)}
-              onToggleFavorite={() => onToggleFavorite(product.id)}
-              onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
-              onOpenDetail={() => onOpenProductModal(product)}
-            />
+          {products.map((product, idx) => (
+            <RevealOnScroll key={product.id} delay={Math.min(idx, 8) * 60}>
+              <ProductCard
+                product={product}
+                rate={rate}
+                isFavorite={favorites.includes(product.id)}
+                onToggleFavorite={() => onToggleFavorite(product.id)}
+                onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
+                onOpenDetail={() => onOpenProductModal(product)}
+              />
+            </RevealOnScroll>
           ))}
         </div>
       )}
@@ -4340,6 +4630,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   // Predicción "Se acaba pronto": el stock durará <= 2 días al ritmo de venta actual.
   const runOutSoon = !isOut && product.runOutDays != null && product.runOutDays > 0 && product.runOutDays <= 2;
   const [justAdded, setJustAdded] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
 
   const handleAdd = (e) => {
     setJustAdded(true);
@@ -4356,7 +4647,8 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <img
           src={product.image}
           alt={product.name}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          onLoad={() => setImgLoaded(true)}
+          className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${imgLoaded ? 'is-loaded' : 'img-load-fade'}`}
           loading="lazy"
         />
         <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1">
@@ -4373,7 +4665,8 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
               {product.brand}
             </span>
           )}
-          <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-slate-950/80 backdrop-blur-md text-[10px] sm:text-xs font-medium text-slate-200 border border-white/10">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
+            <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
             {product.category}
           </span>
         </div>
@@ -4419,7 +4712,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div>
           <h3
             onClick={onOpenDetail}
-            className="font-bold text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1 text-sm sm:text-base"
+            className="font-display text-sm sm:text-base text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1"
           >
             {product.name}
           </h3>
@@ -4436,14 +4729,12 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-slate-700/50">
           <div>
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Precio</span>
-            <span className="text-base sm:text-lg font-black text-white">
-              {formatUsd(product.price)}
-            </span>
-            {rate?.rate > 0 && (
-              <span className="block text-[10px] sm:text-[11px] font-bold text-teal-300/90 mt-0.5 truncate">
-                {formatBs(usdToBs(product.price, rate.rate))}
-              </span>
-            )}
+            <PriceCountUp
+              value={product.price}
+              rate={rate}
+              className="font-display font-black tracking-tight text-white text-base sm:text-lg"
+              bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
+            />
           </div>
 
           <Btn
@@ -4559,7 +4850,8 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             className="w-full h-full object-cover"
           />
           <div className="absolute top-4 left-4 sm:left-4">
-            <span className="hidden sm:inline px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-semibold text-teal-300 border border-teal-500/30">
+            <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-xs font-bold border shadow-sm`}>
+              <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
               {product.category}
             </span>
           </div>
@@ -8144,8 +8436,9 @@ function AdminView({
             </div>
             {order.type === 'delivery' ? (
               inFicha ? (
-                <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
-                  🚚 Entrega a Domicilio
+                <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
+                  <Icon name="mapPin" className="w-3 h-3" />
+                  Entrega a Domicilio
                 </span>
               ) : (
                 <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
@@ -8170,8 +8463,9 @@ function AdminView({
                 </p>
               )
             ) : (
-              <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
-                🛍️ Retiro por Mostrador
+              <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
+                <Icon name="store" className="w-3 h-3" />
+                Retiro por Mostrador
               </span>
             )}
           </div>
@@ -8389,10 +8683,11 @@ function AdminView({
       {/* Admin Top Dashboard Header */}
       <div className="flex flex-col sm:flex-row md:items-center justify-between gap-4 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md">
         <div>
-          <span className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold uppercase tracking-wider">
-            🛡️ Panel Administrativo
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold uppercase tracking-wider">
+            <Icon name="layers" className="w-3.5 h-3.5" />
+            Panel Administrativo
           </span>
-          <h2 className="text-lg sm:text-2xl font-black text-white mt-2">Control de Inventario y Ventas</h2>
+          <h2 className="font-display text-lg sm:text-2xl font-black text-white mt-2">Control de Inventario y Ventas</h2>
           <p className="text-xs text-slate-400 mt-1">Gestiona tus productos en tiempo real y atiende pedidos entrantes.</p>
         </div>
 
@@ -8557,20 +8852,31 @@ function AdminView({
               </button>
             </div>
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
-              {inventoryCategories.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setInvCategory(c)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
-                    invCategory === c
-                      ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
-                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
-                  }`}
-                >
-                  {c === 'todas' ? 'Todas' : c}
-                  <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{catCount(c)}</span>
-                </button>
-              ))}
+              {inventoryCategories.map((c) => {
+                const id = c === 'todas' ? null : categoryIdentity(c);
+                const isActive = invCategory === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setInvCategory(c)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                      isActive
+                        ? c === 'todas'
+                          ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                          : `${id.solid} border-transparent shadow-lg`
+                        : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                    }`}
+                  >
+                    {c === 'todas' ? (
+                      <Icon name="layers" className="w-3 h-3" />
+                    ) : (
+                      <Icon name={id.icon} className="w-3 h-3" />
+                    )}
+                    {c === 'todas' ? 'Todas' : c}
+                    <span className="ml-1 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{catCount(c)}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -8852,7 +9158,12 @@ function AdminView({
                                   : 'text-teal-300 border-teal-500/40 bg-teal-500/10'
                               }`}
                             >
-                              {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
+                              {o.type === 'delivery' ? (
+                                <Icon name="mapPin" className="w-3 h-3" />
+                              ) : (
+                                <Icon name="store" className="w-3 h-3" />
+                              )}
+                              {o.type === 'delivery' ? 'Entrega' : 'Retiro'}
                             </span>
                           </div>
                           <OrderStepsTimeline order={o} />
@@ -9240,7 +9551,7 @@ function AdminView({
                               <td className="p-3 text-xs text-slate-400 whitespace-nowrap">
                                 {isNaN(d) ? '—' : `${d.toLocaleDateString('es-VE')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                               </td>
-                              <td className="p-3 text-xs text-slate-300">{o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}</td>
+                              <td className="p-3 text-xs text-slate-300">{o.type === 'delivery' ? 'Entrega a domicilio' : 'Retiro por mostrador'}</td>
                               <td className="p-3 text-xs text-slate-400 line-clamp-1 max-w-xs">
                                 {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
                               </td>
@@ -11253,7 +11564,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                 <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
                   <span className="text-[11px] uppercase tracking-wider text-emerald-400/80 font-semibold">Disponible para usar</span>
                   <div className="flex items-end justify-between mt-1">
-                    <span className="text-3xl font-black text-emerald-400">{formatUsd(walletAmount)}</span>
+                    <span className="font-display text-3xl font-black tracking-tight text-emerald-400">{formatUsd(walletAmount)}</span>
                     {rate?.rate > 0 && (
                       <span className="text-[10px] text-emerald-400/70">{formatBs(usdToBs(walletAmount, rate.rate))}</span>
                     )}
@@ -11267,7 +11578,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                 <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-rose-300">
                   <span className="text-[11px] uppercase tracking-wider text-rose-400/80 font-semibold">Saldo pendiente por pagar</span>
                   <div className="flex items-end justify-between mt-1">
-                    <span className="text-3xl font-black text-rose-400">{formatUsd(balance)}</span>
+                    <span className="font-display text-3xl font-black tracking-tight text-rose-400">{formatUsd(balance)}</span>
                     {rate?.rate > 0 && (
                       <span className="text-[10px] text-rose-400/70">{formatBs(usdToBs(balance, rate.rate))}</span>
                     )}
@@ -11280,7 +11591,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
               ) : (
                 <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700">
                   <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Saldo disponible</span>
-                  <div className="text-3xl font-black text-slate-500 mt-1">{formatUsd(0)}</div>
+                  <div className="font-display text-3xl font-black tracking-tight text-slate-500 mt-1">{formatUsd(0)}</div>
                   <p className="text-xs text-slate-400 mt-2">
                     Sin saldo a favor por el momento.
                   </p>
@@ -11853,7 +12164,7 @@ function buildAccountMessage(customer, orders) {
   ];
   if (debtOrders.length > 0) {
     debtOrders.forEach((o) => {
-      lines.push(`▫️ Pedido ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}):`);
+      lines.push(`· Pedido ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}):`);
       o.items.forEach((it) => lines.push(`   - ${it.quantity}x ${it.name} = ${formatUsd(it.price * it.quantity)}`));
       lines.push(`   Total: ${formatUsd(o.total)}`);
       lines.push('');
@@ -11861,7 +12172,7 @@ function buildAccountMessage(customer, orders) {
   }
   lines.push(`*Total a pagar: ${formatUsd(debtTotal)}*`);
   lines.push('');
-  lines.push('Gracias por tu prontitud. 🙌');
+  lines.push('Gracias por tu prontitud.');
   return lines.join('\n');
 }
 
@@ -12257,7 +12568,8 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                🥤 Líquido / Bebida
+                <Icon name="cup" className="w-4 h-4" />
+                Líquido / Bebida
               </button>
               <button
                 type="button"
@@ -12268,7 +12580,8 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                📦 Sólido
+                <Icon name="package" className="w-4 h-4" />
+                Sólido
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3">

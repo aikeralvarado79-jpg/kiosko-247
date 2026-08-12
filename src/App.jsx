@@ -1393,10 +1393,30 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
 
   const TOAST_META = {
-    success: { icon: 'checkCircle', color: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', text: 'text-emerald-300', bar: 'bg-emerald-400' },
-    error: { icon: 'xCircle', color: 'from-rose-500/20 to-rose-500/5', border: 'border-rose-500/40', text: 'text-rose-300', bar: 'bg-rose-400' },
-    warning: { icon: 'alertTriangle', color: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', text: 'text-amber-300', bar: 'bg-amber-400' },
-    info: { icon: 'info', color: 'from-sky-500/20 to-sky-500/5', border: 'border-sky-500/40', text: 'text-sky-300', bar: 'bg-sky-400' }
+    success: {
+      icon: 'checkCircle',
+      chip: 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/40 shadow-lg shadow-emerald-500/20',
+      progress: 'from-emerald-400 to-teal-300',
+      glow: 'rgba(16,185,129,0.25)'
+    },
+    error: {
+      icon: 'xCircle',
+      chip: 'bg-rose-500/15 text-rose-300 border border-rose-400/40 shadow-lg shadow-rose-500/20',
+      progress: 'from-rose-400 to-orange-300',
+      glow: 'rgba(244,63,94,0.25)'
+    },
+    warning: {
+      icon: 'alertTriangle',
+      chip: 'bg-amber-500/15 text-amber-300 border border-amber-400/40 shadow-lg shadow-amber-500/20',
+      progress: 'from-amber-400 to-orange-300',
+      glow: 'rgba(245,158,11,0.25)'
+    },
+    info: {
+      icon: 'info',
+      chip: 'bg-sky-500/15 text-sky-300 border border-sky-400/40 shadow-lg shadow-sky-500/20',
+      progress: 'from-sky-400 to-cyan-300',
+      glow: 'rgba(14,165,233,0.25)'
+    }
   };
 
   const addToast = (message, type = 'success') => {
@@ -2354,27 +2374,31 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
       {/* Toast Notification Container */}
-      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2.5 pointer-events-none">
+      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
         {toasts.map((toast) => {
           const meta = TOAST_META[toast.type] || TOAST_META.success;
           return (
             <div
               key={toast.id}
               role="status"
-              className={`pointer-events-auto relative overflow-hidden p-3.5 pr-4 rounded-2xl shadow-2xl backdrop-blur-xl bg-gradient-to-r ${meta.color} border ${meta.border} flex items-center gap-3 text-sm font-medium transition-all duration-300 animate-toast-in`}
+              className="pointer-events-auto relative overflow-hidden rounded-xl bg-slate-950/90 backdrop-blur-xl border border-white/10 animate-toast-in"
+              style={{ boxShadow: `0 8px 32px -8px ${meta.glow}, 0 4px 16px rgba(0,0,0,0.5)` }}
             >
-              <span className={`shrink-0 p-2 rounded-xl bg-slate-950/40 border border-white/10 ${meta.text}`}>
-                <Icon name={meta.icon} className="w-5 h-5" />
-              </span>
-              <p className="flex-1 text-slate-100 leading-snug pr-2">{toast.message}</p>
-              <button
-                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
-                aria-label="Cerrar notificación"
-                className={`shrink-0 p-1.5 rounded-lg bg-slate-950/40 border border-white/10 ${meta.text} hover:bg-slate-950/70 transition-colors`}
-              >
-                <Icon name="x" className="w-4 h-4" />
-              </button>
-              <span className={`absolute bottom-0 left-0 h-0.5 ${meta.bar} animate-toast-progress`} />
+              <span className={`absolute top-0 left-0 h-full w-[3px] bg-gradient-to-b ${meta.progress} opacity-80`} />
+              <div className="flex items-center gap-2.5 py-2.5 pl-3.5 pr-2.5">
+                <span className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${meta.chip}`}>
+                  <Icon name={meta.icon} className="w-4 h-4" />
+                </span>
+                <p className="flex-1 text-[13px] text-slate-100 leading-snug min-w-0">{toast.message}</p>
+                <button
+                  onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                  aria-label="Cerrar notificación"
+                  className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <Icon name="x" className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <span className={`absolute bottom-0 left-0 h-[2px] bg-gradient-to-r ${meta.progress} animate-toast-progress`} />
             </div>
           );
         })}

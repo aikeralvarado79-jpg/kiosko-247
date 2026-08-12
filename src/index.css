@@ -192,10 +192,10 @@ html.light .skeleton-block {
 
 /* Toasts modernos */
 @keyframes toast-in {
-  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); filter: brightness(1.2); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
 }
-.animate-toast-in { animation: toast-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-toast-in { animation: toast-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
 @keyframes toast-progress {
   from { width: 100%; }
   to { width: 0%; }

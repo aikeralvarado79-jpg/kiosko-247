@@ -76,6 +76,7 @@ export const api = {
   upsertCustomer: (phone, data) => request(`/api/customers/${encodeURIComponent(phone)}`, { method: 'PUT', body: JSON.stringify(data) }),
   listCustomers: () => request('/api/customers'),
   setCustomerBenefited: (phone, benefited) => request(`/api/customers/${encodeURIComponent(phone)}/benefited`, { method: 'PUT', body: JSON.stringify({ benefited }) }),
+  setCustomerCreditLimit: (phone, creditLimit) => request(`/api/customers/${encodeURIComponent(phone)}/credit-limit`, { method: 'PUT', body: JSON.stringify({ creditLimit }) }),
   getBlacklist: () => request('/api/customers/blacklist'),
   addToBlacklist: (data) => request('/api/customers/blacklist', { method: 'POST', body: JSON.stringify(data) }),
   addBlacklistDebt: (data) => request('/api/customers/blacklist/debt', { method: 'POST', body: JSON.stringify(data) }),

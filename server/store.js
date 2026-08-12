@@ -413,6 +413,7 @@ const fileStore = {
       addresses,
       balance: Number(existing?.balance) || 0,
       isBenefited: Boolean(existing?.isBenefited),
+      creditLimit: existing?.creditLimit ?? null,
       createdAt: existing?.createdAt || now,
       lastOrderAt: now
     };
@@ -426,7 +427,12 @@ const fileStore = {
 
   async listCustomers() {
     return this.state.customers
-      .map((c) => ({ ...c, balance: Number(c.balance) || 0, isBenefited: Boolean(c.isBenefited) }))
+      .map((c) => ({
+        ...c,
+        balance: Number(c.balance) || 0,
+        isBenefited: Boolean(c.isBenefited),
+        creditLimit: c.creditLimit ?? null
+      }))
       .sort((a, b) => normalizePhone(a.phone).localeCompare(normalizePhone(b.phone)));
   },
 
@@ -436,6 +442,26 @@ const fileStore = {
     const existing = this.state.customers.find((c) => c.phone === key);
     if (!existing) return null;
     const updated = { ...existing, isBenefited: Boolean(benefited) };
+    this.state.customers = [
+      updated,
+      ...this.state.customers.filter((c) => c.phone !== key)
+    ];
+    this.persist();
+    return updated;
+  },
+
+  // Tope de crédito (fiado) por cliente: el admin lo parametriza. Si es null o
+  // <= 0, el cliente no tiene límite (fiado "sin tope").
+  async setCustomerCreditLimit(phone, creditLimit) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const existing = this.state.customers.find((c) => c.phone === key);
+    if (!existing) return null;
+    const limit = Number(creditLimit);
+    const updated = {
+      ...existing,
+      creditLimit: Number.isFinite(limit) && limit > 0 ? limit : null
+    };
     this.state.customers = [
       updated,
       ...this.state.customers.filter((c) => c.phone !== key)
@@ -674,6 +700,7 @@ export async function refreshMirror() {
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.orders ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`);
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
         await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
+        await client.query(`ALTER TABLE ${MIRROR_TARGET_SCHEMA}.customers ADD COLUMN IF NOT EXISTS "creditLimit" NUMERIC`);
         // Columnas de producción que le falten al destino (evita error en INSERT).
         const srcCols = await client.query(
           `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position`,
@@ -702,8 +729,8 @@ export async function refreshMirror() {
           tables[t] = ins.rowCount;
         } else {
           // Clientes: agrega/actualiza desde producción pero conserva los que solo
-          // existen en staging y NO pisa balance/isBenefited locales de calidad.
-          const kept = ['balance', 'isBenefited'];
+          // existen en staging y NO pisa balance/isBenefited/creditLimit locales.
+          const kept = ['balance', 'isBenefited', 'creditLimit'];
           const updateSet = srcCols.rows
             .map((c) => c.column_name)
             .filter((col) => col !== pk && !kept.includes(col))
@@ -806,7 +833,8 @@ const pgStore = {
         "createdAt" TEXT,
         "lastOrderAt" TEXT,
         balance NUMERIC DEFAULT 0,
-        "isBenefited" BOOLEAN DEFAULT false
+        "isBenefited" BOOLEAN DEFAULT false,
+        "creditLimit" NUMERIC
       );
       CREATE TABLE IF NOT EXISTS ${q('webauthn_credentials')} (
         phone TEXT PRIMARY KEY,
@@ -840,6 +868,7 @@ const pgStore = {
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
+    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "creditLimit" NUMERIC`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('webauthn_credentials')} ADD COLUMN IF NOT EXISTS rpID TEXT`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lat NUMERIC`);
@@ -923,7 +952,8 @@ const pgStore = {
     const customers = customersRes.rows.map((r) => ({
       ...r,
       balance: Number(r.balance) || 0,
-      isBenefited: Boolean(r.isBenefited)
+      isBenefited: Boolean(r.isBenefited),
+      creditLimit: r.creditLimit ?? null
     }));
     const settings = {
       promos: []
@@ -1078,7 +1108,12 @@ const pgStore = {
 
   async listCustomers() {
     const { rows } = await this.pool.query(`SELECT * FROM ${q('customers')} ORDER BY phone`);
-    return rows.map((r) => ({ ...r, balance: Number(r.balance) || 0, isBenefited: Boolean(r.isBenefited) }));
+    return rows.map((r) => ({
+      ...r,
+      balance: Number(r.balance) || 0,
+      isBenefited: Boolean(r.isBenefited),
+      creditLimit: r.creditLimit ?? null
+    }));
   },
 
   async setCustomerBenefited(phone, benefited) {
@@ -1090,6 +1125,19 @@ const pgStore = {
     );
     if (!rows[0]) return null;
     return { ...rows[0], balance: Number(rows[0].balance) || 0 };
+  },
+
+  async setCustomerCreditLimit(phone, creditLimit) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const limit = Number(creditLimit);
+    const value = Number.isFinite(limit) && limit > 0 ? limit : null;
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('customers')} SET "creditLimit" = $2 WHERE phone = $1 RETURNING *`,
+      [key, value]
+    );
+    if (!rows[0]) return null;
+    return { ...rows[0], balance: Number(rows[0].balance) || 0, creditLimit: value };
   },
 
   async setCustomerBalance(phone, amount) {
@@ -1296,7 +1344,8 @@ const pgStore = {
       createdAt: existing?.createdAt || now,
       lastOrderAt: now,
       balance: Number(existing?.balance) || 0,
-      isBenefited: Boolean(existing?.isBenefited)
+      isBenefited: Boolean(existing?.isBenefited),
+      creditLimit: existing?.creditLimit ?? null
     };
   },
 

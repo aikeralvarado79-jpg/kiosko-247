@@ -5,6 +5,78 @@ import { api, getToken, setToken, clearToken } from './api.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+// ---------------------------------------------------------------------------
+// Mecanismo compartido de overlay: bloquea el scroll del body mientras hay una
+// capa abierta, cierra la capa superior con el botón "atrás" de Android
+// (history.popstate) y con la tecla ESC. Soporta capas apiladas (carrito →
+// checkout → detalle, etc.) manteniendo una entrada de historial por capa.
+// ---------------------------------------------------------------------------
+let overlayLayers = new Set();
+let overlayCount = 0;
+let scrollLocks = 0;
+let programmaticBack = false;
+let lastCloseViaBack = false;
+
+const closeTopOverlay = () => {
+  const top = [...overlayLayers].pop();
+  if (top) top();
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', () => {
+    if (programmaticBack) {
+      programmaticBack = false;
+      return;
+    }
+    lastCloseViaBack = true;
+    closeTopOverlay();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeTopOverlay();
+  });
+}
+
+const lockBodyScroll = () => {
+  scrollLocks += 1;
+  document.body.style.overflow = 'hidden';
+  document.body.style.overscrollBehaviorY = 'none';
+};
+
+const unlockBodyScroll = () => {
+  scrollLocks = Math.max(0, scrollLocks - 1);
+  if (scrollLocks === 0) {
+    document.body.style.overflow = '';
+    document.body.style.overscrollBehaviorY = '';
+  }
+};
+
+const useOverlay = (active, onClose) => {
+  const cbRef = useRef(onClose);
+  cbRef.current = onClose;
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const handler = () => cbRef.current();
+    overlayLayers.add(handler);
+    overlayCount += 1;
+    window.history.pushState({ __kioskoOverlay: overlayCount }, '');
+    lockBodyScroll();
+    return () => {
+      overlayLayers.delete(handler);
+      unlockBodyScroll();
+      if (overlayCount <= 0) return;
+      overlayCount -= 1;
+      const closedViaBack = lastCloseViaBack;
+      lastCloseViaBack = false;
+      const state = window.history.state;
+      if (!closedViaBack && state && state.__kioskoOverlay) {
+        programmaticBack = true;
+        window.history.back();
+      }
+    };
+  }, [active]);
+};
+
 // SVG Icons Helper Components for full visual depth without external dependencies
 const Icon = ({ name, className = "w-5 h-5", ...props }) => {
   const icons = {
@@ -922,6 +994,25 @@ export default function App() {
 
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
+  // Aviso de versión nueva (dispara main.jsx cuando el SW nuevo toma control,
+  // sin recargar) y estado de conexión para el badge "Modo sin conexión".
+  const [updateReady, setUpdateReady] = useState(false);
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+
+  useEffect(() => {
+    const onUpdate = () => setUpdateReady(true);
+    const onOnline = () => setIsOffline(false);
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener('kiosko:sw-update', onUpdate);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('kiosko:sw-update', onUpdate);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
   // Auxiliar para persistir el contraste/letra grande del cliente (fallback a tema simple)
 
   // Alto del header sticky: se pasa a la tienda para anclar el buscador justo debajo
@@ -1444,8 +1535,7 @@ export default function App() {
       
       pendingRef.current.add(key);
       setLoading(true);
-      addToast(message, 'info');
-      
+
       try {
         const result = await action(...args);
         addToast('Listo', 'success');
@@ -1743,10 +1833,14 @@ export default function App() {
       const matchesCategory =
         selectedCategory === 'Todas' ||
         (selectedCategory === 'Favoritos' ? favorites.includes(p.id) : p.category === selectedCategory);
+      const q = searchQuery.toLowerCase();
       const matchesSearch =
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.code.toLowerCase().includes(searchQuery.toLowerCase());
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        (p.brand || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        p.code.toLowerCase().includes(q);
       return matchesCategory && matchesSearch;
     });
 
@@ -2404,6 +2498,38 @@ export default function App() {
         })}
       </div>
 
+      {/* Aviso de versión nueva: no recarga sola para no perder el estado */}
+      {updateReady && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[62] w-[92vw] max-w-sm rounded-2xl bg-slate-900 border border-teal-500/40 shadow-2xl shadow-teal-500/10 p-3.5 animate-fade-in">
+          <p className="text-xs font-bold text-white">Hay una versión nueva</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Recarga cuando quieras para ver los últimos cambios. Si estás en un pedido, continúa y hazlo al terminar.
+          </p>
+          <div className="flex gap-2 mt-2.5">
+            <button
+              onClick={() => window.location.reload()}
+              className="flex-1 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all"
+            >
+              Recargar
+            </button>
+            <button
+              onClick={() => setUpdateReady(false)}
+              className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 transition-all"
+            >
+              Continuar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Badge de modo sin conexión: los datos se conservan en el buffer local */}
+      {isOffline && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[58] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/95 border border-slate-700 text-[11px] font-semibold text-slate-300 shadow-lg backdrop-blur-md animate-fade-in">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          Modo sin conexión · datos locales
+        </div>
+      )}
+
       {/* Modern Glassmorphic Top Navbar */}
       <header ref={headerRef} className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
@@ -2971,6 +3097,24 @@ export default function App() {
           savedCustomer={savedCustomer}
           headerHeight={headerHeight}
           onClose={() => setIsAikerOpen(false)}
+          onOpenDebt={() => {
+            setDebtDrawerMode('deuda');
+            setIsAikerOpen(false);
+            setIsDebtDrawerOpen(true);
+          }}
+          onOpenOrders={() => {
+            setIsAikerOpen(false);
+            setIsOrdersDrawerOpen(true);
+          }}
+          onTrackOrder={(order) => {
+            setIsAikerOpen(false);
+            setLiveTrackingOrder(order);
+          }}
+          onAddToCart={(product) => addToCart(product, 1)}
+          onRepeatLastOrder={() => {
+            setIsAikerOpen(false);
+            handleRepeatLastOrder();
+          }}
         />
       )}
     </div>
@@ -3741,7 +3885,12 @@ function CustomerView({
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
     return allProducts
-      .filter((p) => p.name.toLowerCase().includes(q))
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.brand || '').toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q)
+      )
       .slice(0, 6);
   }, [allProducts, searchQuery]);
 
@@ -3972,12 +4121,11 @@ function CustomerView({
                 className="snap-start shrink-0 w-[70vw] min-[480px]:w-[320px] sm:w-[340px] rounded-2xl sm:rounded-3xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-teal-500/50 hover:shadow-2xl hover:shadow-teal-500/10 hover:-translate-y-1 transition-all duration-300 cursor-pointer"
               >
                 <div className="relative aspect-[16/10] bg-slate-900">
-                  <img
-                    src={product.image}
+                  <ProductImg
+                    product={product}
                     alt={product.name}
                     loading="lazy"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 img-load-fade"
-                    onLoad={(e) => e.currentTarget.classList.add('is-loaded')}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                   <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
                     <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
@@ -4085,8 +4233,8 @@ function CustomerView({
       {/* Alerta proactiva "Se acaba pronto": producto habitual del cliente */}
       {runOutAlertProduct && (
         <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-rose-500/15 via-orange-500/10 to-amber-500/15 border border-rose-500/30 flex items-center gap-3 sm:gap-4">
-          <img
-            src={runOutAlertProduct.image}
+          <ProductImg
+            product={runOutAlertProduct}
             alt={runOutAlertProduct.name}
             className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl object-cover border border-rose-500/30 shrink-0"
           />
@@ -4138,8 +4286,8 @@ function CustomerView({
                 className="snap-start shrink-0 w-40 sm:w-44 rounded-2xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-amber-500/50 hover:-translate-y-0.5 transition-all"
               >
                 <div className="relative">
-                  <img
-                    src={product.image}
+                  <ProductImg
+                    product={product}
                     alt={product.name}
                     loading="lazy"
                     className="w-full h-24 sm:h-28 object-cover bg-slate-900"
@@ -4602,7 +4750,7 @@ function CustomerView({
                   }}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-800/80 transition-all text-left"
                 >
-                  <img src={p.image} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-800" />
+                  <ProductImg product={p} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-800 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className="block text-xs font-semibold text-slate-200 truncate">{p.name}</span>
                     <span className="text-[11px] text-teal-400 font-bold">{formatUsd(p.price)}</span>
@@ -4666,6 +4814,26 @@ function CustomerView({
           <Icon name="search" className="w-12 h-12 text-slate-600 mx-auto" />
           <h3 className="text-lg font-bold text-slate-300">No encontramos productos</h3>
           <p className="text-slate-500 text-xs">Intenta cambiar la categoría o limpiar el término de búsqueda.</p>
+          {(searchQuery.trim() || selectedCategory !== 'Todas') && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedCategory('Todas');
+              }}
+              className="inline-flex items-center gap-1.5 mx-auto px-4 py-2.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all active:scale-95"
+            >
+              <Icon name="refresh" className="w-3.5 h-3.5" />
+              Limpiar filtros
+            </button>
+          )}
+          {searchQuery.trim() && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="block mx-auto text-[11px] font-semibold text-teal-400 hover:text-teal-300 transition-colors"
+            >
+              Ver todo el catálogo
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
@@ -4687,6 +4855,44 @@ function CustomerView({
   );
 }
 
+// Imagen de producto con fallback: si la URL falla o está vacía muestra el logo
+// de marca + nombre (mismo fallback que usa KAPSULA AR) en vez del rompecabezas
+// roto del navegador. Aplica fade al cargar en todas las superficies.
+function ProductImg({ product, image, name, brand, alt, className = '', loading = 'lazy', onLoad, imgProps }) {
+  const [errored, setErrored] = useState(false);
+  const src = product?.image ?? image;
+  const label = product?.brand?.trim() || product?.name || brand || name || 'Producto';
+
+  if (!src || errored) {
+    return (
+      <div
+        className={`flex flex-col items-center justify-center gap-1.5 select-none ${className || ''}`}
+        style={{ background: 'linear-gradient(135deg, #0f172a, #1e293b)' }}
+        aria-hidden="true"
+      >
+        <BrandLogo className="w-6 h-6 !rounded-lg shrink-0" />
+        <span className="w-full truncate px-1.5 text-center text-[10px] font-bold text-slate-400">{label}</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt || label}
+      loading={loading}
+      draggable={false}
+      onError={() => setErrored(true)}
+      onLoad={(e) => {
+        e.currentTarget.classList.add('is-loaded');
+        onLoad?.(e);
+      }}
+      className={`img-load-fade ${className || ''}`}
+      {...imgProps}
+    />
+  );
+}
+
 function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite }) {
   const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
   const isOut = avail <= 0;
@@ -4694,7 +4900,6 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   // Predicción "Se acaba pronto": el stock durará <= 2 días al ritmo de venta actual.
   const runOutSoon = !isOut && product.runOutDays != null && product.runOutDays > 0 && product.runOutDays <= 2;
   const [justAdded, setJustAdded] = useState(false);
-  const [imgLoaded, setImgLoaded] = useState(false);
 
   const handleAdd = (e) => {
     setJustAdded(true);
@@ -4708,11 +4913,10 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
     >
       <div className="flex flex-col flex-1 overflow-hidden rounded-2xl sm:rounded-3xl">
       <div onClick={onOpenDetail} className="cursor-pointer relative overflow-hidden aspect-square sm:aspect-[4/3] bg-slate-900">
-        <img
-          src={product.image}
+        <ProductImg
+          product={product}
           alt={product.name}
-          onLoad={() => setImgLoaded(true)}
-          className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${imgLoaded ? 'is-loaded' : 'img-load-fade'}`}
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
         />
         <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1">
@@ -4829,6 +5033,13 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   const unitBs = usdToBs(product.price, rate?.rate);
   const lineTotal = product.price * quantity;
 
+  // Cierra con botón "atrás"/ESC y bloquea el scroll del fondo. En pantalla
+  // completa cierra primero la imagen antes de cerrar el modal (como antes).
+  useOverlay(true, () => {
+    if (showFullscreen) setShowFullscreen(false);
+    else onClose();
+  });
+
   const currentIndex = useMemo(() => {
     const idx = (sameBrandProducts || []).findIndex((p) => p.id === product.id);
     return idx >= 0 ? idx : 0;
@@ -4858,26 +5069,23 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
     setTouchX(null);
   };
 
-  // Handle ESC key press
+  // Flechas de teclado para navegar entre productos de la marca. El ESC ya lo
+  // maneja el mecanismo compartido de overlay (cierra la capa superior).
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        if (showFullscreen) setShowFullscreen(false);
-        else onClose();
-      }
       if (e.key === 'ArrowLeft') goTo(-1);
       if (e.key === 'ArrowRight') goTo(1);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, showFullscreen, goTo]);
+  }, [goTo]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       {/* Backdrop Click */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+      <div className="relative sm:max-w-2xl lg:max-w-3xl max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
       {/* Handle visual para indicar arrastre en móvil */}
       <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
@@ -4908,11 +5116,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-          <img
-            src={product.image}
-            alt={product.name}
-            className="w-full h-full object-cover"
-          />
+          <ProductImg product={product} alt={product.name} className="w-full h-full object-cover" />
           <div className="absolute top-4 left-4 sm:left-4">
             <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-xs font-bold border shadow-sm`}>
               <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
@@ -4971,7 +5175,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
                 }`}
                 aria-label={`Ver ${p.name}`}
               >
-                <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                <ProductImg product={p} alt={p.name} className="w-full h-full object-cover" />
                 {i === currentIndex && (
                   <span className="absolute inset-0 bg-teal-500/20" />
                 )}
@@ -5093,11 +5297,10 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
           </div>
 
           <div className="flex-1 flex items-center justify-center px-2 pb-6 min-h-0">
-            <img
-              src={product.image}
+            <ProductImg
+              product={product}
               alt={product.name}
               className="max-w-full max-h-full object-contain select-none"
-              draggable={false}
             />
           </div>
 
@@ -5115,6 +5318,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
 }
 
 function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, mode = 'login', confirmKind = 'switchback', onClose }) {
+  useOverlay(true, onClose);
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -5598,6 +5802,9 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
 
 function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout, holdDeadline, onShare }) {
   const [nowMs, setNowMs] = useState(Date.now());
+
+  useOverlay(isOpen, onClose);
+
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
@@ -5651,8 +5858,8 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
                 key={item.product.id}
                 className="flex items-center gap-3 sm:gap-4 p-3 sm:p-3.5 rounded-2xl bg-slate-800/60 border border-slate-700/60 group hover:border-slate-600 transition-all"
               >
-                <img
-                  src={item.product.image}
+                <ProductImg
+                  product={item.product}
                   alt={item.product.name}
                   className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover bg-slate-900 shrink-0"
                 />
@@ -5770,6 +5977,8 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
   const [dateFilter, setDateFilter] = useState({ preset: 'all', date: null });
   const [showCalendar, setShowCalendar] = useState(false);
   const PAGE_SIZE = 6;
+
+  useOverlay(isOpen, onClose);
 
   const filtered = useMemo(() => {
     const now = new Date();
@@ -6475,6 +6684,7 @@ function DeliveriesRouteMap({ storeLocation, deliveries, storeLabel = 'KIOSKO' }
 // cliente (para elegir dónde recibir distinto de su ubicación actual) y el
 // admin (para fijar la ubicación del comercio).
 function MapPickerModal({ title, initial, onPick, onClose }) {
+  useOverlay(true, onClose);
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markerRef = useRef(null);
@@ -6682,6 +6892,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
 // Modal de rastreo en vivo para el cliente: consulta el estado del pedido y la
 // posición del repartidor cada 5s mientras está abierto, mostrando el mapa.
 function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrderUpdated, addToast, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const [track, setTrack] = useState(order);
   const [error, setError] = useState('');
   const [messages, setMessages] = useState([]);
@@ -6895,6 +7106,9 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
 
 function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig, holdDeadline }) {
   const [nowMs, setNowMs] = useState(Date.now());
+
+  useOverlay(true, onClose);
+
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
@@ -7746,6 +7960,7 @@ function AdminView({
     }
   };
   const [initialOrderPrefs] = useState(loadOrderPrefs);
+  const [confirmRefresh, setConfirmRefresh] = useState(false);
   const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
   const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
@@ -7830,8 +8045,8 @@ function AdminView({
         key={p.id}
         className="flex items-center gap-3 p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60"
       >
-        <img
-          src={p.image}
+        <ProductImg
+          product={p}
           alt={p.name}
           className="w-14 h-14 rounded-xl object-cover bg-slate-900 border border-slate-700 shrink-0"
         />
@@ -7886,8 +8101,8 @@ function AdminView({
     return (
       <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
         <td className="p-4 flex items-center gap-3">
-          <img
-            src={p.image}
+          <ProductImg
+            product={p}
             alt={p.name}
             className="w-12 h-12 rounded-xl object-cover bg-slate-900 border border-slate-700"
           />
@@ -8766,11 +8981,7 @@ function AdminView({
           </button>
           {window.location.hostname === 'kiosko-247-staging.onrender.com' && (
             <button
-              onClick={() => {
-                if (window.confirm('¿Reemplazar los datos de calidad con una copia de producción? Esta acción no se puede deshacer.')) {
-                  onRefreshDb();
-                }
-              }}
+              onClick={() => setConfirmRefresh(true)}
               disabled={refreshingDb}
               className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
               title="Copiar datos de producción hacia calidad (reemplaza el contenido actual de calidad)"
@@ -8788,6 +8999,20 @@ function AdminView({
             <span className="hidden sm:inline">Salir</span>
           </button>
         </div>
+
+        {confirmRefresh && (
+          <ConfirmActionModal
+            title="¿Reemplazar los datos de calidad?"
+            message="Se copiará una muestra de producción sobre esta base. Todo lo que cambió en calidad se perderá."
+            note="Esta acción no se puede deshacer."
+            confirmLabel="Reemplazar"
+            onConfirm={() => {
+              setConfirmRefresh(false);
+              onRefreshDb();
+            }}
+            onClose={() => setConfirmRefresh(false)}
+          />
+        )}
       </div>
 
       {/* Analytics Summary Bar */}
@@ -10252,6 +10477,7 @@ function AdminView({
 // y confirme o rechace el pago digital. El comprobante no viaja en el estado
 // público: se descarga bajo demanda por el dueño del pedido o el admin.
 function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
+  useOverlay(true, onClose);
   const [proof, setProof] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -10456,6 +10682,7 @@ function OverdueCollectionToast({ collection, onSend, onDismiss }) {
 // Modal con todos los cobros vencidos. El admin los envía uno a uno; al
 // enviar uno se quita de la lista. Si lo descarta, se oculta en esta sesión.
 function OverdueCollectionsModal({ collections, onSend, onDismiss }) {
+  useOverlay(true, onDismiss);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
@@ -10513,6 +10740,7 @@ function BlacklistAdminView({
   const [isAddProductsOpen, setIsAddProductsOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isAddAmountOpen, setIsAddAmountOpen] = useState(false);
+  const [clearDebtTarget, setClearDebtTarget] = useState(null);
 
   const debtors = customers.filter((c) => (Number(c.balance) || 0) > 0);
 
@@ -10527,9 +10755,7 @@ function BlacklistAdminView({
   };
 
   const handleClearDebt = (customer) => {
-    if (window.confirm(`¿Saldar la deuda de ${customer.customerName || customer.phone}?`)) {
-      onAddToBlacklist(customer.phone.replace(/\D/g, ''), customer.customerName, '0');
-    }
+    setClearDebtTarget(customer);
   };
 
   return (
@@ -10711,6 +10937,22 @@ function BlacklistAdminView({
           />,
           document.body
         )}
+
+      {clearDebtTarget && (
+        <ConfirmActionModal
+          title={`¿Saldar deuda de ${clearDebtTarget.customerName || clearDebtTarget.phone}?`}
+          message={`${clearDebtTarget.customerName || 'Cliente'} debe ${formatUsd(Number(clearDebtTarget.balance) || 0)}. Al saldar, el saldo queda en cero.`}
+          note="Esta acción no se puede deshacer."
+          confirmLabel="Saldar"
+          icon="checkCircle"
+          tone="danger"
+          onConfirm={() => {
+            onAddToBlacklist(clearDebtTarget.phone.replace(/\D/g, ''), clearDebtTarget.customerName, '0');
+            setClearDebtTarget(null);
+          }}
+          onClose={() => setClearDebtTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -10719,6 +10961,7 @@ function BlacklistAdminView({
 // deudas anteriores a la app). Muestra el catálogo actual y deja elegir
 // cantidades; al confirmar crea un pedido a crédito entregado para el cliente.
 function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [category, setCategory] = useState('Todas');
@@ -10867,8 +11110,8 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, h
                     key={p.id}
                     className={`flex items-center gap-3 p-2.5 rounded-xl border transition-all ${n > 0 ? 'bg-amber-500/10 border-amber-500/40' : 'bg-slate-950 border-slate-800'}`}
                   >
-                    <img
-                      src={p.image}
+                    <ProductImg
+                      product={p}
                       alt={p.name}
                       className="w-11 h-11 rounded-lg object-cover bg-slate-900 shrink-0"
                     />
@@ -10950,6 +11193,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, h
 // monto y motivo). Al confirmar crea un pedido a crédito entregado con un
 // único ítem "Deuda manual" y la descripción como nota del pedido.
 function AddDebtAmountModal({ customers, rate, onClose, onConfirm, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerAmount, setCustomerAmount] = useState('');
@@ -11140,7 +11384,9 @@ function DebtDetailModal({
   payments,
   headerHeight = 0
 }) {
+  useOverlay(true, onClose);
   const [showScheduler, setShowScheduler] = useState(false);
+  const [confirmSaldar, setConfirmSaldar] = useState(false);
 
   const key = normalizePhoneDigits(customer.phone);
   // Pedidos del cliente que han sido entregados y a crédito = deuda contraída.
@@ -11428,12 +11674,7 @@ function DebtDetailModal({
               {overdue > 0 ? `${overdue} cobro(s) vencido(s)` : 'Sin cobros programados pendientes'}
             </span>
             <button
-              onClick={() => {
-                if (window.confirm(`¿Saldar la deuda de ${customer.customerName || customer.phone}?`)) {
-                  onClearDebt(customer);
-                  onClose();
-                }
-              }}
+              onClick={() => setConfirmSaldar(true)}
               className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all"
             >
               Saldar deuda
@@ -11442,6 +11683,23 @@ function DebtDetailModal({
         </div>
       </div>
       </div>
+
+      {confirmSaldar && (
+        <ConfirmActionModal
+          title={`¿Saldar deuda de ${customer.customerName || customer.phone}?`}
+          message={`${customer.customerName || 'Cliente'} debe ${formatUsd(Number(customer.balance) || 0)}. Al saldar, el saldo queda en cero.`}
+          note="Esta acción no se puede deshacer."
+          confirmLabel="Saldar"
+          icon="checkCircle"
+          tone="danger"
+          onConfirm={() => {
+            setConfirmSaldar(false);
+            onClearDebt(customer);
+            onClose();
+          }}
+          onClose={() => setConfirmSaldar(false)}
+        />
+      )}
     </div>
   );
 }
@@ -11449,6 +11707,7 @@ function DebtDetailModal({
 // Modal que el cliente ve en "Mi Cuenta": desglose de su deuda con conversión
 // a bolívares según la tasa del día.
 function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = 'deuda', headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const key = normalizePhoneDigits(customer.phone);
   const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
@@ -12382,6 +12641,7 @@ function CreditLimitInput({ customer, onSetCreditLimit }) {
 }
 
 function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
+  useOverlay(true, onClose);
   const [formData, setFormData] = useState({
     id: productToEdit?.id || '',
     code: productToEdit?.code || '',
@@ -12835,7 +13095,52 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
   );
 }
 
+// Confirmación genérica con el lenguaje visual de la app (reemplaza el
+// window.confirm del navegador). Muestra título, mensaje y botones estilizados.
+function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', tone = 'danger', icon = 'alertTriangle', onConfirm, onClose }) {
+  useOverlay(true, onClose);
+  const danger = tone === 'danger';
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${danger ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+          <Icon name={icon} className="w-6 h-6" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-white">{title}</h3>
+          {message && <p className="text-xs text-slate-400 mt-1 whitespace-pre-line">{message}</p>}
+          {note && (
+            <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 mt-3 inline-block">
+              {note}
+            </p>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <button
+            onClick={onClose}
+            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition-all"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`py-2.5 rounded-xl text-white font-bold text-xs shadow-lg transition-all ${
+              danger
+                ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20'
+                : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20'
+            }`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeleteConfirmModal({ product, onClose, onConfirm }) {
+  useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
@@ -12869,6 +13174,7 @@ function DeleteConfirmModal({ product, onClose, onConfirm }) {
 }
 
 function DeleteOrderModal({ order, onClose, onConfirm }) {
+  useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
@@ -13156,6 +13462,7 @@ function FacturaQr360({ order, rate }) {
 }
 
 function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast }) {
+  useOverlay(true, onClose);
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
   const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
@@ -13288,6 +13595,7 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
 }
 
 function CancelOrderModal({ order, onClose, onConfirm }) {
+  useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
@@ -13420,6 +13728,7 @@ const speechRecognitionAvailable = () =>
 // Modal de confirmación de la compra rápida por voz: muestra los artículos
 // reconocidos y permite confirmar (agrega al carrito) o reintentar.
 function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listening }) {
+  useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
@@ -13460,7 +13769,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
             <div className="space-y-2">
               {items.map((it) => (
                 <div key={it.product.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-800/60 border border-slate-700">
-                  <img src={it.product.image} alt={it.product.name} className="w-10 h-10 rounded-lg object-cover bg-slate-900 shrink-0" />
+                  <ProductImg product={it.product} alt={it.product.name} className="w-10 h-10 rounded-lg object-cover bg-slate-900 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className="block text-xs font-semibold text-slate-200 truncate">{it.product.name}</span>
                     <span className="text-[11px] text-teal-400 font-bold">{formatUsd(it.product.price)} c/u</span>
@@ -13508,6 +13817,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
 // Dashboard personal "Mi Kiosko": resumen del cliente con gasto, pedidos,
 // productos favoritos, rachas y próximos pedidos activos.
 function MyKioskoModal({ customer, customerName, orders, products, rate, onClose, onRepeatLastOrder, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const customerOrders = useMemo(() => {
     if (!customer?.phone) return [];
     const key = normalizePhoneDigits(customer.phone);
@@ -13623,7 +13933,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
               <div className="space-y-2 mt-1.5">
                 {stats.topProducts.map((t) => (
                   <div key={t.product.id} className="flex items-center gap-3 p-2 rounded-xl bg-slate-800/50 border border-slate-700/60">
-                    <img src={t.product.image} alt={t.product.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
+                    <ProductImg product={t.product} alt={t.product.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
                     <span className="flex-1 min-w-0 text-xs font-semibold text-slate-200 truncate">{t.product.name}</span>
                     <span className="text-[11px] font-black text-teal-400">{t.qty}x</span>
                   </div>
@@ -13657,6 +13967,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
 // Modal "Compartir Carrito": el dueño genera un enlace para que familia/amigos
 // sumen artículos y vea el carrito unificado en tiempo real.
 function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, products }) {
+  useOverlay(true, onClose);
   const link = share?.url || '';
   const [copied, setCopied] = useState(false);
 
@@ -13727,7 +14038,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
           ) : (
             sharedItems.map((it) => (
               <div key={it.id} className="flex items-center gap-3 p-2 rounded-xl bg-slate-800/50 border border-slate-700/60">
-                <img src={it.image} alt={it.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
+                <ProductImg image={it.image} name={it.name} alt={it.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
                 <span className="flex-1 min-w-0 text-xs font-semibold text-slate-200 truncate">{it.name}</span>
                 <span className="text-[11px] font-black text-white">{it.qty}x</span>
               </div>
@@ -14078,23 +14389,32 @@ function AikerAssistant({
   rate,
   savedCustomer,
   headerHeight = 0,
-  onClose
+  onClose,
+  onOpenDebt,
+  onOpenOrders,
+  onTrackOrder,
+  onAddToCart,
+  onRepeatLastOrder
 }) {
   const [messages, setMessages] = useState([
     {
       from: 'ai',
-      text: '¡Hola! Soy Don Aiker, el asistente del kiosko. Pregúntame por tu deuda, tus pedidos, promos activas o la tasa del día. 😊'
+      text: '¡Hola! Soy Don Aiker, el asistente del kiosko. Toca una pregunta rápida o pide un producto para agregarlo al carrito. Puedo contarte tu deuda, tus pedidos, las promos y la tasa del día. 😊'
     }
   ]);
   const [thinking, setThinking] = useState(false);
+  // Acción profunda asociada a la última respuesta del asistente (botón debajo
+  // del mensaje): ver deuda, seguir pedido, repetir pedido o agregar al carrito.
+  const [action, setAction] = useState(null);
+  const [draft, setDraft] = useState('');
   const scrollRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useOverlay(true, onClose);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, thinking]);
-
-  // Respuestas rápidas sugeridas
-  const quickReplies = ['¿Cuánto debo?', '¿Dónde está mi pedido?', 'Promos activas', '¿Cuál es la tasa?'];
 
   const balance = Number(customer?.balance) || 0;
   const name = customer?.customerName?.split(' ')[0] || savedCustomer?.customerName?.split(' ')[0] || 'cliente';
@@ -14104,88 +14424,157 @@ function AikerAssistant({
   );
   const activePromos = (promos || []).filter((p) => p.active);
 
-  const answer = (q) => {
+  // Productos populares del catálogo para el acceso rápido "Agregar".
+  const popular = useMemo(() => {
+    if (!Array.isArray(products) || products.length === 0) return [];
+    const freq = {};
+    (customerOrders || []).forEach((o) =>
+      (o.items || []).forEach((it) => {
+        freq[it.id] = (freq[it.id] || 0) + (Number(it.quantity) || 0);
+      })
+    );
+    return [...products]
+      .sort((a, b) => (freq[b.id] || 0) - (freq[a.id] || 0) || Number(b.stock || 0) - Number(a.stock || 0))
+      .slice(0, 3);
+  }, [products, customerOrders]);
+
+  const baseReplies = ['¿Cuánto debo?', '¿Dónde está mi pedido?', 'Promos activas', '¿Cuál es la tasa?'];
+  const quickReplies = myOrders.length ? [...baseReplies, 'Repetir mi último pedido'] : baseReplies;
+
+  // Responde una pregunta y adosale una acción profunda cuando corresponde.
+  const respond = (q) => {
     const t = q.toLowerCase();
     // Saludos
     if (/hola|buenas|saludos|hey|qué tal|que tal|^hi|^hello/.test(t)) {
-      return `¡Hola${name !== 'cliente' ? `, ${name}` : ''}! Soy Don Aiker 🤖 ¿En qué te ayudo hoy? Puedo contarte tu deuda, el estado de tus pedidos, las promos activas o la tasa del día.`;
+      return {
+        text: `¡Hola${name !== 'cliente' ? `, ${name}` : ''}! Soy Don Aiker 🤖 ¿En qué te ayudo hoy? Toca abajo para ver tu deuda, tus pedidos, las promos activas, la tasa del día o agregar un producto.`
+      };
     }
     // Deuda / saldo / fiado
     if (/deuda|debo|adeudo|saldo|fiado|cr[eé]dito|c[uú]anto pag|deber|pendiente/.test(t)) {
       if (!customer) {
-        return 'Aún no estás identificado. Identifícate con tu número para ver tu deuda y saldo a favor.';
+        return { text: 'Aún no estás identificado. Identifícate con tu número para ver tu deuda y saldo a favor.' };
       }
       if (balance > 0) {
-        return `Tienes ${formatUsd(balance)} de deuda pendiente. Puedes abonar desde "Mi deuda" en tu cuenta. ${
-          rate?.rate > 0 ? `Equivale a ${formatBs(usdToBs(balance, rate.rate))} a la tasa del día (Bs ${Number(rate.rate).toFixed(2)}).` : ''
-        }`;
+        return {
+          text: `Tienes ${formatUsd(balance)} de deuda pendiente.${
+            rate?.rate > 0 ? ` Equivale a ${formatBs(usdToBs(balance, rate.rate))} a la tasa del día (Bs ${Number(rate.rate).toFixed(2)}).` : ''
+          }\nPuedes abonar desde tu cuenta.`,
+          action: { kind: 'debt', label: 'Ver mi deuda', icon: 'creditCard' }
+        };
       }
       if (balance < 0) {
-        return `Tienes ${formatUsd(Math.abs(balance))} a tu favor en tu cartera 🎉. Al pagar tu próximo pedido elige "Mi Cartera" para usarlo.`;
+        return {
+          text: `Tienes ${formatUsd(Math.abs(balance))} a tu favor en tu cartera 🎉. Al pagar tu próximo pedido elige "Mi Cartera" para usarlo.`,
+          action: { kind: 'debt', label: 'Ver mi saldo', icon: 'wallet' }
+        };
       }
-      return '¡Estás al día! No tienes deudas pendientes ni saldo a favor.';
+      return { text: '¡Estás al día! No tienes deudas pendientes ni saldo a favor.' };
     }
     // Pedidos / rastreo
     if (/pedido|orden|rastr|d[oó]nde est[aá]|en camino|entrega|estado/.test(t)) {
       if (myOrders.length === 0) {
-        return 'Aún no tienes pedidos registrados con tu número. ¡Haz tu primer pedido en la tienda!';
+        return { text: 'Aún no tienes pedidos registrados con tu número. ¡Haz tu primer pedido en la tienda!' };
       }
       const pending = myOrders.find((o) => !['entregado', 'cancelado'].includes(o.status));
       if (pending) {
-        return `Tu último pedido ${pending.id} está ${pending.status === 'pendiente' ? 'pendiente de confirmar' : pending.status === 'preparando' ? 'en preparación' : pending.status === 'en_camino' ? 'en camino 🛵' : pending.status}. Puedes verlo en "Mis Pedidos" o seguir el rastreo en vivo.`;
+        return {
+          text: `Tu último pedido ${pending.id} está ${
+            pending.status === 'pendiente' ? 'pendiente de confirmar' : pending.status === 'preparando' ? 'en preparación' : pending.status === 'en_camino' ? 'en camino 🛵' : pending.status
+          }.\nSeguilo en vivo o revisalo en "Mis Pedidos".`,
+          action:
+            pending.type === 'delivery' && pending.status === 'en_camino'
+              ? { kind: 'track', order: pending, label: 'Seguir mi pedido', icon: 'navigation' }
+              : { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' }
+        };
       }
       const latest = myOrders[0];
-      return `Tu último pedido ${latest.id} fue entregado ✅. Puedes repetirlo desde "Mis Pedidos".`;
+      return {
+        text: `Tu último pedido ${latest.id} fue entregado ✅.`,
+        action: { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' }
+      };
+    }
+    // Repetir último pedido
+    if (/repetir|repite|de nuevo/.test(t)) {
+      if (myOrders.length === 0) {
+        return { text: 'No encontré pedidos anteriores para repetir. ¡Haz tu primer pedido en la tienda!' };
+      }
+      return {
+        text: 'Voy a cargar los artículos de tu último pedido en el carrito 🛒.',
+        action: { kind: 'repeat', label: 'Repetir último pedido', icon: 'refresh' }
+      };
     }
     // Promos / ofertas
     if (/promo|oferta|descuento|rebaja|especial|combos|barato/.test(t)) {
       if (activePromos.length === 0) {
-        return 'Hoy no hay promos activas, pero te recomiendo revisar el Radar de Novedades por los productos nuevos.';
+        return { text: 'Hoy no hay promos activas, pero te recomiendo revisar el Radar de Novedades por los productos nuevos.' };
       }
       const lines = activePromos.map((p, i) => `${i + 1}. ${p.title}${p.subtitle ? ` — ${p.subtitle}` : ''}`).join('\n');
-      return `¡Hay ${activePromos.length} promo${activePromos.length > 1 ? 's' : ''} activa${activePromos.length > 1 ? 's' : ''}! 🎉\n${lines}`;
+      return { text: `¡Hay ${activePromos.length} promo${activePromos.length > 1 ? 's' : ''} activa${activePromos.length > 1 ? 's' : ''}! 🎉\n${lines}` };
     }
     // Tasa / dólar / bolívar
     if (/tasa|d[oó]lar|dolar|bol[ií]var|bs|bcv|divisa|cambio/.test(t)) {
       if (rate?.rate > 0) {
-        return `La tasa del día es Bs ${Number(rate.rate).toFixed(2)} por dólar. Por ejemplo, $10 serían ${formatBs(usdToBs(10, rate.rate))}.`;
+        return { text: `La tasa del día es Bs ${Number(rate.rate).toFixed(2)} por dólar. Por ejemplo, $10 serían ${formatBs(usdToBs(10, rate.rate))}.` };
       }
-      return 'Aún no tenemos la tasa del día disponible. Intenta de nuevo en unos minutos.';
+      return { text: 'Aún no tenemos la tasa del día disponible. Intenta de nuevo en unos minutos.' };
+    }
+    // Producto específico (por nombre completo o primera palabra). Se evalúa
+    // ANTES del catálogo genérico para que "agregar milka" o "hay cocacola"
+    // aterricen en el producto con acción "Agregar al carrito".
+    const prodList = Array.isArray(products) ? products : [];
+    const product =
+      prodList.find((p) => p.name && t.includes(p.name.toLowerCase())) ||
+      prodList.find((p) => p.name && t.includes(p.name.toLowerCase().split(' ')[0]));
+    if (product) {
+      const avail = Math.max(0, Number(product.stock) - Number(product.reserved || 0));
+      return {
+        text: `"${product.name}" está disponible a ${formatUsd(product.price)}${
+          avail > 0 ? ` con ${avail} ${avail === 1 ? 'unidad' : 'unidades'} en stock` : ', agotado por ahora'
+        }.`,
+        action: avail > 0 ? { kind: 'product', product, label: 'Agregar al carrito', icon: 'plus' } : null
+      };
     }
     // Productos / catálogo
-    if (/qu[eé] venden|producto|c[aá]talogo|tienes|disponible|vendes|hay de/.test(t)) {
-      if (!Array.isArray(products) || products.length === 0) return 'Ahora mismo el catálogo está cargando. Intenta en un momento.';
+    if (/qu[eé] venden|producto|c[aá]talogo|tienes|disponible|vendes|hay de|agregar/.test(t)) {
+      if (!Array.isArray(products) || products.length === 0) return { text: 'Ahora mismo el catálogo está cargando. Intenta en un momento.' };
       const cats = [...new Set(products.map((p) => p.category || 'Otros'))];
-      return `Tenemos ${products.length} productos disponibles en ${cats.length} categoría${cats.length > 1 ? 's' : ''}: ${cats.slice(0, 6).join(', ')}. Busca en la barra superior o navega por categorías.`;
+      return { text: `Tenemos ${products.length} productos disponibles en ${cats.length} categoría${cats.length > 1 ? 's' : ''}: ${cats.slice(0, 6).join(', ')}. Busca en la barra superior o navega por categorías.` };
     }
     // Horario / abierto
     if (/horario|abierto|hora|cu[aá]ndo|abren|cierran/.test(t)) {
-      return 'Estamos abiertos ahora mismo ⏰ con atención rápida. Puedes pedir para retirar en el kiosko o para entrega.';
-    }
-    // Producto específico (busca coincidencia en nombres)
-    const product = (products || []).find((p) => t.includes(p.name.toLowerCase().split(' ')[0]));
-    if (product) {
-      return `"${product.name}" está disponible a ${formatUsd(product.price)}${
-        product.stock > 0 ? ` con ${Math.max(0, Number(product.stock) - Number(product.reserved || 0))} unidades en stock` : ', agotado por ahora'
-      }. Puedes agregarlo tocando "+" en su tarjeta.`;
+      return { text: 'Estamos abiertos ahora mismo ⏰ con atención rápida. Puedes pedir para retirar en el kiosko o para entrega.' };
     }
     // Agradecimiento
     if (/gracias|genial|perfecto|excelente|muchas gracias/.test(t)) {
-      return `¡Con gusto${name !== 'cliente' ? `, ${name}` : ''}! Recuerda que puedes pedir con voz tocando el micrófono del buscador 🎤.`;
+      return { text: `¡Con gusto${name !== 'cliente' ? `, ${name}` : ''}! Recuerda que puedes pedir con voz tocando el micrófono del buscador 🎤.` };
     }
     // Fallback
-    return 'Todavía estoy aprendiendo. Pregúntame por: tu deuda, tus pedidos, las promos activas, la tasa del día o los productos del catálogo.';
+    return { text: 'Todavía estoy aprendiendo. Tocá una pregunta rápida abajo o probá con: tu deuda, tus pedidos, las promos, la tasa del día o un producto del catálogo.' };
   };
 
   const send = (text) => {
     const q = String(text ?? '').trim();
     if (!q || thinking) return;
     setMessages((m) => [...m, { from: 'user', text: q }]);
+    setAction(null);
     setThinking(true);
     setTimeout(() => {
-      setMessages((m) => [...m, { from: 'ai', text: answer(q) }]);
+      const res = respond(q);
+      setMessages((m) => [...m, { from: 'ai', text: res.text }]);
+      setAction(res.action || null);
       setThinking(false);
     }, 650);
+  };
+
+  const runAction = (a) => {
+    if (!a) return;
+    if (a.kind === 'debt') onOpenDebt?.();
+    else if (a.kind === 'orders') onOpenOrders?.();
+    else if (a.kind === 'track') onTrackOrder?.(a.order);
+    else if (a.kind === 'repeat') onRepeatLastOrder?.();
+    else if (a.kind === 'product') onAddToCart?.(a.product);
+    onClose();
   };
 
   return (
@@ -14201,9 +14590,11 @@ function AikerAssistant({
             <div className="flex-1 min-w-0">
               <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
                 Don Aiker
-                <span className="px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[9px] font-bold uppercase tracking-wider border border-indigo-500/30">IA</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold uppercase tracking-wider border border-emerald-500/30">
+                  asistente
+                </span>
               </h3>
-              <p className="text-[11px] text-slate-400 truncate">Asistente del kiosko · responde con datos en vivo</p>
+              <p className="text-[11px] text-slate-400 truncate">Toca una pregunta o pide un producto</p>
             </div>
             <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl" aria-label="Cerrar asistente">
               <Icon name="x" className="w-5 h-5" />
@@ -14229,6 +14620,17 @@ function AikerAssistant({
                 </div>
               </div>
             ))}
+            {action && (
+              <div className="flex justify-start pl-9 animate-fade-in">
+                <button
+                  onClick={() => runAction(action)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-slate-950 text-xs font-bold shadow-lg shadow-indigo-500/25 transition-all active:scale-95 hover:from-indigo-400 hover:to-cyan-400"
+                >
+                  <Icon name={action.icon || 'check'} className="w-3.5 h-3.5" />
+                  {action.label}
+                </button>
+              </div>
+            )}
             {thinking && (
               <div className="flex justify-start animate-fade-in">
                 <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
@@ -14244,6 +14646,54 @@ function AikerAssistant({
           </div>
 
           <div className="p-3 border-t border-slate-800 shrink-0 bg-slate-900">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!draft.trim() || thinking) return;
+                send(draft);
+                setDraft('');
+              }}
+              className="mb-3 flex items-center gap-2"
+            >
+              <input
+                ref={inputRef}
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Escribe tu pregunta o pide un producto…"
+                disabled={thinking}
+                enterKeyHint="send"
+                className="flex-1 min-w-0 px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/70 focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!draft.trim() || thinking}
+                aria-label="Enviar"
+                className="shrink-0 p-2.5 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-500/30 transition-all active:scale-95 hover:from-indigo-500 hover:to-cyan-400 disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <Icon name="arrowRight" className="w-5 h-5" />
+              </button>
+            </form>
+            {popular.length > 0 && (
+              <div className="mb-2.5">
+                <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 px-1">
+                  Agregar rápido
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {popular.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => send(`agregar ${p.name}`)}
+                      disabled={thinking}
+                      className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-[11px] font-bold text-teal-300 hover:bg-teal-500/25 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      <Icon name="plus" className="w-3 h-3" />
+                      <span className="max-w-24 truncate">{p.name.split(' ').slice(0, 2).join(' ')}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 px-1">
               ¿Qué quieres saber?
             </span>

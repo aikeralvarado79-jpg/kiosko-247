@@ -126,6 +126,97 @@ const BrandLogo = ({ className = 'w-9 h-9' }) => (
   </span>
 );
 
+// Reveal on scroll: aplica reveal-on-scroll al envolver un bloque y activa la
+// clase is-revealed cuando entra al viewport. Respeto total a prefers-reduced-motion.
+const RevealOnScroll = ({ children, className = '', delay = 0, as: Tag = 'div', ...props }) => {
+  const ref = useRef(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    if (
+      typeof matchMedia !== 'undefined' &&
+      matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      setVisible(true);
+      return undefined;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            io.disconnect();
+          }
+        });
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -36px 0px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <Tag
+      ref={ref}
+      className={`reveal-on-scroll ${visible ? 'is-revealed' : ''} ${className}`.trim()}
+      style={{ '--reveal-delay': `${delay}ms`, ...props.style }}
+      {...props}
+    >
+      {children}
+    </Tag>
+  );
+};
+
+// Precio con count-up: anima el número del valor anterior al nuevo en ~0.5s.
+// Sin animación si el usuario prefiere reducir el movimiento del sistema.
+const useCountUp = (value, duration = 500) => {
+  const [display, setDisplay] = useState(value);
+  const [animKey, setAnimKey] = useState(0);
+
+  useEffect(() => {
+    const prev = display;
+    if (Number(display) === Number(value)) return undefined;
+    let raf = 0;
+    const start = performance.now();
+    const from = Number(prev) || 0;
+    const to = Number(value) || 0;
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(from + (to - from) * eased);
+      if (t < 1) raf = requestAnimationFrame(step);
+      else setAnimKey((k) => k + 1);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, duration]);
+
+  return { display, animKey };
+};
+
+// Precio con count-up listo para usarse junto a los helpers formatUsd/formatBs.
+const PriceCountUp = ({ value, rate, className = '', bsClass = '', donate = false }) => {
+  const { display, animKey } = useCountUp(value);
+  return (
+    <div className={`animate-price-pop ${className}`} key={`pc-${animKey}`}>
+      <span className="block">{formatUsd(display)}</span>
+      {rate?.rate > 0 && (
+        <span className={`block mt-0.5 truncate ${bsClass}`}>
+          {formatBs(usdToBs(display, rate.rate))}
+        </span>
+      )}
+      {donate && (
+        <span className="block text-[9px] text-slate-500 uppercase tracking-wide mt-0.5">
+          precio actualizado
+        </span>
+      )}
+    </div>
+  );
+};
+
 // Botón reusable con feedback visual completo: hover (lift + glow), press
 // (scale + sombra hundida), focus-visible ring, estados de carga (spinner),
 // éxito (check) y error. Variantes: primary | secondary | tonal | danger | ghost.
@@ -3735,6 +3826,7 @@ function CustomerView({
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
       {/* Hero editorial: foto real del producto estrella con efecto parallax */}
+      <RevealOnScroll>
       <div
         ref={heroRef}
         className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-700/60 shadow-2xl min-h-[300px] sm:min-h-[340px]"
@@ -3786,9 +3878,11 @@ function CustomerView({
           </div>
         </div>
       </div>
+      </RevealOnScroll>
 
       {/* Vitrina "Los más pedidos": 3-5 estrellas en carrusel a pantalla ancha */}
       {topSellers.length > 0 && (
+        <RevealOnScroll delay={80}>
         <section className="animate-fade-in">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -3817,7 +3911,8 @@ function CustomerView({
                     src={product.image}
                     alt={product.name}
                     loading="lazy"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 img-load-fade"
+                    onLoad={(e) => e.currentTarget.classList.add('is-loaded')}
                   />
                   <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-medium border`}>
                     <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
@@ -3831,14 +3926,12 @@ function CustomerView({
                   </p>
                   <div className="mt-auto pt-2 flex items-end justify-between gap-2 border-t border-slate-700/50">
                     <div className="min-w-0">
-                      <span className="font-display text-xl sm:text-2xl font-black tracking-tight text-white">
-                        {formatUsd(product.price)}
-                      </span>
-                      {rate?.rate > 0 && (
-                        <span className="block text-[10px] sm:text-[11px] font-bold text-teal-300/90 truncate">
-                          {formatBs(usdToBs(product.price, rate.rate))}
-                        </span>
-                      )}
+                      <PriceCountUp
+                        value={product.price}
+                        rate={rate}
+                        className="font-display text-xl sm:text-2xl font-black tracking-tight text-white"
+                        bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
+                      />
                     </div>
                     <button
                       onClick={(e) => {
@@ -3856,6 +3949,7 @@ function CustomerView({
             ))}
           </div>
         </section>
+        </RevealOnScroll>
       )}
 
       {/* Promos Carousel */}
@@ -4511,16 +4605,21 @@ function CustomerView({
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6 lg:gap-8">
           {products.map((product, idx) => (
-            <ProductCard
+            <RevealOnScroll
               key={product.id}
-              product={product}
-              rate={rate}
-              isFavorite={favorites.includes(product.id)}
-              onToggleFavorite={() => onToggleFavorite(product.id)}
-              onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
-              onOpenDetail={() => onOpenProductModal(product)}
-              featured={idx === 0}
-            />
+              delay={Math.min(idx, 8) * 60}
+              className={idx === 0 ? 'lg:col-span-2 lg:row-span-2' : ''}
+            >
+              <ProductCard
+                product={product}
+                rate={rate}
+                isFavorite={favorites.includes(product.id)}
+                onToggleFavorite={() => onToggleFavorite(product.id)}
+                onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
+                onOpenDetail={() => onOpenProductModal(product)}
+                featured={idx === 0}
+              />
+            </RevealOnScroll>
           ))}
         </div>
       )}
@@ -4535,6 +4634,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   // Predicción "Se acaba pronto": el stock durará <= 2 días al ritmo de venta actual.
   const runOutSoon = !isOut && product.runOutDays != null && product.runOutDays > 0 && product.runOutDays <= 2;
   const [justAdded, setJustAdded] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
 
   // Vitrina 3D: efecto de inclinación (tilt) al pasar/arrastrar sobre la tarjeta.
   const cardRef = useRef(null);
@@ -4571,9 +4671,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         transformStyle: 'preserve-3d',
         transition: 'transform 180ms ease-out, box-shadow 300ms, border-color 300ms, translate 300ms'
       }}
-      className={`group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm tilt-3d ${
-        featured ? 'lg:col-span-2 lg:row-span-2' : ''
-      }`}
+      className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 active:scale-[0.97] flex flex-col justify-between backdrop-blur-sm tilt-3d"
     >
       {/* Contenido plano: se contra-rota para que solo el marco de la tarjeta se incline */}
       <div
@@ -4590,7 +4688,8 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <img
           src={product.image}
           alt={product.name}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          onLoad={() => setImgLoaded(true)}
+          className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${imgLoaded ? 'is-loaded' : 'img-load-fade'}`}
           loading="lazy"
         />
         {featured && (
@@ -4676,14 +4775,12 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-slate-700/50">
           <div>
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Precio</span>
-            <span className={`font-display font-black tracking-tight text-white ${featured ? 'text-2xl sm:text-4xl' : 'text-base sm:text-lg'}`}>
-              {formatUsd(product.price)}
-            </span>
-            {rate?.rate > 0 && (
-              <span className="block text-[10px] sm:text-[11px] font-bold text-teal-300/90 mt-0.5 truncate">
-                {formatBs(usdToBs(product.price, rate.rate))}
-              </span>
-            )}
+            <PriceCountUp
+              value={product.price}
+              rate={rate}
+              className={`font-display font-black tracking-tight text-white ${featured ? 'text-2xl sm:text-4xl' : 'text-base sm:text-lg'}`}
+              bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
+            />
           </div>
 
           <Btn

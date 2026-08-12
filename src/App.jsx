@@ -85,6 +85,14 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
       download: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />,
       radio: <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4M16.2 7.8c2.3 2.3 2.3 6.1 0 8.4M19.1 4.9C23 8.8 23 15.2 19.1 19.1M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
       percent: <path d="M19 5 5 19M6.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17.5 20a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />,
+      burger: <path d="M3 11h18a9 9 0 0 0-18 0zM3 15h18M7 11l.01.01M12 11l.01.01M17 11l.01.01M5 19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2M6 15a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2" />,
+      cup: <path d="M8 2v3M16 2v3M3 5h18M4 8h16l-1.5 12a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2L4 8zM7 14a5 5 0 0 0 10 0" />,
+      milk: <path d="M8 2h8v3l-1.5 2V21a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V7L8 5V2zM10 10h4M10 14h4M10 18h4" />,
+      candy: <path d="M7.5 6.5 4 4l2.5-2.5C7.5 2.5 7.5 5 7.5 6.5zM12.5 17.5 16 20l-2.5 2.5c-1-1-1-3.5-1-5zM6 6l12 12c1.5-1.5 1-4 0-6.5-2.5-1-5-1.5-6.5 0L6 6zM16 20 8 12M4 4l8 8" />,
+      spray: <path d="M9 4h6a2 2 0 0 1 2 2v2M9 4a2 2 0 0 0-2 2v2m2-4h6M7 8h10v12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V8zM17 6l3-3M14 6l1-1" />,
+      chips: <path d="M6 21h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM2 9h2M2 15h2M20 9h2M20 15h2M12 7v10" />,
+      pizza: <path d="M12 2 4 7l8 15 8-15-8-5zM12 2v5M4 7h16M9 7l3 6 3-6M12 13v9" />,
+      iceCream: <path d="M12 2a5 5 0 0 1 5 5c0 1.5-.5 2.5-1 3.5h-8C7.5 9.5 7 8.5 7 7a5 5 0 0 1 5-5zM8 11h8l-2.5 10a2 2 0 0 1-3 0L8 11z" />,
     };
 
   return (
@@ -103,6 +111,20 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     </svg>
   );
 };
+
+// Logo de marca: monograma "24" con rayo (tienda abierta día y noche) sobre un
+// sello redondeado. Gradiente propio (no depende del tema) para que el logo se
+// reconozca igual en modo claro y oscuro.
+const BrandLogo = ({ className = 'w-9 h-9' }) => (
+  <span
+    className={`inline-flex items-center justify-center rounded-2xl bg-gradient-to-tr from-teal-500 via-emerald-500 to-cyan-400 shadow-lg shadow-teal-500/25 ring-2 ring-white/15 shrink-0 select-none ${className}`}
+    aria-hidden="true"
+  >
+    <svg viewBox="0 0 24 24" className="w-[62%] h-[62%] fill-slate-950" xmlns="http://www.w3.org/2000/svg">
+      <path d="M13 2 4.5 13.5h5L10.5 22 19.5 9.5h-5.5L13 2z" />
+    </svg>
+  </span>
+);
 
 // Botón reusable con feedback visual completo: hover (lift + glow), press
 // (scale + sombra hundida), focus-visible ring, estados de carga (spinner),
@@ -520,6 +542,31 @@ const SEM_TONES = {
   rose: 'bg-rose-500/15 text-rose-300 border-rose-500/40'
 };
 
+// Identidad visual por categoría: cada categoría tiene su color (pill/badge),
+// su tono sólido (estado activo) y su icono. El fallback genérico cubre
+// categorías nuevas sin necesidad de editar el código.
+const CATEGORY_IDENTITY = {
+  comida: { chip: 'bg-amber-500/15 text-amber-300 border-amber-500/40', solid: 'bg-amber-400 text-slate-950', icon: 'burger' },
+  confitería: { chip: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40', solid: 'bg-fuchsia-400 text-slate-950', icon: 'candy' },
+  golosinas: { chip: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40', solid: 'bg-fuchsia-400 text-slate-950', icon: 'candy' },
+  snacks: { chip: 'bg-orange-500/15 text-orange-300 border-orange-500/40', solid: 'bg-orange-400 text-slate-950', icon: 'chips' },
+  bebidas: { chip: 'bg-sky-500/15 text-sky-300 border-sky-500/40', solid: 'bg-sky-400 text-slate-950', icon: 'cup' },
+  lácteos: { chip: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/40', solid: 'bg-indigo-400 text-slate-950', icon: 'milk' },
+  lacteos: { chip: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/40', solid: 'bg-indigo-400 text-slate-950', icon: 'milk' },
+  higiene: { chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40', solid: 'bg-emerald-400 text-slate-950', icon: 'spray' },
+  farmacia: { chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40', solid: 'bg-emerald-400 text-slate-950', icon: 'spray' },
+  limpieza: { chip: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40', solid: 'bg-cyan-400 text-slate-950', icon: 'spray' },
+  panadería: { chip: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/40', solid: 'bg-yellow-400 text-slate-950', icon: 'burger' },
+  helados: { chip: 'bg-violet-500/15 text-violet-300 border-violet-500/40', solid: 'bg-violet-400 text-slate-950', icon: 'iceCream' },
+  postres: { chip: 'bg-pink-500/15 text-pink-300 border-pink-500/40', solid: 'bg-pink-400 text-slate-950', icon: 'iceCream' },
+  pizza: { chip: 'bg-rose-500/15 text-rose-300 border-rose-500/40', solid: 'bg-rose-400 text-slate-950', icon: 'pizza' }
+};
+const CATEGORY_FALLBACK = { chip: 'bg-teal-500/15 text-teal-300 border-teal-500/40', solid: 'bg-teal-400 text-slate-950', icon: 'layers' };
+const categoryIdentity = (name) => {
+  const key = String(name || '').toLowerCase().trim();
+  return CATEGORY_IDENTITY[key] || CATEGORY_FALLBACK;
+};
+
 const playChime = (() => {
   let ctx = null;
   const note = (freq, start, dur, type = 'sine', gain = 0.12) => {
@@ -920,7 +967,7 @@ export default function App() {
         changed = true;
       } else if (prev !== cur) {
         if (cur < prev) {
-          addToast(`${p.name} bajó a ${formatUsd(cur)} 🎉`, 'success');
+          addToast(`${p.name} bajó a ${formatUsd(cur)}`, 'success');
         } else if (cur > prev) {
           addToast(`${p.name} subió a ${formatUsd(cur)}`, 'warning');
         }
@@ -2162,7 +2209,7 @@ export default function App() {
       } else if (status === 'en_camino') {
         addToast(`¡Tu pedido ${trackedOrder.id} está en camino!`, 'warning');
       } else if (status === 'entregado') {
-        addToast(`¡Tu pedido ${trackedOrder.id} fue entregado! 🎉`, 'success');
+        addToast(`¡Tu pedido ${trackedOrder.id} fue entregado!`, 'success');
       } else if (status === 'cancelado') {
         addToast(`Tu pedido ${trackedOrder.id} fue cancelado.`, 'error');
       }
@@ -2183,7 +2230,7 @@ export default function App() {
         if (o.status === 'en_camino') {
           addToast(`¡Tu pedido ${o.id} está en camino!`, 'warning');
         } else if (o.status === 'entregado') {
-          addToast(`¡Tu pedido ${o.id} fue entregado! 🎉`, 'success');
+          addToast(`¡Tu pedido ${o.id} fue entregado!`, 'success');
         } else if (o.status === 'cancelado') {
           addToast(`Tu pedido ${o.id} fue cancelado.`, 'error');
         }
@@ -2226,11 +2273,9 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 ring-2 ring-white/10 shrink-0 animate-glow-pulse">
-              <Icon name="store" className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
+            <BrandLogo className="w-10 h-10 sm:w-11 sm:h-11" />
             <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate">
+              <h1 className="font-display text-lg sm:text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate">
                 Empresas Alvarados
               </h1>
               <span className="hidden sm:flex text-xs text-teal-400/90 font-medium items-center gap-1.5">
@@ -2725,7 +2770,11 @@ export default function App() {
         style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
         className="mt-auto border-t border-slate-800/80 bg-slate-950/60 pt-5 pb-20 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500"
       >
-        <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
+        <div className="inline-flex items-center gap-1.5 mb-1.5">
+          <BrandLogo className="w-5 h-5 !rounded-lg" />
+          <span className="font-display font-bold text-slate-300 text-xs tracking-wide">Kiosko 24/7 · Empresas Alvarados</span>
+        </div>
+        <p>Abierto todo el día, todos los días. Pedí, pagá y retirá sin filas o recibí en tu puerta.</p>
       </footer>
 
       {/* Banner de notificaciones push (solo cliente identificado y permiso sin decidir) */}
@@ -2817,7 +2866,7 @@ function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
         <p className="text-[11px] sm:text-xs font-bold uppercase tracking-[0.35em] text-teal-200/80 mb-3 animate-welcome-pop">
           {tag}
         </p>
-        <h2 className="text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
+        <h2 className="font-display text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
           {name}
         </h2>
         <p className="text-xs sm:text-sm text-teal-100/70 animate-welcome-pop">
@@ -3645,10 +3694,11 @@ function CustomerView({
       <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 animate-gradient-x border border-slate-700/60 p-4 sm:p-8 shadow-2xl backdrop-blur-md">
         <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-5">
           <div className="space-y-2 sm:space-y-3 max-w-xl">
-            <span className="px-2.5 sm:px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
-              ⚡ Pedidos al momento
+            <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
+              <Icon name="zap" className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              Pedidos al momento
             </span>
-            <h2 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h2 className="font-display text-xl sm:text-3xl font-extrabold text-white tracking-tight">
               ¿Qué se te antoja hoy?
             </h2>
             <p className="hidden sm:block text-slate-300 text-sm leading-relaxed">
@@ -4274,21 +4324,33 @@ function CustomerView({
         </div>
 
         <div className="space-y-2.5">
-          {/* Category Pills */}
+          {/* Category Pills: cada categoría tiene su color e icono de identidad */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {['Todas', 'Favoritos', ...categories].map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3.5 sm:px-4 py-2 rounded-2xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-300 border shrink-0 ${
-                  selectedCategory === cat
-                    ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20 scale-105'
-                    : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
-                }`}
-              >
-                {cat === 'Favoritos' ? `❤ Favoritos (${favorites.length})` : cat}
-              </button>
-            ))}
+            {['Todas', 'Favoritos', ...categories].map((cat) => {
+              const isFav = cat === 'Favoritos';
+              const id = isFav ? null : categoryIdentity(cat);
+              const active = selectedCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-2xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-300 border shrink-0 ${
+                    active
+                      ? isFav
+                        ? 'bg-rose-400 text-slate-950 border-rose-300 shadow-lg shadow-rose-500/25 scale-105'
+                        : `${id.solid} border-transparent shadow-lg scale-105`
+                      : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
+                  }`}
+                >
+                  {isFav ? (
+                    <Icon name="heart" className={`w-3.5 h-3.5 ${active ? 'fill-current' : ''}`} />
+                  ) : (
+                    <Icon name={id.icon} className="w-3.5 h-3.5" />
+                  )}
+                  {isFav ? `Favoritos (${favorites.length})` : cat}
+                </button>
+              );
+            })}
           </div>
 
           {/* Sort Selector */}
@@ -4298,11 +4360,11 @@ function CustomerView({
             className="w-full px-3 py-2.5 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-xs font-semibold text-slate-300 focus:border-teal-500 focus:outline-none"
             aria-label="Ordenar productos"
           >
-            <option value="relevancia">✨ Ordenar: Relevancia</option>
-            <option value="popular">🔥 Más vendidos</option>
-            <option value="precio-asc">💲 Precio: menor a mayor</option>
-            <option value="precio-desc">💲 Precio: mayor a menor</option>
-            <option value="stock">📦 Mayor stock</option>
+            <option value="relevancia">Ordenar: Relevancia</option>
+            <option value="popular">Más vendidos</option>
+            <option value="precio-asc">Precio: menor a mayor</option>
+            <option value="precio-desc">Precio: mayor a menor</option>
+            <option value="stock">Mayor stock</option>
           </select>
         </div>
       </div>
@@ -4410,7 +4472,8 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
               {product.brand}
             </span>
           )}
-          <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-slate-950/80 backdrop-blur-md text-[10px] sm:text-xs font-medium text-slate-200 border border-white/10">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-medium border`}>
+            <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
             {product.category}
           </span>
         </div>
@@ -4473,7 +4536,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-slate-700/50">
           <div>
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Precio</span>
-            <span className="text-base sm:text-lg font-black text-white">
+            <span className="font-display text-base sm:text-lg font-extrabold tracking-tight text-white">
               {formatUsd(product.price)}
             </span>
             {rate?.rate > 0 && (
@@ -4590,7 +4653,8 @@ function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-950/70 border border-emerald-400/40 text-emerald-300 text-[10px] font-bold backdrop-blur-md">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> TARGET LOCK
           </span>
-          <span className="block px-2.5 py-1.5 rounded-full bg-slate-950/70 border border-fuchsia-400/40 text-fuchsia-200 text-[10px] font-bold backdrop-blur-md">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-950/70 border border-fuchsia-400/40 text-fuchsia-200 text-[10px] font-bold backdrop-blur-md">
+            <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
             {product.category}
           </span>
         </div>
@@ -4747,7 +4811,8 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             className="w-full h-full object-cover"
           />
           <div className="absolute top-4 left-4 sm:left-4">
-            <span className="hidden sm:inline px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-semibold text-teal-300 border border-teal-500/30">
+            <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-xs font-semibold border`}>
+              <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
               {product.category}
             </span>
           </div>
@@ -8347,8 +8412,9 @@ function AdminView({
             </div>
             {order.type === 'delivery' ? (
               inFicha ? (
-                <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
-                  🚚 Entrega a Domicilio
+                <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
+                  <Icon name="mapPin" className="w-3 h-3" />
+                  Entrega a Domicilio
                 </span>
               ) : (
                 <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
@@ -8373,8 +8439,9 @@ function AdminView({
                 </p>
               )
             ) : (
-              <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
-                🛍️ Retiro por Mostrador
+              <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
+                <Icon name="store" className="w-3 h-3" />
+                Retiro por Mostrador
               </span>
             )}
           </div>
@@ -8592,10 +8659,11 @@ function AdminView({
       {/* Admin Top Dashboard Header */}
       <div className="flex flex-col sm:flex-row md:items-center justify-between gap-4 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md">
         <div>
-          <span className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold uppercase tracking-wider">
-            🛡️ Panel Administrativo
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold uppercase tracking-wider">
+            <Icon name="layers" className="w-3.5 h-3.5" />
+            Panel Administrativo
           </span>
-          <h2 className="text-lg sm:text-2xl font-black text-white mt-2">Control de Inventario y Ventas</h2>
+          <h2 className="font-display text-lg sm:text-2xl font-black text-white mt-2">Control de Inventario y Ventas</h2>
           <p className="text-xs text-slate-400 mt-1">Gestiona tus productos en tiempo real y atiende pedidos entrantes.</p>
         </div>
 
@@ -8760,20 +8828,31 @@ function AdminView({
               </button>
             </div>
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
-              {inventoryCategories.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setInvCategory(c)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
-                    invCategory === c
-                      ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
-                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
-                  }`}
-                >
-                  {c === 'todas' ? 'Todas' : c}
-                  <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{catCount(c)}</span>
-                </button>
-              ))}
+              {inventoryCategories.map((c) => {
+                const id = c === 'todas' ? null : categoryIdentity(c);
+                const isActive = invCategory === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setInvCategory(c)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                      isActive
+                        ? c === 'todas'
+                          ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                          : `${id.solid} border-transparent shadow-lg`
+                        : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                    }`}
+                  >
+                    {c === 'todas' ? (
+                      <Icon name="layers" className="w-3 h-3" />
+                    ) : (
+                      <Icon name={id.icon} className="w-3 h-3" />
+                    )}
+                    {c === 'todas' ? 'Todas' : c}
+                    <span className="ml-1 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{catCount(c)}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -9055,7 +9134,12 @@ function AdminView({
                                   : 'text-teal-300 border-teal-500/40 bg-teal-500/10'
                               }`}
                             >
-                              {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
+                              {o.type === 'delivery' ? (
+                                <Icon name="mapPin" className="w-3 h-3" />
+                              ) : (
+                                <Icon name="store" className="w-3 h-3" />
+                              )}
+                              {o.type === 'delivery' ? 'Entrega' : 'Retiro'}
                             </span>
                           </div>
                           <OrderStepsTimeline order={o} />
@@ -9443,7 +9527,7 @@ function AdminView({
                               <td className="p-3 text-xs text-slate-400 whitespace-nowrap">
                                 {isNaN(d) ? '—' : `${d.toLocaleDateString('es-VE')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                               </td>
-                              <td className="p-3 text-xs text-slate-300">{o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}</td>
+                              <td className="p-3 text-xs text-slate-300">{o.type === 'delivery' ? 'Entrega a domicilio' : 'Retiro por mostrador'}</td>
                               <td className="p-3 text-xs text-slate-400 line-clamp-1 max-w-xs">
                                 {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
                               </td>
@@ -11456,7 +11540,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                 <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
                   <span className="text-[11px] uppercase tracking-wider text-emerald-400/80 font-semibold">Disponible para usar</span>
                   <div className="flex items-end justify-between mt-1">
-                    <span className="text-3xl font-black text-emerald-400">{formatUsd(walletAmount)}</span>
+                    <span className="font-display text-3xl font-black tracking-tight text-emerald-400">{formatUsd(walletAmount)}</span>
                     {rate?.rate > 0 && (
                       <span className="text-[10px] text-emerald-400/70">{formatBs(usdToBs(walletAmount, rate.rate))}</span>
                     )}
@@ -11470,7 +11554,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                 <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-rose-300">
                   <span className="text-[11px] uppercase tracking-wider text-rose-400/80 font-semibold">Saldo pendiente por pagar</span>
                   <div className="flex items-end justify-between mt-1">
-                    <span className="text-3xl font-black text-rose-400">{formatUsd(balance)}</span>
+                    <span className="font-display text-3xl font-black tracking-tight text-rose-400">{formatUsd(balance)}</span>
                     {rate?.rate > 0 && (
                       <span className="text-[10px] text-rose-400/70">{formatBs(usdToBs(balance, rate.rate))}</span>
                     )}
@@ -11483,7 +11567,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
               ) : (
                 <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700">
                   <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Saldo disponible</span>
-                  <div className="text-3xl font-black text-slate-500 mt-1">{formatUsd(0)}</div>
+                  <div className="font-display text-3xl font-black tracking-tight text-slate-500 mt-1">{formatUsd(0)}</div>
                   <p className="text-xs text-slate-400 mt-2">
                     Sin saldo a favor por el momento.
                   </p>
@@ -12056,7 +12140,7 @@ function buildAccountMessage(customer, orders) {
   ];
   if (debtOrders.length > 0) {
     debtOrders.forEach((o) => {
-      lines.push(`▫️ Pedido ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}):`);
+      lines.push(`· Pedido ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}):`);
       o.items.forEach((it) => lines.push(`   - ${it.quantity}x ${it.name} = ${formatUsd(it.price * it.quantity)}`));
       lines.push(`   Total: ${formatUsd(o.total)}`);
       lines.push('');
@@ -12064,7 +12148,7 @@ function buildAccountMessage(customer, orders) {
   }
   lines.push(`*Total a pagar: ${formatUsd(debtTotal)}*`);
   lines.push('');
-  lines.push('Gracias por tu prontitud. 🙌');
+  lines.push('Gracias por tu prontitud.');
   return lines.join('\n');
 }
 
@@ -12459,7 +12543,8 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                🥤 Líquido / Bebida
+                <Icon name="cup" className="w-4 h-4" />
+                Líquido / Bebida
               </button>
               <button
                 type="button"
@@ -12470,7 +12555,8 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                📦 Sólido
+                <Icon name="package" className="w-4 h-4" />
+                Sólido
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3">

@@ -4510,6 +4510,7 @@ function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
   const streamRef = useRef(null);
   const [camOk, setCamOk] = useState(false);
   const [camError, setCamError] = useState(false);
+  const [imgOk, setImgOk] = useState(Boolean(product.image));
   const [qty, setQty] = useState(1);
   const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
   const isOut = avail <= 0;
@@ -4580,9 +4581,23 @@ function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
         </div>
 
         {/* Producto flotante "anclado" */}
-        <div className="absolute left-1/2 top-6 -translate-x-1/2 w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-slate-950/50 border border-fuchsia-400/50 overflow-hidden shadow-2xl shadow-fuchsia-500/30 animate-float">
-          <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-          <span className="absolute inset-0 bg-gradient-to-tr from-transparent via-transparent to-fuchsia-400/20" />
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[55%] w-44 h-44 sm:w-56 sm:h-56 rounded-full bg-slate-950/55 border-2 border-fuchsia-400/70 overflow-hidden shadow-2xl shadow-fuchsia-500/40 animate-float">
+          {imgOk ? (
+            <img src={product.image} alt={product.name} className="w-full h-full object-cover" onError={() => setImgOk(false)} draggable={false} />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-fuchsia-900/60 to-indigo-900/60 p-4 text-center">
+              <Icon name="package" className="w-10 h-10 text-fuchsia-300/80" />
+              <span className="text-[11px] font-bold text-white leading-tight line-clamp-2">{product.name || 'Producto'}</span>
+            </div>
+          )}
+          <span className="absolute inset-0 bg-gradient-to-tr from-transparent via-transparent to-fuchsia-400/20 pointer-events-none" />
+        </div>
+
+        {/* Leyenda: qué es KAPSULA AR */}
+        <div className="absolute inset-x-0 bottom-4 flex justify-center px-6">
+          <span className="text-center text-[11px] font-semibold text-fuchsia-100/90 bg-slate-950/60 backdrop-blur-md border border-fuchsia-400/30 rounded-full px-3.5 py-1.5">
+            Apunta la cámara: esta es una vista previa aumentada del producto en tu entorno.
+          </span>
         </div>
 
         {/* HUD chips */}
@@ -12177,6 +12192,7 @@ function CreditLimitInput({ customer, onSetCreditLimit }) {
     <div className="flex items-center gap-1.5 min-w-0">
       <div className="flex items-center gap-1 rounded-xl bg-slate-800 border border-slate-700 px-2 py-1">
         <span className="text-[10px] text-slate-500 font-semibold">Tope</span>
+        <span className="text-teal-400 text-xs font-bold">$</span>
         <input
           type="number"
           min="0"

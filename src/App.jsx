@@ -3675,6 +3675,50 @@ function CustomerView({
     return list.slice(0, 12);
   }, [allProducts, customerOrders]);
 
+  // Vitrina "Los más pedidos": top de ventas globales derivado de los pedidos reales
+  // (no requiere campo featured en la base). Si aún no hay pedidos, cae a stock alto.
+  const topSellers = useMemo(() => {
+    if (!Array.isArray(allProducts) || allProducts.length === 0) return [];
+    const demand = {};
+    (orders || []).forEach((o) =>
+      (o.items || []).forEach((it) => {
+        demand[it.id] = (demand[it.id] || 0) + (Number(it.quantity) || 0);
+      })
+    );
+    const ranked = allProducts
+      .map((p) => ({ p, qty: demand[p.id] || 0 }))
+      .sort((a, b) => b.qty - a.qty || Number(b.p.stock || 0) - Number(a.p.stock || 0));
+    return ranked.slice(0, 5).map((x) => x.p);
+  }, [allProducts, orders]);
+
+  // Efecto parallax del hero: la foto de fondo se desplaza más lento que el scroll.
+  const heroRef = useRef(null);
+  const [heroOffset, setHeroOffset] = useState(0);
+  const reducedMotionHero =
+    typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  useEffect(() => {
+    if (reducedMotionHero) return undefined;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const el = heroRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > window.innerHeight) return;
+        setHeroOffset(Math.max(-60, Math.min(60, r.top * -0.22)));
+      });
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [reducedMotionHero]);
+
   // La barra inferior (móvil) pide expandir y scrollear a Mis Pedidos o Mi Cuenta
   useEffect(() => {
     if (!focusSection) return;
@@ -3690,24 +3734,43 @@ function CustomerView({
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
-      {/* Compact Hero Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 animate-gradient-x border border-slate-700/60 p-4 sm:p-8 shadow-2xl backdrop-blur-md">
-        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-5">
-          <div className="space-y-2 sm:space-y-3 max-w-xl">
-            <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
+      {/* Hero editorial: foto real del producto estrella con efecto parallax */}
+      <div
+        ref={heroRef}
+        className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-700/60 shadow-2xl min-h-[300px] sm:min-h-[340px]"
+      >
+        {/* Foto de fondo (más alta que el contenedor para permitir el parallax) */}
+        {topSellers[0]?.image ? (
+          <div
+            className="absolute inset-x-0 -top-16 -bottom-16 bg-cover bg-center will-change-transform"
+            style={{
+              backgroundImage: `url(${topSellers[0].image.replace('w=500', 'w=1600')})`,
+              transform: reducedMotionHero ? undefined : `translate3d(0, ${heroOffset}px, 0)`
+            }}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-teal-900/60 via-slate-900 to-indigo-950/70" />
+        )}
+        {/* Overlay oscuro para legibilidad del texto */}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-slate-950/20" />
+        <div className="absolute inset-0 bg-gradient-to-r from-teal-950/60 via-transparent to-transparent" />
+
+        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 sm:gap-6 p-5 sm:p-10 pt-8 sm:pt-14 min-h-[300px] sm:min-h-[340px]">
+          <div className="space-y-3 max-w-xl">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-500/25 text-teal-200 border border-teal-400/40 text-[10px] sm:text-xs font-semibold uppercase tracking-wider backdrop-blur-md">
               <Icon name="zap" className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               Pedidos al momento
             </span>
-            <h2 className="font-display text-xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h2 className="font-display text-3xl sm:text-5xl font-black text-white tracking-tight leading-tight">
               ¿Qué se te antoja hoy?
             </h2>
-            <p className="hidden sm:block text-slate-300 text-sm leading-relaxed">
+            <p className="hidden sm:block text-slate-200 text-sm leading-relaxed max-w-md">
               Explora nuestros antojos, bebidas frías y snacks. Paga y retira sin hacer filas o recibe en tu puerta.
             </p>
           </div>
 
           {/* Tasa BCV card */}
-          <div className="w-full sm:w-auto shrink-0 p-3 sm:p-4 rounded-2xl bg-slate-950/60 border border-teal-500/30 backdrop-blur-md">
+          <div className="w-full sm:w-auto shrink-0 p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-teal-500/30 backdrop-blur-md shadow-lg">
             <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
               <Icon name="dollarSign" className="w-3.5 h-3.5 text-teal-400" />
               Tasa BCV
@@ -3722,9 +3785,78 @@ function CustomerView({
             )}
           </div>
         </div>
-        {/* Decorative graphic background */}
-        <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
       </div>
+
+      {/* Vitrina "Los más pedidos": 3-5 estrellas en carrusel a pantalla ancha */}
+      {topSellers.length > 0 && (
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400">
+                <Icon name="star" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div>
+                <h3 className="font-display text-base sm:text-lg font-extrabold text-white">Los más pedidos</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400">Los favoritos que vuelan del kiosko</p>
+              </div>
+            </div>
+            <span className="px-2 py-1 rounded-full bg-teal-500/10 text-teal-400 text-[10px] font-bold uppercase tracking-wider border border-teal-500/20">
+              top ventas
+            </span>
+          </div>
+
+          <div className="flex gap-3 sm:gap-5 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+            {topSellers.map((product) => (
+              <article
+                key={product.id}
+                onClick={onOpenProductModal ? () => onOpenProductModal(product) : undefined}
+                className="snap-start shrink-0 w-[70vw] min-[480px]:w-[320px] sm:w-[340px] rounded-2xl sm:rounded-3xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-teal-500/50 hover:shadow-2xl hover:shadow-teal-500/10 hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+              >
+                <div className="relative aspect-[16/10] bg-slate-900">
+                  <img
+                    src={product.image}
+                    alt={product.name}
+                    loading="lazy"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-medium border`}>
+                    <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
+                    {product.category}
+                  </span>
+                </div>
+                <div className="p-3 sm:p-4 flex flex-col gap-1.5 flex-1">
+                  <h4 className="font-display text-sm sm:text-base font-extrabold text-white truncate">{product.name}</h4>
+                  <p className="text-[11px] text-slate-400 line-clamp-1">
+                    {formatSize(product) || product.brand || 'Artículo'}
+                  </p>
+                  <div className="mt-auto pt-2 flex items-end justify-between gap-2 border-t border-slate-700/50">
+                    <div className="min-w-0">
+                      <span className="font-display text-xl sm:text-2xl font-black tracking-tight text-white">
+                        {formatUsd(product.price)}
+                      </span>
+                      {rate?.rate > 0 && (
+                        <span className="block text-[10px] sm:text-[11px] font-bold text-teal-300/90 truncate">
+                          {formatBs(usdToBs(product.price, rate.rate))}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(product, 1, e.currentTarget.getBoundingClientRect());
+                      }}
+                      className="shrink-0 p-2.5 rounded-xl bg-teal-500 text-slate-950 hover:bg-teal-400 transition-all active:scale-90 shadow-lg shadow-teal-500/20"
+                      aria-label={`Agregar ${product.name}`}
+                    >
+                      <Icon name="plus" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Promos Carousel */}
       {activePromos.length > 0 && (
@@ -4377,8 +4509,8 @@ function CustomerView({
           <p className="text-slate-500 text-xs">Intenta cambiar la categoría o limpiar el término de búsqueda.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
-          {products.map((product) => (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6 lg:gap-8">
+          {products.map((product, idx) => (
             <ProductCard
               key={product.id}
               product={product}
@@ -4387,6 +4519,7 @@ function CustomerView({
               onToggleFavorite={() => onToggleFavorite(product.id)}
               onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
               onOpenDetail={() => onOpenProductModal(product)}
+              featured={idx === 0}
             />
           ))}
         </div>
@@ -4395,7 +4528,7 @@ function CustomerView({
   );
 }
 
-function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite }) {
+function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite, featured = false }) {
   const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
   const isOut = avail <= 0;
   const isLow = avail > 0 && avail <= 5;
@@ -4438,7 +4571,9 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         transformStyle: 'preserve-3d',
         transition: 'transform 180ms ease-out, box-shadow 300ms, border-color 300ms, translate 300ms'
       }}
-      className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm tilt-3d"
+      className={`group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm tilt-3d ${
+        featured ? 'lg:col-span-2 lg:row-span-2' : ''
+      }`}
     >
       {/* Contenido plano: se contra-rota para que solo el marco de la tarjeta se incline */}
       <div
@@ -4458,6 +4593,11 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
         />
+        {featured && (
+          <span className="absolute bottom-2.5 left-2.5 sm:bottom-4 sm:left-4 inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg sm:rounded-xl bg-teal-500/90 text-slate-950 font-black text-[10px] sm:text-xs uppercase tracking-wider shadow-lg shadow-teal-500/30">
+            <Icon name="star" className="w-3.5 h-3.5" /> Destacado
+          </span>
+        )}
         <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1">
           {isNewProduct(product) && !wasNewProductViewed(product.id) && (
             <span
@@ -4519,7 +4659,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div>
           <h3
             onClick={onOpenDetail}
-            className="font-bold text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1 text-sm sm:text-base"
+            className={`font-display text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1 ${featured ? 'text-base sm:text-2xl' : 'text-sm sm:text-base'}`}
           >
             {product.name}
           </h3>
@@ -4536,7 +4676,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-slate-700/50">
           <div>
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Precio</span>
-            <span className="font-display text-base sm:text-lg font-extrabold tracking-tight text-white">
+            <span className={`font-display font-black tracking-tight text-white ${featured ? 'text-2xl sm:text-4xl' : 'text-base sm:text-lg'}`}>
               {formatUsd(product.price)}
             </span>
             {rate?.rate > 0 && (

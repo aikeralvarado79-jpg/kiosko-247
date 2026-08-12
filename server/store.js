@@ -1752,6 +1752,8 @@ export const listCustomers = () => store.listCustomers();
 
 export const setCustomerBenefited = (phone, benefited) => store.setCustomerBenefited(phone, benefited);
 
+export const setCustomerCreditLimit = (phone, creditLimit) => store.setCustomerCreditLimit(phone, creditLimit);
+
 export const setCustomerBalance = (phone, amount) => store.setCustomerBalance(phone, amount);
 
 export const addOrderToAccount = (order) => store.addOrderToAccount(order);

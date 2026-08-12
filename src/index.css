@@ -294,37 +294,11 @@ html.light .bg-gradient-to-r.from-white {
 }
 
 /* ------------------------------------------------------------------ */
-/*  KAPSULA AR — retícula y chips flotantes sobre la cámara             */
-/* ------------------------------------------------------------------ */
-@keyframes ar-scan {
-  0% { transform: translateY(-40%); opacity: 0.9; }
-  50% { opacity: 1; }
-  100% { transform: translateY(40%); opacity: 0.9; }
-}
-.animate-ar-scan { animation: ar-scan 2.4s ease-in-out infinite; }
-@keyframes ar-pulse {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.5); }
-  50% { transform: scale(1.06); box-shadow: 0 0 0 10px rgba(45, 212, 191, 0); }
-}
-.animate-ar-pulse { animation: ar-pulse 1.6s ease-in-out infinite; }
-
-/* Producto "anclado" flotando sobre la cámara AR */
-@keyframes float {
-  0%, 100% { transform: translateX(-50%) translateY(0); }
-  50% { transform: translateX(-50%) translateY(-8px); }
-}
-.animate-float { animation: float 3.2s ease-in-out infinite; }
-
-/* ------------------------------------------------------------------ */
-/*  Vitrina 3D — transform 3D de la imagen con perspectiva              */
+/*  Rotación de tarjetas — transform 3D con perspectiva                 */
 /* ------------------------------------------------------------------ */
 .perspective-800 { perspective: 900px; }
 .preserve-3d { transform-style: preserve-3d; }
 .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-.tilt-3d {
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease;
-  will-change: transform;
-}
 
 /* Micro-interacción: pulso del botón agregar al carrito */
 @keyframes add-pulse {

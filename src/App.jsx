@@ -5167,7 +5167,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
       {/* Backdrop Click */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative sm:max-w-2xl lg:max-w-3xl max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
+      <div className="relative w-full sm:max-w-2xl lg:max-w-3xl h-[86vh] sm:h-[82vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto min-h-0">
       {/* Handle visual para indicar arrastre en móvil */}
       <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
@@ -5268,9 +5268,9 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
 
         <div
           key={`body-${product.id}`}
-          className={`p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+          className={`p-4 sm:p-6 flex flex-col overflow-y-auto flex-1 min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         >
-          <div>
+          <div className="mb-5 sm:mb-6">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-400 font-mono">CÓDIGO: {product.code}</span>
@@ -5289,7 +5289,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             <p className="text-slate-300 text-sm mt-3 leading-relaxed">{product.description}</p>
           </div>
 
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60">
+          <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 mb-5 sm:mb-6">
             <div>
               <span className="text-xs text-slate-400 block">Precio Unitario</span>
               <span className="text-2xl font-black text-white">{formatUsd(product.price)}</span>
@@ -5320,6 +5320,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             )}
           </div>
 
+          <div className="mt-auto">
           <Btn
             onClick={(e) => {
               onAddToCart(quantity, e.currentTarget.getBoundingClientRect());
@@ -5335,6 +5336,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
               ? 'Sin Stock Disponible'
               : `Agregar al Carrito • ${formatUsd(lineTotal)}${rate?.rate > 0 ? ` (${formatBs(usdToBs(lineTotal, rate.rate))})` : ''}`}
           </Btn>
+        </div>
         </div>
       </div>
 

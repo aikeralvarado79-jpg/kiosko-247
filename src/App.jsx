@@ -572,36 +572,6 @@ const loadFavorites = () => {
 };
 
 // ------------------------------------------------------------------
-//  Modo Accesibilidad "Fácil de Ver": texto grande y alto contraste
-// ------------------------------------------------------------------
-const ACCESS_KEY = 'kiosko_accessibility';
-const ACCESS_TEXT_CLASS = 'accessible-text';
-const ACCESS_CONTRAST_CLASS = 'accessible-contrast';
-
-const loadAccessibility = () => {
-  try {
-    const raw = localStorage.getItem(ACCESS_KEY);
-    const p = raw ? JSON.parse(raw) : {};
-    return { text: Boolean(p.text), contrast: Boolean(p.contrast) };
-  } catch {
-    return { text: false, contrast: false };
-  }
-};
-
-const applyAccessibility = (acc) => {
-  try {
-    document.documentElement.classList.toggle(ACCESS_TEXT_CLASS, acc.text);
-    document.documentElement.classList.toggle(ACCESS_CONTRAST_CLASS, acc.contrast);
-  } catch {}
-};
-
-const saveAccessibility = (acc) => {
-  try {
-    localStorage.setItem(ACCESS_KEY, JSON.stringify(acc));
-  } catch {}
-};
-
-// ------------------------------------------------------------------
 //  Alertas de Precio de Preferidos: registra el último precio conocido
 //  de cada favorito y detecta cambios para notificar al cliente.
 // ------------------------------------------------------------------
@@ -793,17 +763,7 @@ export default function App() {
 
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
-  // Modo Accesibilidad "Fácil de Ver": texto grande + alto contraste
-  const [accessibility, setAccessibility] = useState(loadAccessibility);
-
-  useEffect(() => {
-    applyAccessibility(accessibility);
-    saveAccessibility(accessibility);
-  }, [accessibility]);
-
-  const toggleAccessibility = (key) => {
-    setAccessibility((a) => ({ ...a, [key]: !a[key] }));
-  };
+  // Auxiliar para persistir el contraste/letra grande del cliente (fallback a tema simple)
 
   // Alto del header sticky: se pasa a la tienda para anclar el buscador justo debajo
   const headerRef = useRef(null);
@@ -1436,6 +1396,16 @@ export default function App() {
     }
     await loadCustomers();
     addToast(benefited ? 'Cliente añadido a beneficiados' : 'Beneficio revocado');
+  };
+
+  const handleSetCreditLimit = async (phone, creditLimit) => {
+    const res = await api.setCustomerCreditLimit(phone, creditLimit);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el tope de fiado', 'error');
+      return;
+    }
+    await loadCustomers();
+    addToast(creditLimit > 0 ? `Tope de fiado fijado en ${formatUsd(creditLimit)}` : 'Fiado sin tope (sin límite)');
   };
 
   const handleAddToBlacklist = async (phone, name, amount) => {
@@ -2313,32 +2283,6 @@ export default function App() {
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="w-5 h-5" />
           </button>
 
-          {/* Modo Accesibilidad "Fácil de Ver" */}
-          <button
-            onClick={() => toggleAccessibility('text')}
-            className={`p-2 sm:p-2.5 rounded-2xl border shrink-0 transition-all ${
-              accessibility.text
-                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
-                : 'bg-slate-800/90 border-slate-700/80 text-slate-200 hover:border-amber-500/50 hover:text-amber-400'
-            }`}
-            aria-label="Alternar letra grande (modo fácil de ver)"
-            title={accessibility.text ? 'Letra grande activada' : 'Activar letra grande'}
-          >
-            <Icon name="type" className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => toggleAccessibility('contrast')}
-            className={`hidden sm:flex p-2 sm:p-2.5 rounded-2xl border shrink-0 transition-all ${
-              accessibility.contrast
-                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
-                : 'bg-slate-800/90 border-slate-700/80 text-slate-200 hover:border-amber-500/50 hover:text-amber-400'
-            }`}
-            aria-label="Alternar alto contraste"
-            title={accessibility.contrast ? 'Alto contraste activado' : 'Activar alto contraste'}
-          >
-            <Icon name="contrast" className="w-5 h-5" />
-          </button>
-
           {/* Customer identity chip */}
           {activeView === 'customer' && savedCustomer?.customerName && (
             <button
@@ -2455,6 +2399,7 @@ export default function App() {
             allCustomers={allCustomers}
             onLoadCustomers={loadCustomers}
             onToggleBenefited={handleToggleBenefited}
+            onSetCreditLimit={handleSetCreditLimit}
             onAddToBlacklist={handleAddToBlacklist}
             onAddBlacklistDebt={handleAddBlacklistDebt}
             collections={collections}
@@ -2665,6 +2610,7 @@ export default function App() {
           addToast={addToast}
           onClose={() => setLiveTrackingOrder(null)}
           storeLocation={storeLocation}
+          headerHeight={headerHeight}
         />
       )}
 
@@ -4427,10 +4373,22 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         transform: reducedMotion
           ? undefined
           : `perspective(900px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) translateZ(0)`,
+        transformStyle: 'preserve-3d',
         transition: 'transform 180ms ease-out, box-shadow 300ms, border-color 300ms, translate 300ms'
       }}
-      className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl overflow-hidden hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm tilt-3d"
+      className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm tilt-3d"
     >
+      {/* Contenido plano: se contra-rota para que solo el marco de la tarjeta se incline */}
+      <div
+        className="flex flex-col flex-1 overflow-hidden rounded-2xl sm:rounded-3xl"
+        style={{
+          transform: reducedMotion
+            ? undefined
+            : `rotateX(${-tilt.rx}deg) rotateY(${-tilt.ry}deg)`,
+          transformStyle: 'preserve-3d',
+          transition: 'transform 180ms ease-out'
+        }}
+      >
       <div onClick={onOpenDetail} className="cursor-pointer relative overflow-hidden aspect-square sm:aspect-[4/3] bg-slate-900">
         <img
           src={product.image}
@@ -4539,6 +4497,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           </Btn>
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -4548,6 +4507,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
 // cuando hay permiso; si no, muestra un fondo AR simulado con el producto.
 function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
   const videoRef = useRef(null);
+  const streamRef = useRef(null);
   const [camOk, setCamOk] = useState(false);
   const [camError, setCamError] = useState(false);
   const [qty, setQty] = useState(1);
@@ -4555,7 +4515,6 @@ function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
   const isOut = avail <= 0;
 
   useEffect(() => {
-    let stream = null;
     let alive = true;
     const start = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -4563,15 +4522,15 @@ function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
         return;
       }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false
         });
-        if (!alive) return;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
+        if (!alive) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
         }
+        streamRef.current = stream;
         setCamOk(true);
       } catch {
         if (alive) setCamError(true);
@@ -4580,16 +4539,24 @@ function KapsulaArModal({ product, rate, onClose, onAddToCart }) {
     start();
     return () => {
       alive = false;
-      if (stream) stream.getTracks().forEach((t) => t.stop());
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     };
   }, []);
+
+  // El <video> se monta recién cuando camOk = true; aquí sí existe el nodo,
+  // así que conectamos el stream capturado al elemento para que no quede negro.
+  useEffect(() => {
+    if (!camOk || !videoRef.current || !streamRef.current) return;
+    videoRef.current.srcObject = streamRef.current;
+    videoRef.current.play().catch(() => {});
+  }, [camOk]);
 
   return (
     <div className="fixed inset-0 z-[80] bg-black flex flex-col animate-fade-in">
       {/* Cámara (o fondo AR simulado si no hay permiso) */}
       <div className="relative flex-1 min-h-0 overflow-hidden">
         {camOk ? (
-          <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" muted playsInline />
+          <video ref={videoRef} autoPlay muted playsInline className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-fuchsia-950 via-slate-950 to-indigo-950">
             <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'radial-gradient(circle at 20% 30%, rgba(217,70,239,0.35), transparent 40%), radial-gradient(circle at 80% 70%, rgba(99,102,241,0.35), transparent 45%)' }} />
@@ -6561,7 +6528,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
 
 // Modal de rastreo en vivo para el cliente: consulta el estado del pedido y la
 // posición del repartidor cada 5s mientras está abierto, mostrando el mapa.
-function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrderUpdated, addToast }) {
+function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrderUpdated, addToast, headerHeight = 0 }) {
   const [track, setTrack] = useState(order);
   const [error, setError] = useState('');
   const [messages, setMessages] = useState([]);
@@ -6625,10 +6592,14 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
     : null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-scale-up">
-        <div className="p-5 sm:p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 flex items-center justify-between gap-3">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 shrink-0 bg-slate-900 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
               <Icon name="mapPin" className="w-5 h-5 text-emerald-400" />
@@ -6644,7 +6615,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
           </button>
         </div>
 
-        <div className="p-5 sm:p-6 space-y-4">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Stepper de estados: oculto hasta validar el pago digital */}
           {needsPaymentValidation(order) ? (
             <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
@@ -6764,6 +6735,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
           </button>
         </div>
       </div>
+    </div>
     </div>
   );
 }
@@ -7585,6 +7557,7 @@ function AdminView({
   allCustomers,
   onLoadCustomers,
   onToggleBenefited,
+  onSetCreditLimit,
   onAddToBlacklist,
   onAddBlacklistDebt,
   collections,
@@ -9808,7 +9781,7 @@ function AdminView({
               {allCustomers.map((c) => (
                 <div
                   key={c.phone}
-                  className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60"
+                  className="flex flex-wrap items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60"
                 >
                   <span
                     className={`p-2 rounded-xl shrink-0 ${
@@ -9821,6 +9794,9 @@ function AdminView({
                     <p className="text-sm font-bold text-slate-100 truncate">{c.customerName || 'Cliente'}</p>
                     <p className="text-[11px] text-slate-400">{c.phone}</p>
                   </div>
+                  {c.isBenefited && (
+                    <CreditLimitInput customer={c} onSetCreditLimit={onSetCreditLimit} />
+                  )}
                   <button
                     onClick={() => onToggleBenefited(c.phone, !c.isBenefited)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
@@ -11375,15 +11351,13 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
   });
   const monthName = monthStart.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
 
-  // Fiado Digital: tope de crédito derivado del historial (1.5x la mayor deuda
-  // registrada, mínimo $10, redondeado a $5) y % de uso actual.
+  // Fiado Digital: el admin parametriza un tope por cliente beneficiado. Si no
+  // lo definió (creditLimit null/0) el cliente fiado NO tiene límite.
   const fiadoTope = useMemo(() => {
-    const amounts = debtOrders.map((o) => Number(o.total) || 0);
-    const mayor = Math.max(balance, ...amounts);
-    const raw = Math.max(10, mayor * 1.5);
-    return Math.ceil(raw / 5) * 5;
-  }, [balance, debtOrders]);
-  const fiadoUso = fiadoTope > 0 ? Math.min(100, (Math.abs(balance) / fiadoTope) * 100) : 0;
+    const adminLimit = Number(customer?.creditLimit);
+    return Number.isFinite(adminLimit) && adminLimit > 0 ? adminLimit : null;
+  }, [customer?.creditLimit]);
+  const fiadoUso = fiadoTope ? Math.min(100, (Math.abs(balance) / fiadoTope) * 100) : 0;
 
   // Abono rápido 1-toque: rellena el monto en Bs (según el % del total a pagar).
   const quickAbono = (pct) => {
@@ -11630,43 +11604,53 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
           {!isSaldoView && !hasWallet && (
             <div className="space-y-2">
               {/* Billetera Fiado Digital: tope de crédito + abonos rápidos 1-toque */}
-              {balance > 0 && fiadoTope > 0 && (
+              {balance > 0 && (
                 <div className="rounded-2xl bg-gradient-to-br from-indigo-500/15 via-slate-900 to-teal-500/10 border border-indigo-500/30 p-4 animate-fade-in">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
                       <Icon name="wallet" className="w-4 h-4" /> Billetera Fiado
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      Tope <b className="text-teal-400">{formatUsd(fiadoTope)}</b>
+                      {fiadoTope ? (
+                        <>Tope <b className="text-teal-400">{formatUsd(fiadoTope)}</b></>
+                      ) : (
+                        <><b className="text-teal-400">Sin tope</b> · sin límite</>
+                      )}
                     </span>
                   </div>
-                  <div className="mt-3">
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="text-slate-300">Uso del fiado</span>
-                      <span className={`font-black ${fiadoUso >= 85 ? 'text-rose-400' : fiadoUso >= 60 ? 'text-amber-400' : 'text-teal-400'}`}>
-                        {Math.round(fiadoUso)}% · {formatUsd(Math.abs(balance))}
-                      </span>
+                  {fiadoTope ? (
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-xs mb-1.5">
+                        <span className="text-slate-300">Uso del fiado</span>
+                        <span className={`font-black ${fiadoUso >= 85 ? 'text-rose-400' : fiadoUso >= 60 ? 'text-amber-400' : 'text-teal-400'}`}>
+                          {Math.round(fiadoUso)}% · {formatUsd(Math.abs(balance))}
+                        </span>
+                      </div>
+                      <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 ${
+                            fiadoUso >= 85
+                              ? 'bg-gradient-to-r from-rose-500 to-orange-500'
+                              : fiadoUso >= 60
+                                ? 'bg-gradient-to-r from-amber-500 to-orange-400'
+                                : 'bg-gradient-to-r from-teal-500 to-emerald-400'
+                          }`}
+                          style={{ width: `${Math.max(4, fiadoUso)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1.5">
+                        {fiadoUso >= 85
+                          ? 'Estás cerca del tope. Considera abonar para liberar tu fiado.'
+                          : fiadoUso >= 60
+                            ? 'Has usado buena parte de tu fiado. Abona para seguir comprando a cuenta.'
+                            : 'Tu fiado tiene espacio disponible para tus próximos pedidos.'}
+                      </p>
                     </div>
-                    <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-700 ${
-                          fiadoUso >= 85
-                            ? 'bg-gradient-to-r from-rose-500 to-orange-500'
-                            : fiadoUso >= 60
-                              ? 'bg-gradient-to-r from-amber-500 to-orange-400'
-                              : 'bg-gradient-to-r from-teal-500 to-emerald-400'
-                        }`}
-                        style={{ width: `${Math.max(4, fiadoUso)}%` }}
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-1.5">
-                      {fiadoUso >= 85
-                        ? 'Estás cerca del tope. Considera abonar para liberar tu fiado.'
-                        : fiadoUso >= 60
-                          ? 'Has usado buena parte de tu fiado. Abona para seguir comprando a cuenta.'
-                          : 'Tu fiado tiene espacio disponible para tus próximos pedidos.'}
+                  ) : (
+                    <p className="text-[10px] text-slate-500 mt-3">
+                      El kiosko te dio fiado sin tope de crédito. Puedes comprar a cuenta y abonar cuando quieras.
                     </p>
-                  </div>
+                  )}
                   {rate?.rate > 0 && (
                     <div className="mt-3 space-y-2">
                       <span className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Abono rápido</span>
@@ -12171,6 +12155,59 @@ const searchWikimedia = async (query) => {
     .filter((r) => r.thumb && r.full);
 };
 
+// Tope de fiado por cliente beneficiado: input compacto para el panel admin.
+// Un valor vacío o 0 = fiado sin tope (sin límite).
+function CreditLimitInput({ customer, onSetCreditLimit }) {
+  const [value, setValue] = useState(customer?.creditLimit != null ? String(customer.creditLimit) : '');
+  const [saving, setSaving] = useState(false);
+  const limit = customer?.creditLimit != null ? Number(customer.creditLimit) : null;
+
+  const save = async () => {
+    if (saving) return;
+    const raw = String(value || '').trim().replace(',', '.');
+    const num = raw === '' ? null : Number(raw);
+    const amount = num != null && Number.isFinite(num) && num > 0 ? num : null;
+    setSaving(true);
+    await onSetCreditLimit(customer.phone, amount);
+    setSaving(false);
+    if (amount == null) setValue('');
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center gap-1 rounded-xl bg-slate-800 border border-slate-700 px-2 py-1">
+        <span className="text-[10px] text-slate-500 font-semibold">Tope</span>
+        <input
+          type="number"
+          min="0"
+          step="any"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save();
+          }}
+          placeholder="sin tope"
+          className="w-16 bg-transparent text-slate-100 text-xs font-bold focus:outline-none"
+          aria-label={`Tope de fiado de ${customer.customerName || customer.phone}`}
+        />
+        {limit != null ? (
+          <span className="text-[10px] font-bold text-teal-400 shrink-0">{formatUsd(limit)}</span>
+        ) : (
+          <span className="text-[10px] font-semibold text-slate-500 shrink-0">∞</span>
+        )}
+      </div>
+      <button
+        onClick={save}
+        disabled={saving}
+        className="shrink-0 px-2 py-1.5 rounded-lg bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[10px] font-bold hover:bg-teal-500/25 transition-all disabled:opacity-50"
+        title="Guardar tope (vacío = sin límite)"
+      >
+        {saving ? '…' : 'OK'}
+      </button>
+    </div>
+  );
+}
+
 function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
   const [formData, setFormData] = useState({
     id: productToEdit?.id || '',
@@ -12479,7 +12516,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Imagen del Producto</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Imagen del Producto (Opcional)</label>
             <div className="flex items-center gap-2 mb-2">
               <button
                 type="button"
@@ -12499,7 +12536,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
               />
             </div>
             <input
-              type="url"
+              type="text"
               value={formData.image}
               onChange={(e) => setFormData({ ...formData, image: e.target.value })}
               placeholder="https://images.unsplash.com/..."
@@ -13874,7 +13911,6 @@ function AikerAssistant({
       text: '¡Hola! Soy Don Aiker, el asistente del kiosko. Pregúntame por tu deuda, tus pedidos, promos activas o la tasa del día. 😊'
     }
   ]);
-  const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const scrollRef = useRef(null);
 
@@ -13967,10 +14003,9 @@ function AikerAssistant({
   };
 
   const send = (text) => {
-    const q = (text ?? input).trim();
+    const q = String(text ?? '').trim();
     if (!q || thinking) return;
     setMessages((m) => [...m, { from: 'user', text: q }]);
-    setInput('');
     setThinking(true);
     setTimeout(() => {
       setMessages((m) => [...m, { from: 'ai', text: answer(q) }]);
@@ -14033,37 +14068,21 @@ function AikerAssistant({
             )}
           </div>
 
-          <div className="p-3 border-t border-slate-800 shrink-0 space-y-2 bg-slate-900">
-            <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
+          <div className="p-3 border-t border-slate-800 shrink-0 bg-slate-900">
+            <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 px-1">
+              ¿Qué quieres saber?
+            </span>
+            <div className="flex flex-wrap gap-2">
               {quickReplies.map((r) => (
                 <button
                   key={r}
                   onClick={() => send(r)}
-                  className="shrink-0 px-2.5 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-[11px] text-slate-300 hover:border-indigo-500/60 hover:text-indigo-300 transition-all active:scale-95"
+                  disabled={thinking}
+                  className="shrink-0 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] text-slate-200 hover:border-indigo-500/60 hover:text-indigo-300 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {r}
                 </button>
               ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') send();
-                }}
-                placeholder="Pregúntale a Don Aiker..."
-                className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
-              />
-              <button
-                onClick={() => send()}
-                disabled={thinking || !input.trim()}
-                className="p-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 text-white disabled:opacity-40 transition-all active:scale-90"
-                aria-label="Enviar mensaje"
-              >
-                <Icon name="navigation" className="w-4 h-4" />
-              </button>
             </div>
           </div>
         </div>

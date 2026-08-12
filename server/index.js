@@ -273,7 +273,24 @@ app.get('/api/products/:id/image', async (req, res) => {
 
 app.post('/api/orders', async (req, res) => {
   try {
-    const result = await store.createOrder(req.body || {});
+    const body = req.body || {};
+    if (body.credit && body.phone) {
+      const customer = await store.getCustomerByPhone(body.phone);
+      if (!customer || !customer.isBenefited) {
+        return res.status(403).json({ error: 'Solo los clientes beneficiados pueden pedir a cuenta' });
+      }
+      const limit = Number(customer.creditLimit);
+      if (Number.isFinite(limit) && limit > 0) {
+        const used = Math.abs(Number(customer.balance) || 0) + (Number(body.total) || 0);
+        if (used > limit) {
+          return res.status(403).json({
+            error: 'Superaste el tope de fiado establecido por el kiosko',
+            creditLimit: limit
+          });
+        }
+      }
+    }
+    const result = await store.createOrder(body);
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
     notifyAdminsNewOrder(result.order).catch(() => {});
@@ -802,6 +819,16 @@ app.post('/api/orders/:id/payment/credit', async (req, res) => {
     if (!customer || !customer.isBenefited) {
       return res.status(403).json({ error: 'Solo los clientes beneficiados pueden pedir a cuenta' });
     }
+    const limit = Number(customer.creditLimit);
+    if (Number.isFinite(limit) && limit > 0) {
+      const used = Math.abs(Number(customer.balance) || 0) + (Number(order.total) || 0);
+      if (used > limit) {
+        return res.status(403).json({
+          error: 'Superaste el tope de fiado establecido por el kiosko',
+          creditLimit: limit
+        });
+      }
+    }
     const result = await store.convertToCredit(req.params.id);
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
@@ -980,6 +1007,18 @@ app.put('/api/customers/:phone/benefited', requireAdmin, async (req, res) => {
     res.json(customer);
   } catch (err) {
     fail(res, err, 'No se pudo actualizar el beneficio.');
+  }
+});
+
+// Parametriza el tope de fiado (crédito) de un cliente beneficiado. Un valor
+// vacío o 0 deja el fiado sin tope (sin límite).
+app.put('/api/customers/:phone/credit-limit', requireAdmin, async (req, res) => {
+  try {
+    const customer = await store.setCustomerCreditLimit(req.params.phone, req.body?.creditLimit);
+    if (!customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+    res.json(customer);
+  } catch (err) {
+    fail(res, err, 'No se pudo actualizar el tope de fiado.');
   }
 });
 

@@ -313,6 +313,26 @@ const IS_IOS =
   /iPad|iPhone|iPod/.test(typeof navigator !== 'undefined' ? navigator.userAgent : '') ||
   (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+// ¿El dispositivo tiene biometría REAL (huella/Face ID)? platformAuthenticatorIsAvailable()
+// también devuelve true en escritorios con Windows Hello por PIN o passcode de iCloud,
+// donde NO existe Face ID ni sensor de huella. Para no ofrecer "Entrar con biometría"
+// en equipos sin soporte, exigimos además que sea un dispositivo móvil o táctil.
+const hasRealBiometrics = async () => {
+  if (typeof navigator === 'undefined' || !browserSupportsWebAuthn()) return false;
+  let platformOk = false;
+  try {
+    platformOk = await platformAuthenticatorIsAvailable();
+  } catch {
+    platformOk = false;
+  }
+  if (!platformOk) return false;
+  return (
+    navigator.maxTouchPoints > 0 ||
+    'ontouchstart' in window ||
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '')
+  );
+};
+
 const formatTimestamp = (date = new Date()) =>
   date.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
@@ -3162,6 +3182,24 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const [bioNeedsRegister, setBioNeedsRegister] = useState(false);
   const bioFetchKeyRef = useRef('');
 
+  // NEW: Detectar si el dispositivo soporta WebAuthn (huella/Face ID)
+  // Usamos los mismos checks que en la App principal para consistencia.
+  const [webauthnSupported, setWebauthnSupported] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supported = browserSupportsWebAuthn();
+      let platformOk = false;
+      if (supported) {
+        try { platformOk = await hasRealBiometrics(); } catch { platformOk = false; }
+      }
+      if (!cancelled) setWebauthnSupported(supported && platformOk);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Recovery state
+
   // Recovery state
   const [recoverMode, setRecoverMode] = useState(false);
   const [recoverStep, setRecoverStep] = useState('phone'); // 'phone' | 'biometric' | 'newpass'
@@ -3537,30 +3575,32 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
           </button>
 
           {/* Biometría: debajo de Iniciar sesión, sin separador */}
-          <button
-            type="button"
-            onClick={handleBiometricLogin}
-            disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
-            className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl bg-slate-800/70 border border-cyan-500/30 hover:border-cyan-400/60 hover:bg-slate-700/60 text-slate-200 transition-all disabled:opacity-60"
-          >
-            {bioStatus === 'working' || bioStatus === 'register' ? (
-              <>
-                {IS_IOS ? <Icon name="apple" className="w-5 h-5" /> : <Icon name="fingerprint" className="w-5 h-5" />}
-                <span>{bioStatus === 'working' ? 'Esperando...' : 'Registrando...'}</span>
-              </>
-            ) : IS_IOS ? (
-              <>
-                <Icon name="apple" className="w-5 h-5" />
-                <Icon name="faceId" className="w-5 h-5" />
-                <span className="font-semibold">Entrar con Face ID</span>
-              </>
-            ) : (
-              <>
-                <Icon name="fingerprint" className="w-6 h-6" />
-                <span className="font-semibold">Entrar con huella</span>
-              </>
-            )}
-          </button>
+          {webauthnSupported && (
+            <button
+              type="button"
+              onClick={handleBiometricLogin}
+              disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
+              className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl bg-slate-800/70 border border-cyan-500/30 hover:border-cyan-400/60 hover:bg-slate-700/60 text-slate-200 transition-all disabled:opacity-60"
+            >
+              {bioStatus === 'working' || bioStatus === 'register' ? (
+                <>
+                  {IS_IOS ? <Icon name="apple" className="w-5 h-5" /> : <Icon name="fingerprint" className="w-5 h-5" />}
+                  <span>{bioStatus === 'working' ? 'Esperando...' : 'Registrando...'}</span>
+                </>
+              ) : IS_IOS ? (
+                <>
+                  <Icon name="apple" className="w-5 h-5" />
+                  <Icon name="faceId" className="w-5 h-5" />
+                  <span className="font-semibold">Entrar con Face ID</span>
+                </>
+              ) : (
+                <>
+                  <Icon name="fingerprint" className="w-6 h-6" />
+                  <span className="font-semibold">Entrar con huella</span>
+                </>
+              )}
+            </button>
+          )}
         </form>
 
         <div className="pt-2 border-t border-slate-800 space-y-2">
@@ -5072,7 +5112,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
       const supported = browserSupportsWebAuthn();
       let platformOk = false;
       if (supported) {
-        try { platformOk = await platformAuthenticatorIsAvailable(); } catch { platformOk = false; }
+        try { platformOk = await hasRealBiometrics(); } catch { platformOk = false; }
       }
       if (!cancelled) setWebauthnSupported(supported && platformOk);
     })();

@@ -71,12 +71,13 @@ if ('serviceWorker' in navigator) {
       .register('/sw.js', { updateViaCache: 'none' })
       .catch(() => {});
   });
-  // Si un service worker nuevo toma control (nueva versión desplegada),
-  // recarga la app una vez para que deje de servir el shell cacheado viejo.
-  let reloaded = false;
+  // Cuando un service worker nuevo toma control, NO recargamos la app (eso
+  // borraría el formulario del checkout a mitad de pago). Solo se avisa con un
+  // evento para que App muestre "Hay una versión nueva — Recargar o Continuar".
+  let announced = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloaded) return;
-    reloaded = true;
-    window.location.reload();
+    if (announced) return;
+    announced = true;
+    window.dispatchEvent(new CustomEvent('kiosko:sw-update'));
   });
 }

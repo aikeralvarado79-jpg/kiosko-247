@@ -392,6 +392,14 @@ const IS_IOS =
   /iPad|iPhone|iPod/.test(typeof navigator !== 'undefined' ? navigator.userAgent : '') ||
   (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+const IS_ANDROID =
+  typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
+
+// ¿La app ya está instalada y abierta como app (fuera del navegador)?
+const isInstalledPWA = () =>
+  (typeof navigator !== 'undefined' && navigator.standalone) ||
+  (typeof matchMedia !== 'undefined' && matchMedia('(display-mode: standalone)').matches);
+
 // ¿El dispositivo tiene biometría REAL (huella/Face ID)? platformAuthenticatorIsAvailable()
 // también devuelve true en escritorios con Windows Hello por PIN o passcode de iCloud,
 // donde NO existe Face ID ni sensor de huella. Para no ofrecer "Entrar con biometría"
@@ -483,6 +491,12 @@ const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
 const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'];
 
 const CUSTOMER_KEY = 'kiosko_customer';
+
+// Preferencias del tutorial de instalación PWA. Dismissed se respeta solo
+// durante la sesión (se limpia al cerrar sesión); Done marca que el dispositivo
+// ya instaló la app y no se vuelve a preguntar nunca.
+const INSTALL_DISMISS_KEY = 'kiosko_install_dismissed';
+const INSTALL_DONE_KEY = 'kiosko_install_done';
 
 // Memoria de login ("Recordarme"): conserva los campos de identificación para
 // que el siguiente login los pre-cargue sin vaciarlos.
@@ -1047,6 +1061,83 @@ export default function App() {
   // sin recargar) y estado de conexión para el badge "Modo sin conexión".
   const [updateReady, setUpdateReady] = useState(false);
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+
+  // Tutorial de instalación PWA: notificación en cada recarga. Se respeta el
+  // "no volver a preguntar" solo durante la sesión (al cerrar sesión se limpia
+  // y vuelve a aparecer) y nunca se muestra si el dispositivo ya instaló la app.
+  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
+  const [installTutorial, setInstallTutorial] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        if (isInstalledPWA()) return;
+        if (localStorage.getItem(INSTALL_DISMISS_KEY)) return;
+        if (localStorage.getItem(INSTALL_DONE_KEY)) return;
+      } catch {
+        // si no hay localStorage, se muestra igual
+      }
+      setShowInstallPrompt(true);
+    }, 2500);
+    const onInstalled = () => {
+      try {
+        localStorage.setItem(INSTALL_DONE_KEY, '1');
+        localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+      } catch {}
+      setShowInstallPrompt(false);
+      setInstallTutorial(false);
+    };
+    window.addEventListener('kiosko:app-installed', onInstalled);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('kiosko:app-installed', onInstalled);
+    };
+  }, []);
+
+  // Pasos de la guía según la plataforma del dispositivo.
+  const installSteps = useMemo(() => {
+    if (IS_IOS) {
+      return [
+        'Abrí la tienda en Safari (iPhone/iPad).',
+        'Tocá el botón Compartir (el cuadrado con la flecha ↑) en la barra inferior de Safari.',
+        'Deslizá hacia abajo y tocá «Agregar a pantalla de inicio».',
+        'Tocá «Agregar» arriba a la derecha. El acceso queda en tu pantalla de inicio.',
+      ];
+    }
+    if (IS_ANDROID) {
+      return [
+        'Abrí la tienda en Chrome de Android.',
+        'Tocá los tres puntos ⋮ del menú, arriba a la derecha.',
+        'Tocá «Instalar aplicación» (o «Agregar a pantalla de inicio»).',
+        'Confirmá con «Instalar». Queda un acceso en la pantalla de inicio.',
+      ];
+    }
+    return [
+      'En Chrome/Edge tocá el icono de instalación (monitor con flecha ↓) al final de la barra de direcciones.',
+      'O abrí el menú ⋮ y tocá «Instalar Kiosko 24/7».',
+    ];
+  }, []);
+
+  const handleInstallYes = () => {
+    setShowInstallPrompt(false);
+    setInstallTutorial(true);
+  };
+
+  const handleInstallNative = () => {
+    if (typeof window === 'undefined' || typeof window.__kioskoGetDeferredPrompt !== 'function') return;
+    const evt = window.__kioskoGetDeferredPrompt();
+    if (evt) {
+      evt.prompt();
+      window.__kioskoClearDeferredPrompt();
+    }
+  };
+
+  const handleDismissInstall = () => {
+    try {
+      localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+    } catch {}
+    setShowInstallPrompt(false);
+  };
 
   useEffect(() => {
     const onUpdate = () => setUpdateReady(true);
@@ -1831,6 +1922,7 @@ export default function App() {
     try {
       sessionStorage.removeItem('kiosko_admin_role');
       sessionStorage.removeItem('kiosko_admin_phone');
+      localStorage.removeItem(INSTALL_DISMISS_KEY);
     } catch {}
     setAdminInfo(null);
     setAdminProfile(null);
@@ -2518,6 +2610,9 @@ export default function App() {
   // Cerrar sesión del cliente: limpia identidad y carrito, y reabre el login.
   const handleCustomerLogout = () => {
     localStorage.removeItem(CUSTOMER_KEY);
+    try {
+      localStorage.removeItem(INSTALL_DISMISS_KEY);
+    } catch {}
     setSavedCustomer(null);
     setCustomerProfile(null);
     setCart([]);
@@ -2825,6 +2920,110 @@ export default function App() {
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[58] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/95 border border-slate-700 text-[11px] font-semibold text-slate-300 shadow-lg backdrop-blur-md animate-fade-in">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
           Modo sin conexión · datos locales
+        </div>
+      )}
+
+      {/* Notificación del tutorial de instalación PWA: aparece en cada recarga
+          (salvo que ya esté instalada o se haya elegido "no preguntar" durante
+          la sesión). Al elegir "Sí" guía según Android / iOS / escritorio. */}
+      {showInstallPrompt && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[61] w-[92vw] max-w-sm rounded-2xl bg-slate-900 border border-teal-500/40 shadow-2xl shadow-teal-500/10 p-3.5 animate-fade-in">
+          <div className="flex items-start gap-2.5">
+            <span className="shrink-0 p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400">
+              <Icon name="download" className="w-4 h-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-white">¿Querés tener la app en tu dispositivo?</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Acceso directo en tu pantalla de inicio, más rápido y con modo sin conexión.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowInstallPrompt(false)}
+              aria-label="Cerrar notificación"
+              className="shrink-0 p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <Icon name="x" className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={handleInstallYes}
+              className="flex-1 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all"
+            >
+              Sí, guíame
+            </button>
+            <button
+              onClick={() => setShowInstallPrompt(false)}
+              className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 transition-all"
+            >
+              Ahora no
+            </button>
+          </div>
+          <button
+            onClick={handleDismissInstall}
+            className="mt-2 w-full text-center text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            No volver a preguntar (hasta que cierres sesión)
+          </button>
+        </div>
+      )}
+
+      {/* Guía de instalación paso a paso, según la plataforma detectada */}
+      {installTutorial && (
+        <div className="fixed inset-0 z-[65] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="absolute inset-0" onClick={() => setInstallTutorial(false)} />
+          <div className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden animate-screen-up">
+            <div className="px-4 sm:px-5 pt-4 pb-3 border-b border-slate-800 flex items-center gap-2.5">
+              <span className="shrink-0 p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400">
+                <Icon name="download" className="w-4 h-4" />
+              </span>
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-white">Instalar la app</h4>
+                <p className="text-[11px] text-slate-400">
+                  {IS_IOS ? 'iPhone / iPad · Safari' : IS_ANDROID ? 'Android · Chrome' : 'Escritorio · Chrome/Edge'}
+                </p>
+              </div>
+              <button
+                onClick={() => setInstallTutorial(false)}
+                aria-label="Cerrar guía"
+                className="ml-auto shrink-0 p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <Icon name="x" className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-4 sm:px-5 py-4 space-y-3">
+              {installSteps.map((step, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-teal-500/15 border border-teal-500/40 text-teal-300 text-[11px] font-bold flex items-center justify-center">
+                    {i + 1}
+                  </span>
+                  <p className="text-[12px] text-slate-200 leading-snug">{step}</p>
+                </div>
+              ))}
+              {IS_IOS && (
+                <p className="text-[10px] text-amber-300/90">
+                  En iPhone/iPad la instalación solo funciona desde Safari.
+                </p>
+              )}
+            </div>
+            <div className="px-4 sm:px-5 pb-4 flex gap-2">
+              {IS_ANDROID && (
+                <button
+                  onClick={handleInstallNative}
+                  className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all active:scale-95"
+                >
+                  Instalar ahora
+                </button>
+              )}
+              <button
+                onClick={() => setInstallTutorial(false)}
+                className={`${IS_ANDROID ? 'flex-1' : 'w-full'} py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 transition-all active:scale-95`}
+              >
+                Ya lo hice
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

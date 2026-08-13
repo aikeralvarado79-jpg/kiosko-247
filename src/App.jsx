@@ -5293,7 +5293,8 @@ function CustomerView({
             {radarProducts.map(({ product, tag }) => (
               <article
                 key={product.id}
-                className="snap-start shrink-0 w-40 sm:w-44 rounded-2xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-amber-500/50 hover:-translate-y-0.5 transition-all"
+                onClick={() => onOpenProductModal(product)}
+                className="snap-start shrink-0 w-40 sm:w-44 rounded-2xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col cursor-pointer hover:border-amber-500/50 hover:-translate-y-0.5 transition-all"
               >
                 <div className="relative">
                   <ProductImg
@@ -5324,7 +5325,10 @@ function CustomerView({
                       {formatUsd(product.price)}
                     </span>
                     <button
-                      onClick={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(product, 1, e.currentTarget.getBoundingClientRect());
+                      }}
                       className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 border border-teal-500/40 hover:bg-teal-500 hover:text-slate-950 transition-all active:scale-90"
                       aria-label={`Agregar ${product.name}`}
                     >
@@ -5556,20 +5560,23 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
 // Calculadora flotante: botón fijo (solo escritorio; en móvil se abre desde la
 // barra inferior) que despliega un panel no modal de conversión $ ⇄ Bs. El panel
 // tiene pointer-events solo sobre sí mismo: no bloquea la navegación ni el scroll.
-function CalcFab({ open, onToggle, rate }) {
+function CalcFab({ open, onToggle, rate, forceMobileVisible = false, zClass = 'z-[46]' }) {
   const [usdInput, setUsdInput] = useState('');
   const [bsInput, setBsInput] = useState('');
   const r = rate?.rate || 0;
 
+  // Formatea mientras se teclea: coloca los puntos de miles automáticamente y
+  // deja que el usuario escriba la coma para los decimales (igual que los
+  // montos de la tienda). parseAmount tolera ambos estilos.
   const handleUsd = (value) => {
-    const v = value.replace(/[^\d.,]/g, '');
+    const v = formatAmountBsInput(value);
     setUsdInput(v);
     const num = parseAmount(v);
     setBsInput(Number.isFinite(num) ? formatAmount(num * r) : '');
   };
 
   const handleBs = (value) => {
-    const v = value.replace(/[^\d.,]/g, '');
+    const v = formatAmountBsInput(value);
     setBsInput(v);
     const num = parseAmount(v);
     setUsdInput(Number.isFinite(num) && r > 0 ? formatAmount(num / r) : '');
@@ -5577,12 +5584,13 @@ function CalcFab({ open, onToggle, rate }) {
 
   return (
     <>
-      {/* Botón fijo: solo escritorio (en móvil el acceso vive en la barra inferior) */}
+      {/* Botón fijo: solo escritorio (en móvil el acceso vive en la barra inferior).
+          forceMobileVisible lo fuerza visible también en móvil (perfil admin). */}
       <button
         onClick={onToggle}
         aria-label={open ? 'Cerrar calculadora' : 'Abrir calculadora'}
         aria-expanded={open}
-        className={`hidden sm:flex fixed right-5 bottom-6 z-[46] p-3.5 rounded-2xl shadow-xl border backdrop-blur-md transition-all active:scale-90 ${
+        className={`${forceMobileVisible ? 'flex' : 'hidden sm:flex'} fixed right-5 bottom-6 ${zClass} p-3.5 rounded-2xl shadow-xl border backdrop-blur-md transition-all active:scale-90 ${
           open
             ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-teal-500/30'
             : 'bg-slate-800/90 text-teal-300 border-teal-500/40 shadow-teal-500/10 hover:bg-slate-800'
@@ -5594,7 +5602,7 @@ function CalcFab({ open, onToggle, rate }) {
       {/* Panel flotante no modal: no cubre toda la pantalla y deja navegar de fondo */}
       {open && (
         <div
-          className="fixed right-3 sm:right-5 bottom-[4.75rem] sm:bottom-24 z-[46] w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-modal-spring"
+          className={`fixed right-3 sm:right-5 bottom-[4.75rem] sm:bottom-24 ${zClass} w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-modal-spring`}
         >
           <div className="flex items-center justify-between px-3.5 pt-3 pb-1">
             <span className="text-xs font-black text-white flex items-center gap-1.5 min-w-0">
@@ -10137,6 +10145,7 @@ function AdminView({
         onSavePrefs={saveAdminPrefs}
         theme={theme}
         onSetTheme={onSetTheme}
+        rate={rate}
         onBack={() => setAdminTab('inventory')}
       />
     );
@@ -12265,6 +12274,7 @@ function AdminView({
           onSavePrefs={saveAdminPrefs}
           theme={theme}
           onSetTheme={onSetTheme}
+          rate={rate}
         />
       )}
     </div>
@@ -12378,6 +12388,7 @@ function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, on
   const [name, setName] = useState(profile?.name || '');
   const [photo, setPhoto] = useState(profile?.photo || '');
   const [saving, setSaving] = useState(false);
+  const [photoFullscreen, setPhotoFullscreen] = useState(false);
 
   // Cambio de contraseña
   const [currentPassword, setCurrentPassword] = useState('');
@@ -12455,7 +12466,20 @@ function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, on
           <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 space-y-3">
             <div className="flex items-center gap-4">
               {photo ? (
-                <img src={photo} alt={name || 'Admin'} className="w-16 h-16 rounded-2xl object-cover border-2 border-teal-500/50" />
+                <div className="relative shrink-0">
+                  <img
+                    src={photo}
+                    alt={name || 'Admin'}
+                    className="w-16 h-16 rounded-2xl object-cover border-2 border-teal-500/50"
+                  />
+                  <button
+                    onClick={() => setPhotoFullscreen(true)}
+                    aria-label="Ver foto en pantalla completa"
+                    className="absolute -bottom-1.5 -right-1.5 p-1.5 rounded-xl bg-slate-800 border border-slate-600 text-teal-300 hover:text-white hover:border-teal-500/60 transition-all active:scale-90 shadow-lg"
+                  >
+                    <Icon name="maximize" className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               ) : (
                 <span className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-500 to-teal-400 text-slate-950 text-xl font-black flex items-center justify-center">
                   {(name || 'A').charAt(0).toUpperCase()}
@@ -12612,29 +12636,57 @@ function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, on
             )}
           </div>
         </div>
+
+      {/* Visor de la foto de perfil a pantalla (modal centrado con X para cerrar) */}
+      {photoFullscreen && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in"
+          onClick={() => setPhotoFullscreen(false)}
+        >
+          <div
+            className="relative max-w-[92vw] max-h-[85vh] rounded-3xl overflow-hidden bg-slate-900 border border-slate-700 shadow-2xl animate-modal-spring"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img src={photo || ''} alt={name || 'Admin'} className="max-w-full max-h-[85vh] object-contain" />
+            <button
+              onClick={() => setPhotoFullscreen(false)}
+              aria-label="Cerrar foto"
+              className="absolute top-3 right-3 p-2 rounded-full bg-slate-950/70 border border-white/15 text-slate-200 hover:text-white hover:border-teal-400/50 transition-all active:scale-90 z-10"
+            >
+              <Icon name="x" className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
 // Modal clásico de perfil (escritorio / pantallas grandes).
-function AdminProfileModal({ onClose, ...rest }) {
+function AdminProfileModal({ onClose, rate, ...rest }) {
   useOverlay(true, onClose);
+  const [calcOpen, setCalcOpen] = useState(false);
   return (
-    <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
-        <AdminProfilePanel onClose={onClose} {...rest} />
+    <>
+      <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+        <div className="absolute inset-0" onClick={onClose} />
+        <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
+          <AdminProfilePanel onClose={onClose} {...rest} />
+        </div>
       </div>
-    </div>
+      <CalcFab open={calcOpen} onToggle={() => setCalcOpen((v) => !v)} rate={rate} forceMobileVisible zClass="z-[76]" />
+    </>
   );
 }
 
 // Vista completa "Mi perfil administrador" (móvil): en vez de modal, cambia
 // la vista de la app entera. Se abre desde la barra inferior de opciones.
-function AdminProfileView({ onBack, ...rest }) {
+function AdminProfileView({ onBack, rate, ...rest }) {
+  const [calcOpen, setCalcOpen] = useState(false);
   return (
     <div className="fixed inset-0 z-[70] bg-slate-950 flex flex-col">
       <AdminProfilePanel onClose={onBack} {...rest} />
+      <CalcFab open={calcOpen} onToggle={() => setCalcOpen((v) => !v)} rate={rate} forceMobileVisible zClass="z-[71]" />
     </div>
   );
 }

@@ -5167,7 +5167,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
       {/* Backdrop Click */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-2xl min-h-[60vh] sm:min-h-[56vh] max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
+      <div className="relative w-full sm:max-w-2xl max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
       {/* Handle visual para indicar arrastre en móvil */}
       <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
@@ -5194,7 +5194,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
       {/* Imagen + full screen + paginación de la marca */}
       <div
         key={`img-${product.id}`}
-        className={`relative flex-1 min-h-32 sm:min-h-44 bg-slate-950 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+        className={`relative h-40 sm:h-56 bg-slate-950 shrink-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
@@ -5268,7 +5268,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
 
         <div
           key={`body-${product.id}`}
-          className={`p-4 sm:p-6 flex flex-col overflow-y-auto min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+          className={`p-4 sm:p-6 flex flex-col overflow-y-auto flex-1 min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         >
           <div className="mb-5 sm:mb-6">
             <div className="flex items-center justify-between gap-2">

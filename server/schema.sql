@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS customers (
   "lastOrderAt" TEXT,
   balance NUMERIC DEFAULT 0,
   "isBenefited" BOOLEAN DEFAULT false,
-  "creditLimit" NUMERIC
+  "creditLimit" NUMERIC,
+  disabled BOOLEAN DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS admin_credentials (

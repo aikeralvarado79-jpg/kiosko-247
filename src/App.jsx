@@ -3159,6 +3159,7 @@ export default function App() {
           onSubmit={handlePlaceOrder}
           savedCustomer={savedCustomer}
           knownCustomers={knownCustomers}
+          allCustomers={allCustomers}
           onSaveCustomer={setSavedCustomer}
           customerProfile={customerProfile}
           onSaveAddress={handleSaveCustomerAddress}
@@ -3256,6 +3257,7 @@ export default function App() {
       {isIdentityOpen && activeView === 'customer' && (
         <IdentityModal
           knownCustomers={knownCustomers}
+          allCustomers={allCustomers}
           savedCustomer={savedCustomer}
           mode={identityMode}
           confirmKind={identityConfirmKind}
@@ -6056,7 +6058,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   );
 }
 
-function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, adminPhones, mode = 'login', confirmKind = 'switchback', onClose }) {
+function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, adminPhones, mode = 'login', confirmKind = 'switchback', onClose }) {
   useOverlay(true, onClose);
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
@@ -6097,17 +6099,38 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
     }
   }, []);
 
-  // Autocompleta el nombre cuando el teléfono ya está registrado (historial),
-  // sin interferir con el nombre que el usuario escriba manualmente.
+  // Autocompleta el nombre cuando el teléfono ya está registrado (historial local
+  // o clientes del servidor), sin interferir con lo que el usuario escriba a mano.
   const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
+  const nameRef = useRef('');
+  useEffect(() => {
+    nameRef.current = customerName;
+  }, [customerName]);
   useEffect(() => {
     if (phoneNumber.length < 7) return;
-    const match = (knownCustomers || []).find((c) => normalizePhoneDigits(c.phone) === phoneKey);
-    if (match && match.name && !customerName.trim()) {
-      setCustomerName(match.name);
+    let cancelled = false;
+    const applyName = (n) => {
+      if (n && !nameRef.current.trim()) setCustomerName(n);
+    };
+    const local = [
+      ...(knownCustomers || []),
+      ...(allCustomers || []).map((c) => ({ phone: c.phone, name: c.customerName || c.name }))
+    ].find((c) => normalizePhoneDigits(c.phone) === phoneKey);
+    if (local && local.name) {
+      applyName(local.name);
+      return;
     }
+    api
+      .getCustomer(phoneKey)
+      .then((res) => {
+        if (cancelled) return;
+        const n = res && res.ok && res.data ? res.data.customerName : '';
+        applyName(n);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phoneCode, phoneNumber, knownCustomers]);
+  }, [phoneCode, phoneNumber, knownCustomers, allCustomers]);
 
   const handlePhoneNumber = (value) => {
     setPhoneNumber(value.replace(/\D/g, '').slice(0, 7));
@@ -6175,6 +6198,16 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
   // Flujo del formulario (login o registro nuevo).
   const runWebAuthn = async () => {
     setWebauthnError('');
+    // Un usuario inhabilitado por el super admin no puede pasar del login.
+    if (phoneKey.length >= 7) {
+      try {
+        const existing = await api.getCustomer(phoneKey);
+        if (existing.ok && existing.data && existing.data.disabled) {
+          setWebauthnError('Tu cuenta está inhabilitada por el kiosko. Contacta la tienda.');
+          return;
+        }
+      } catch {}
+    }
     // Dispositivo sin biometría/Face ID: no bloquear el ingreso, se accede igual.
     if (!webauthnSupported) {
       persistRemember();
@@ -7065,7 +7098,8 @@ function BottomTabBar({
     { key: 'benefited', label: 'Beneficiados', icon: 'users', onClick: () => onAdminTab('benefited'), badge: null },
     { key: 'blacklist', label: 'Lista Negra', icon: 'alertTriangle', onClick: () => onAdminTab('blacklist'), badge: null },
     { key: 'abonos', label: 'Abonos', icon: 'wallet', onClick: () => onAdminTab('abonos'), badge: pendingPayments > 0 ? pendingPayments : null },
-    { key: 'analytics', label: 'Finanzas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null }
+    { key: 'analytics', label: 'Finanzas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null },
+    { key: 'profile', label: 'Perfil', icon: 'user', onClick: () => onAdminTab('profile'), badge: null }
   ];
 
   const tabs = activeView === 'admin' && isAdminAuthed ? adminTabs : customerTabs;
@@ -7935,7 +7969,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig, holdDeadline }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, allCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig, holdDeadline }) {
   const [nowMs, setNowMs] = useState(Date.now());
 
   useOverlay(true, onClose);
@@ -8030,14 +8064,41 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     );
   };
 
-  // Autocompletado por teléfono: busca clientes conocidos cuyos 7 dígitos coincidan
+  // Autocompletado por teléfono: busca clientes conocidos (historial local) y
+  // registrados (servidor) cuyos 7 dígitos coincidan
   const phoneSuggestions = useMemo(() => {
     if (formData.phoneNumber.length < 3) return [];
     const q = formData.phoneNumber;
-    return knownCustomers
-      .filter((c) => (c.number || '').startsWith(q))
-      .slice(0, 3);
-  }, [knownCustomers, formData.phoneNumber]);
+    const known = (knownCustomers || []).filter((c) => (c.number || '').startsWith(q));
+    const server = (allCustomers || [])
+      .map((c) => ({
+        name: c.customerName || c.name || '',
+        code: String(c.phone || '').slice(0, 4),
+        number: String(c.phone || '').slice(-7),
+        address: Array.isArray(c.addresses) && c.addresses[0] ? c.addresses[0] : ''
+      }))
+      .filter((c) => c.number.startsWith(q));
+    const extra = server.filter((s) => !known.some((k) => k.number === s.number));
+    return [...known, ...extra].slice(0, 3);
+  }, [knownCustomers, allCustomers, formData.phoneNumber]);
+
+  // Autocompleta el nombre desde el servidor cuando el teléfono está completo
+  // y el cliente no escribió nada a mano.
+  useEffect(() => {
+    if (formData.phoneNumber.length !== 7 || formData.customerName.trim()) return;
+    let cancelled = false;
+    const phoneDigits = `${formData.phoneCode}${formData.phoneNumber}`.replace(/\D/g, '').slice(-11);
+    api
+      .getCustomer(phoneDigits)
+      .then((res) => {
+        if (cancelled) return;
+        const n = res && res.ok && res.data ? res.data.customerName : '';
+        if (n) setFormData((prev) => (prev.customerName.trim() ? prev : { ...prev, customerName: n }));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.phoneCode, formData.phoneNumber]);
 
   const applyCustomer = (customer) => {
     setFormData((prev) => ({
@@ -8079,9 +8140,20 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (isPlacingOrder) return;
+    if (/^\d{7}$/.test(formData.phoneNumber)) {
+      // Un usuario inhabilitado por el super admin no puede pedir.
+      const phoneDigits = `${formData.phoneCode}${formData.phoneNumber}`.replace(/\D/g, '').slice(-11);
+      try {
+        const existing = await api.getCustomer(phoneDigits);
+        if (existing.ok && existing.data && existing.data.disabled) {
+          setErrors({ phone: 'Tu cuenta está inhabilitada por el kiosko. Contacta la tienda.' });
+          return;
+        }
+      } catch {}
+    }
     if (validate()) {
       // Con "Mi Cartera": aplica el saldo a favor al total. Si cubre todo el
       // pedido, el pago queda confirmado con cartera; si no, el resto se paga
@@ -8832,6 +8904,8 @@ function AdminView({
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [newEmployeePhone, setNewEmployeePhone] = useState('');
   const [newEmployeeName, setNewEmployeeName] = useState('');
+  const [usersFilter, setUsersFilter] = useState('');
+  const [usersBusy, setUsersBusy] = useState(false);
 
   const loadEmployees = useCallback(async () => {
     setLoadingEmployees(true);
@@ -8879,6 +8953,40 @@ function AdminView({
     addToast('Sesión cerrada remotamente');
     loadEmployees();
   };
+
+  const toggleCustomerDisabled = async (customer) => {
+    if (usersBusy) return;
+    const next = !customer.disabled;
+    setUsersBusy(true);
+    const res = await api.setCustomerDisabled(customer.phone, next);
+    setUsersBusy(false);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el usuario', 'error');
+      return;
+    }
+    addToast(next ? 'Usuario inhabilitado. No podrá pasar del login.' : 'Usuario habilitado');
+    onLoadCustomers();
+  };
+
+  const deleteCustomerAccount = async (customer) => {
+    if (usersBusy) return;
+    if (!window.confirm(`¿Eliminar el perfil de "${customer.customerName || customer.phone}"? Esta acción no se puede deshacer.`)) return;
+    setUsersBusy(true);
+    const res = await api.deleteCustomer(customer.phone);
+    setUsersBusy(false);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo eliminar el usuario', 'error');
+      return;
+    }
+    addToast('Perfil eliminado del sistema');
+    onLoadCustomers();
+  };
+
+  const filteredSystemUsers = (allCustomers || []).filter((c) => {
+    const q = usersFilter.trim().toLowerCase();
+    if (!q) return true;
+    return String(c.phone).includes(q) || (c.customerName || '').toLowerCase().includes(q);
+  });
 
   // Vista del inventario: 'lista' (tabla/tarjetas) | 'recorrido' (filas
   // horizontales estilo tienda con las opciones del admin en cada tarjeta).
@@ -9972,6 +10080,29 @@ function AdminView({
     );
   };
 
+  const openProfile = () => {
+    // En móvil el perfil es una vista completa; en escritorio, el modal clásico.
+    if (window.innerWidth < 640) setAdminTab('profile');
+    else setShowAdminProfile(true);
+  };
+
+  if (adminTab === 'profile') {
+    return (
+      <AdminProfileView
+        phone={adminPhone}
+        role={adminRole}
+        profile={adminProfile}
+        onChangePassword={onChangePassword}
+        onSaveProfile={onSaveAdminProfile}
+        adminPrefs={adminPrefs}
+        onSavePrefs={saveAdminPrefs}
+        theme={theme}
+        onSetTheme={onSetTheme}
+        onBack={() => setAdminTab('inventory')}
+      />
+    );
+  }
+
   return (
     <div className="space-y-5 sm:space-y-8 animate-fade-in">
       {/* Admin Top Dashboard Header */}
@@ -9986,7 +10117,7 @@ function AdminView({
 
           {/* Identidad del admin logueado: avatar, nombre, rol. Abre el perfil. */}
           <button
-            onClick={() => setShowAdminProfile(true)}
+            onClick={openProfile}
             className="mt-3 inline-flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-2xl bg-slate-900/60 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-900 transition-all group"
             title="Abrir mi perfil de administrador"
           >
@@ -10022,7 +10153,7 @@ function AdminView({
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowAdminProfile(true)}
+            onClick={openProfile}
             className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2"
             title="Perfil del administrador y preferencias"
           >
@@ -11929,6 +12060,79 @@ function AdminView({
               </ul>
             )}
           </div>
+
+          {/* Usuarios en el sistema */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 sm:p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <Icon name="users" className="w-4 h-4 text-amber-300" />
+                Usuarios en el sistema
+              </h4>
+              <button
+                onClick={() => { onLoadCustomers(); loadEmployees(); }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-xs font-bold text-slate-300 hover:text-teal-300 hover:border-teal-500/40 transition-all"
+              >
+                <Icon name="refresh" className="w-3.5 h-3.5" />
+                Refrescar
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Todos los perfiles de clientes registrados. Un usuario inhabilitado no podrá pasar del login ni hacer pedidos.
+            </p>
+            <input
+              value={usersFilter}
+              onChange={(e) => setUsersFilter(e.target.value)}
+              placeholder="Buscar por nombre o teléfono"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+            />
+            {allCustomers.length === 0 ? (
+              <p className="text-xs text-slate-400">No hay usuarios registrados.</p>
+            ) : filteredSystemUsers.length === 0 ? (
+              <p className="text-xs text-slate-400">Ningún usuario coincide con la búsqueda.</p>
+            ) : (
+              <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                {filteredSystemUsers.map((c) => (
+                  <li key={c.phone} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70">
+                    <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${c.disabled ? 'bg-slate-700 text-slate-500' : 'bg-teal-500/20 text-teal-300 border border-teal-500/40'}`}>
+                      {(c.customerName || c.phone.slice(-2)).toUpperCase().slice(0, 2)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-white truncate">
+                        {c.customerName || `Cliente ${c.phone.slice(-4)}`}
+                        {c.disabled && (
+                          <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-rose-500/20 text-rose-300 font-black align-middle">
+                            Inhabilitado
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-slate-400">{c.phone}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => toggleCustomerDisabled(c)}
+                        disabled={usersBusy}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all disabled:opacity-50 shrink-0 ${
+                          c.disabled
+                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                            : 'bg-amber-500/10 border-amber-500/40 text-amber-300 hover:bg-amber-500/25'
+                        }`}
+                      >
+                        {c.disabled ? 'Habilitar' : 'Inhabilitar'}
+                      </button>
+                      <button
+                        onClick={() => deleteCustomerAccount(c)}
+                        disabled={usersBusy}
+                        className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[10px] font-bold hover:bg-rose-500/25 transition-all disabled:opacity-50 shrink-0"
+                        title="Eliminar perfil"
+                      >
+                        <Icon name="trash" className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
       {overdueList.length === 1 && (
@@ -12111,8 +12315,7 @@ function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
 
 // Perfil visual del admin: nombre, foto, teléfono y rol. Incluye cambio de
 // contraseña y preferencias personales (tema) que se guardan por admin.
-function AdminProfileModal({ phone, role, profile, onClose, onChangePassword, onSaveProfile, adminPrefs, onSavePrefs, theme, onSetTheme }) {
-  useOverlay(true, onClose);
+function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, onSaveProfile, adminPrefs, onSavePrefs, theme, onSetTheme }) {
   const [name, setName] = useState(profile?.name || '');
   const [photo, setPhoto] = useState(profile?.photo || '');
   const [saving, setSaving] = useState(false);
@@ -12172,10 +12375,8 @@ function AdminProfileModal({ phone, role, profile, onClose, onChangePassword, on
   ];
 
   return (
-    <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
-        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+    <>
+      <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
               <Icon name="user" className="w-5 h-5 text-teal-400" />
@@ -12352,7 +12553,29 @@ function AdminProfileModal({ phone, role, profile, onClose, onChangePassword, on
             )}
           </div>
         </div>
+    </>
+  );
+}
+
+// Modal clásico de perfil (escritorio / pantallas grandes).
+function AdminProfileModal({ onClose, ...rest }) {
+  useOverlay(true, onClose);
+  return (
+    <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
+        <AdminProfilePanel onClose={onClose} {...rest} />
       </div>
+    </div>
+  );
+}
+
+// Vista completa "Mi perfil administrador" (móvil): en vez de modal, cambia
+// la vista de la app entera. Se abre desde la barra inferior de opciones.
+function AdminProfileView({ onBack, ...rest }) {
+  return (
+    <div className="fixed inset-0 z-[70] bg-slate-950 flex flex-col">
+      <AdminProfilePanel onClose={onBack} {...rest} />
     </div>
   );
 }

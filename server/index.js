@@ -95,6 +95,13 @@ const requireAdmin = async (req, res, next) => {
   const payload = decodeToken(token);
   const phone = (payload && payload.phone) || '';
   const role = (payload && payload.role) || (SUPER_ADMIN_PHONES.includes(phone) ? 'superadmin' : 'admin');
+  // Revocación global por teléfono: si el super admin cerró la sesión remota,
+  // ningún token de ese teléfono vale aunque su registro de sesión haya sido
+  // borrado o se re-registre (los tokens viejos no renacen).
+  const revokedList = await store.listRevokedAdminPhones();
+  if (Array.isArray(revokedList) && revokedList.includes(phone)) {
+    return res.status(401).json({ error: 'Sesión cerrada por el super administrador' });
+  }
   const hash = sha256(token);
   let session = await store.getAdminSession(hash);
   if (!session) {
@@ -204,6 +211,7 @@ app.post('/api/auth/login', async (req, res) => {
     const token = signToken({ role, phone: key || '', iat: Date.now() });
     const hash = sha256(token);
     await store.saveAdminSession(hash, { phone: key, role, iat: Date.now(), lastSeen: Date.now(), revoked: false });
+    await store.unrevokeAdminPhone(key);
     res.json({ token, role, phone: key });
   } catch (err) {
     fail(res, err, 'No se pudo iniciar sesión. Intenta de nuevo.');
@@ -392,6 +400,9 @@ app.post('/api/admin/sessions/revoke', requireSuperAdmin, async (req, res) => {
     if (req.admin?.phone === key) {
       return res.status(403).json({ error: 'No puedes cerrar tu propia sesión desde aquí' });
     }
+    // Veto global por teléfono: cubre cualquier token/sesión del admin, incluso
+    // los emitidos antes del tracking o cuyos registros hayan desaparecido.
+    await store.revokeAdminPhone(key);
     const sessions = await store.listAdminSessions();
     for (const s of sessions) {
       if (s.phone === key && !s.revoked) {
@@ -420,6 +431,7 @@ app.post('/api/auth/admin/biometric-login', async (req, res) => {
     const token = signToken({ role, phone: key, iat: Date.now() });
     const hash = sha256(token);
     await store.saveAdminSession(hash, { phone: key, role, iat: Date.now(), lastSeen: Date.now(), revoked: false });
+    await store.unrevokeAdminPhone(key);
     res.json({ token, role, phone: key });
   } catch (err) {
     fail(res, err, 'No se pudo verificar la biometría. Intenta de nuevo.');
@@ -441,6 +453,7 @@ app.post('/api/auth/admin/biometric-register', async (req, res) => {
     const token = signToken({ role, phone: key, iat: Date.now() });
     const hash = sha256(token);
     await store.saveAdminSession(hash, { phone: key, role, iat: Date.now(), lastSeen: Date.now(), revoked: false });
+    await store.unrevokeAdminPhone(key);
     res.json({ token, role, phone: key });
   } catch (err) {
     fail(res, err, 'No se pudo guardar la biometría. Intenta de nuevo.');
@@ -506,6 +519,12 @@ app.get('/api/products/:id/image', async (req, res) => {
 app.post('/api/orders', async (req, res) => {
   try {
     const body = req.body || {};
+    if (body.phone) {
+      const person = await store.getCustomerByPhone(body.phone);
+      if (person && person.disabled) {
+        return res.status(403).json({ error: 'Tu cuenta está inhabilitada por el kiosko. Contacta la tienda.' });
+      }
+    }
     if (body.credit && body.phone) {
       const customer = await store.getCustomerByPhone(body.phone);
       if (!customer || !customer.isBenefited) {
@@ -1257,6 +1276,29 @@ app.put('/api/customers/:phone/credit-limit', requireAdmin, async (req, res) => 
     res.json(customer);
   } catch (err) {
     fail(res, err, 'No se pudo actualizar el tope de fiado.');
+  }
+});
+
+// Inhabilita o habilita la cuenta de un cliente (solo super admin). Un usuario
+// inhabilitado no puede pasar del login ni hacer pedidos.
+app.put('/api/customers/:phone/disabled', requireSuperAdmin, async (req, res) => {
+  try {
+    const customer = await store.setCustomerDisabled(req.params.phone, Boolean(req.body?.disabled));
+    if (!customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+    res.json(customer);
+  } catch (err) {
+    fail(res, err, 'No se pudo actualizar el estado del usuario.');
+  }
+});
+
+// Elimina por completo el perfil de un cliente (solo super admin).
+app.delete('/api/customers/:phone', requireSuperAdmin, async (req, res) => {
+  try {
+    const removed = await store.deleteCustomer(req.params.phone);
+    if (!removed) return res.status(404).json({ error: 'Cliente no encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'No se pudo eliminar el usuario.');
   }
 });
 

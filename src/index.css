@@ -493,3 +493,96 @@ html.light .shelf-product__art {
   box-shadow: 0 12px 20px -12px rgb(15 23 42 / 0.25);
 }
 html.light .shelf-product__shadow { background: radial-gradient(ellipse at center, rgb(15 23 42 / 0.28) 0%, transparent 72%); }
+
+/* ------------------------------------------------------------------ */
+/*  Onboarding visual del kiosko — secuencia de bienvenida pre-tienda   */
+/* ------------------------------------------------------------------ */
+@keyframes onboard-bg-drift {
+  0%, 100% { transform: translate(-6%, -4%) scale(1.05); }
+  50% { transform: translate(5%, 3%) scale(1.12); }
+}
+.onboard-bg-drift { animation: onboard-bg-drift 9s ease-in-out infinite; }
+
+@keyframes onboard-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-12px) rotate(2deg); }
+}
+.onboard-float { animation: onboard-float 3.2s ease-in-out infinite; }
+
+@keyframes onboard-pop {
+  0% { opacity: 0; transform: translateY(26px) scale(0.9); }
+  70% { opacity: 1; transform: translateY(-4px) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.onboard-pop { animation: onboard-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes onboard-slide-in {
+  from { opacity: 0; transform: translateX(48px) scale(0.98); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+.onboard-slide-in { animation: onboard-slide-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes onboard-slide-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(-48px) scale(0.98); }
+}
+.onboard-slide-out { animation: onboard-slide-out 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* ------------------------------------------------------------------ */
+/*  Modo vitrina "kiosko siempre abierto"                               */
+/* ------------------------------------------------------------------ */
+@keyframes showcase-kenburns {
+  0%, 100% { transform: scale(1) translate(0, 0); }
+  50% { transform: scale(1.12) translate(-2%, -3%); }
+}
+.showcase-kenburns { animation: showcase-kenburns 8s ease-in-out infinite; }
+
+@keyframes showcase-fade {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.showcase-fade { animation: showcase-fade 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes showcase-pulse-cta {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.55); }
+  50% { box-shadow: 0 0 0 14px rgba(45, 212, 191, 0); }
+}
+.showcase-pulse-cta { animation: showcase-pulse-cta 1.8s ease-out infinite; }
+
+/* ------------------------------------------------------------------ */
+/*  Éxito de pedido cinematográfico — confeti + celebración             */
+/* ------------------------------------------------------------------ */
+@keyframes confetti-fall {
+  0% { transform: translateY(-12vh) translateX(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) translateX(var(--confetti-x, 0px)) rotate(var(--confetti-rot, 540deg)); opacity: 0.85; }
+}
+.confetti-piece {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  animation: confetti-fall var(--confetti-dur, 2.6s) linear var(--confetti-delay, 0s) infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes success-ring {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.success-ring { animation: success-ring 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes success-check {
+  0% { transform: scale(0); opacity: 0; }
+  55% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.success-check { animation: success-check 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both; }
+
+@keyframes success-order-num {
+  0% { opacity: 0; transform: scale(2.2); }
+  60% { opacity: 1; transform: scale(1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.success-order-num { animation: success-order-num 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both; }

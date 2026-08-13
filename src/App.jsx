@@ -1230,6 +1230,22 @@ export default function App() {
   // Tour tutorial para usuarios nuevos (se muestra tras la bienvenida).
   const [showTour, setShowTour] = useState(false);
 
+  // Onboarding visual del kiosko: secuencia de bienvenida antes de entrar a la
+  // tienda. Se muestra una única vez (localStorage) o hasta que el usuario
+  // pulse "Entrar". Complementa el tour (NewUserTour) para usuarios nuevos.
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try { return localStorage.getItem('kiosko_onboarding_done') !== '1'; }
+    catch { return true; }
+  });
+
+  const finishOnboarding = () => {
+    try { localStorage.setItem('kiosko_onboarding_done', '1'); } catch {}
+    setShowOnboarding(false);
+  };
+
+  // Éxito de pedido cinematográfico: overlay de celebración tras confirmar.
+  const [successOrder, setSuccessOrder] = useState(null);
+
   // Banner de notificaciones: ocultable, se recuerda la decisión del usuario.
   const [pushBannerHidden, setPushBannerHidden] = useState(() => {
     try { return localStorage.getItem('kiosko_push_banner_hidden') === '1'; } catch { return false; }
@@ -1391,6 +1407,56 @@ export default function App() {
   const [orderDetailOrder, setOrderDetailOrder] = useState(null);
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState(null);
   const [deleteOrderTarget, setDeleteOrderTarget] = useState(null);
+
+  // Modo vitrina "kiosko siempre abierto": tras ~60s de inactividad en la home
+  // se activa un carrusel de atracción. Cualquier tap reanuda la navegación.
+  const [showcaseActive, setShowcaseActive] = useState(false);
+  const lastActivityRef = useRef(Date.now());
+  const showcaseTimerRef = useRef(null);
+
+  // Reinicia el contador de inactividad con cualquier gesto del usuario.
+  const bumpActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    if (showcaseActive) setShowcaseActive(false);
+  }, [showcaseActive]);
+
+  useEffect(() => {
+    const events = ['pointerdown', 'touchstart', 'keydown', 'scroll', 'wheel'];
+    events.forEach((ev) => window.addEventListener(ev, bumpActivity, { passive: true }));
+    return () => events.forEach((ev) => window.removeEventListener(ev, bumpActivity));
+  }, [bumpActivity]);
+
+  const overlayBlockingShowcase = Boolean(
+    isIdentityOpen ||
+    welcome ||
+    showTour ||
+    showOnboarding ||
+    isCartOpen ||
+    isCheckoutOpen ||
+    productDetailModal ||
+    isOrdersDrawerOpen ||
+    isDebtDrawerOpen ||
+    isMyKioskoOpen ||
+    isAikerOpen ||
+    liveTrackingOrder ||
+    orderDetailOrder ||
+    showcaseActive
+  );
+
+  useEffect(() => {
+    const tick = () => {
+      if (
+        activeView === 'customer' &&
+        !isLoading &&
+        !overlayBlockingShowcase &&
+        Date.now() - lastActivityRef.current > 60000
+      ) {
+        setShowcaseActive(true);
+      }
+    };
+    showcaseTimerRef.current = setInterval(tick, 5000);
+    return () => clearInterval(showcaseTimerRef.current);
+  }, [activeView, isLoading, overlayBlockingShowcase]);
 
   // Clientes registrados (para Beneficiados / Lista Negra del panel admin)
   const [allCustomers, setAllCustomers] = useState([]);
@@ -1954,6 +2020,9 @@ export default function App() {
 
       haptic([20, 40, 20]);
       playChime();
+      // Overlay de éxito cinematográfico: celebra la compra en pantalla completa
+      // con el número de pedido, ETA y acciones (seguir pedido / compartir).
+      setSuccessOrder(res.data.order || orderPayload);
       addToast('¡Pedido realizado con éxito!', 'success');
     } catch (err) {
       console.error('[kiosko] Error al crear pedido:', err);
@@ -1961,6 +2030,29 @@ export default function App() {
     } finally {
       setIsPlacingOrder(false);
     }
+  };
+
+  // Desde el overlay de éxito: cierra la celebración y abre el seguimiento del
+  // pedido recién creado (rastreo en vivo para delivery, detalle para retiro).
+  const handleSuccessTrack = () => {
+    const order = successOrder;
+    setSuccessOrder(null);
+    if (!order) return;
+    setCurrentOrderTracking(order.id || order);
+    if (order.type === 'delivery') setLiveTrackingOrder(order);
+  };
+
+  // Compartir el pedido confirmado por WhatsApp (mensaje formateado con artículos).
+  const handleSuccessShareWhatsApp = () => {
+    const order = successOrder;
+    if (!order) return;
+    const items = (Array.isArray(order.items) ? order.items : []).map(
+      (it) => `• ${it.quantity}× ${it.name}` + (Number(it.price) > 0 ? ` — ${formatUsd(it.price * it.quantity)}` : '')
+    ).join('\n');
+    const text = encodeURIComponent(
+      `🍫 ¡Pedido realizado en el Kiosko 247!\n\nN° ${order.id} — Total ${formatUsd(order.total)}\n\n${items}\n\nGracias por tu compra.`
+    );
+    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
   };
 
   // Rellena el carrito con los artículos del último pedido del cliente reconocido
@@ -3060,6 +3152,36 @@ export default function App() {
         />
       )}
 
+      {/* Onboarding visual del kiosko: se muestra una vez antes de entrar */}
+      {showOnboarding && !isLoading && activeView === 'customer' && (
+        <KioskoOnboarding onFinish={finishOnboarding} />
+      )}
+
+      {/* Modo vitrina: carrusel de atracción tras inactividad */}
+      {showcaseActive && activeView === 'customer' && (
+        <ShowcaseMode
+          products={products}
+          promos={promos}
+          rate={rate}
+          onResume={() => setShowcaseActive(false)}
+          onOrderNow={() => setShowcaseActive(false)}
+          onOpenProduct={(p) => {
+            setShowcaseActive(false);
+            setProductDetailModal(p);
+          }}
+        />
+      )}
+
+      {/* Éxito de pedido cinematográfico */}
+      {successOrder && (
+        <OrderSuccessOverlay
+          order={successOrder}
+          onClose={() => setSuccessOrder(null)}
+          onTrack={handleSuccessTrack}
+          onShare={handleSuccessShareWhatsApp}
+        />
+      )}
+
       {/* Bienvenida a pantalla completa tras el inicio de sesión */}
       {welcome && (
         <WelcomeOverlay
@@ -3273,6 +3395,332 @@ function NewUserTour({ onClose }) {  const steps = [
             {stepIdx < steps.length - 1 ? 'Siguiente' : '¡Listo!'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Onboarding visual: secuencia de bienvenida antes de entrar a la tienda.
+// Tarjetas deslizables con identidad del negocio, qué vendemos, cómo pedir en
+// 3 pasos y métodos de pago. Se muestra una vez (localStorage).
+function KioskoOnboarding({ onFinish }) {
+  const steps = [
+    {
+      icon: 'store',
+      title: 'Kiosko 24/7',
+      subtitle: 'Empresas Alvarados',
+      desc: 'Tu kiosko de confianza, siempre abierto. Antojos, bebidas frías, snacks y todo lo que se te antoje.',
+      gradient: 'from-teal-600 via-cyan-700 to-slate-950',
+      chip: 'bg-teal-500/20 text-teal-300 border-teal-500/30'
+    },
+    {
+      icon: 'bag',
+      title: '¿Qué vendemos?',
+      subtitle: 'Anímate a explorar',
+      desc: 'Refrescos, papas, chichas, dulces, pan, huevos, queso… miles de productos con precios en $ y Bs.',
+      gradient: 'from-orange-600 via-amber-700 to-slate-950',
+      chip: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+    },
+    {
+      icon: 'shoppingBag',
+      title: 'Pedir es fácil',
+      subtitle: 'En 3 pasos',
+      desc: '① Elige tus productos · ② Confirma tu pedido · ③ Pagas a la entrega o retiras en tienda sin filas.',
+      gradient: 'from-indigo-600 via-violet-700 to-slate-950',
+      chip: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+    },
+    {
+      icon: 'creditCard',
+      title: 'Paga como quieras',
+      subtitle: 'Efectivo o digital',
+      desc: 'Pago móvil, transferencia, cartera de saldo e incluso a crédito si eres beneficiado. A domicilio o retiro.',
+      gradient: 'from-emerald-600 via-teal-700 to-slate-950',
+      chip: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+    }
+  ];
+  const [idx, setIdx] = useState(0);
+  const touchX = useRef(null);
+
+  const go = (next) => {
+    if (next === idx) return;
+    setIdx(next);
+  };
+
+  const s = steps[Math.min(Math.max(idx, 0), steps.length - 1)];
+
+  return (
+    <div
+      className="fixed inset-0 z-[95] flex flex-col overflow-hidden select-none touch-manipulation"
+      role="dialog"
+      aria-label="Bienvenida al Kiosko 24/7"
+      onTouchStart={(e) => (touchX.current = e.touches?.[0]?.clientX ?? null)}
+      onTouchEnd={(e) => {
+        if (touchX.current == null) return;
+        const delta = (e.changedTouches?.[0]?.clientX ?? 0) - touchX.current;
+        if (Math.abs(delta) > 45) go(Math.max(0, Math.min(steps.length - 1, idx + (delta < 0 ? 1 : -1))));
+        touchX.current = null;
+      }}
+    >
+      {/* Fondo con gradiente animado */}
+      <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient}`} />
+      <div className="absolute inset-0 onboard-bg-drift opacity-40 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.25),transparent_45%),radial-gradient(circle_at_80%_70%,rgba(45,212,191,0.3),transparent_45%)]" />
+
+      {/* Contenido de la pantalla actual */}
+      <div key={idx} className="relative flex-1 flex flex-col items-center justify-center px-8 text-center onboard-slide-in">
+        <div className="onboard-float w-24 h-24 sm:w-32 sm:h-32 mb-8 rounded-[2rem] bg-white/10 border border-white/20 backdrop-blur-md flex items-center justify-center shadow-2xl shadow-black/30">
+          <Icon name={s.icon} className="w-12 h-12 sm:w-16 sm:h-16 text-white" />
+        </div>
+        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider border ${s.chip} backdrop-blur-md mb-4 onboard-pop`}>
+          <Icon name="sparkles" className="w-3 h-3" /> {s.subtitle}
+        </span>
+        <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight mb-3 onboard-pop" style={{ animationDelay: '0.08s' }}>
+          {s.title}
+        </h2>
+        <p className="text-sm sm:text-base text-white/80 max-w-md leading-relaxed onboard-pop" style={{ animationDelay: '0.16s' }}>
+          {s.desc}
+        </p>
+      </div>
+
+      {/* Indicadores de punto + navegación */}
+      <div className="relative pb-10 px-6 flex flex-col items-center gap-5">
+        <div className="flex items-center gap-2">
+          {steps.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => go(i)}
+              aria-label={`Paso ${i + 1}`}
+              className={`h-2 rounded-full transition-all ${i === idx ? 'w-7 bg-white' : 'w-2 bg-white/30'}`}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-3 w-full max-w-sm">
+          {idx > 0 && (
+            <button
+              onClick={() => go(idx - 1)}
+              className="px-4 py-3 rounded-2xl bg-white/10 border border-white/15 text-white text-sm font-semibold backdrop-blur-md active:scale-95 transition-all"
+            >
+              Atrás
+            </button>
+          )}
+          <button
+            onClick={() => (idx < steps.length - 1 ? go(idx + 1) : onFinish())}
+            className={`flex-1 py-3 rounded-2xl bg-white text-slate-950 text-sm font-black shadow-xl shadow-black/20 active:scale-95 transition-all ${idx < steps.length - 1 ? '' : 'showcase-pulse-cta'}`}
+          >
+            {idx < steps.length - 1 ? 'Siguiente' : 'Entrar al kiosko'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modo vitrina "kiosko siempre abierto": carrusel de atracción que se enciende
+// tras inactividad. Rota promos y productos destacados; cualquier tap reanuda.
+function ShowcaseMode({ products, promos, rate, onResume, onOrderNow, onOpenProduct }) {
+  const [stepIdx, setStepIdx] = useState(0);
+
+  // Carrusel de items: promos con imagen + productos con stock.
+  const items = useMemo(() => {
+    const list = [];
+    const activePromos = Array.isArray(promos) ? promos.filter((p) => p.active && p.image) : [];
+    activePromos.forEach((p) => list.push({ kind: 'promo', label: p.title, sub: p.subtitle, image: p.image }));
+    const withImage = (Array.isArray(products) ? products : []).filter((p) => p.image && Math.max(0, (Number(p.stock) || 0) - (Number(p.reserved) || 0)) > 0);
+    withImage.slice(0, 8).forEach((p) => list.push({ kind: 'product', product: p, label: p.name, sub: p.brand || p.category, image: p.image }));
+    if (!list.length && Array.isArray(products) && products.length) {
+      products.slice(0, 6).forEach((p) => list.push({ kind: 'product', product: p, label: p.name, sub: p.category, image: p.image }));
+    }
+    return list;
+  }, [promos, products]);
+
+  useEffect(() => {
+    if (items.length <= 1) return undefined;
+    const id = setInterval(() => setStepIdx((i) => (i + 1) % items.length), 4000);
+    return () => clearInterval(id);
+  }, [items.length]);
+
+  // Silencio: cualquier tap reanuda la navegación normal.
+  const resume = () => {
+    haptic(8);
+    onResume?.();
+  };
+
+  const item = items.length ? items[stepIdx % items.length] : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] bg-slate-950 overflow-hidden select-none"
+      role="region"
+      aria-label="Modo vitrina del kiosko"
+      onClick={resume}
+    >
+      {/* Fondo de la tarjeta actual en rotación */}
+      {item?.image && (
+        <div
+          key={stepIdx}
+          className="absolute inset-0 bg-cover bg-center showcase-kenburns"
+          style={{ backgroundImage: `url(${item.image.replace('w=500', 'w=1400')})` }}
+        />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/55 to-slate-950/25" />
+
+      <div className="relative z-10 flex flex-col items-center justify-center h-full px-6 text-center">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-200 text-[10px] font-bold uppercase tracking-[0.25em] mb-6">
+          <Icon name="store" className="w-3 h-3" /> Kiosko 24/7 · Abierto
+        </span>
+
+        <div key={`card-${stepIdx}`} className="showcase-fade">
+          {item?.kind === 'promo' ? (
+            <>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 mb-2 block">Oferta especial</span>
+              <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight max-w-xl">{item.label}</h2>
+              {item.sub && <p className="text-white/80 text-sm mt-3 max-w-md">{item.sub}</p>}
+            </>
+          ) : item?.product ? (
+            <>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-teal-300 mb-2 block">
+                {item.product.category} {item.product.brand ? `· ${item.product.brand}` : ''}
+              </span>
+              <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight max-w-xl">{item.product.name}</h2>
+              <p className="text-amber-300 font-black text-2xl sm:text-4xl mt-3">
+                {formatUsd(item.product.price)}
+                {rate?.rate > 0 && (
+                  <span className="text-white/70 text-sm sm:text-base font-semibold block mt-1">
+                    {formatBs(usdToBs(item.product.price, rate.rate))}
+                  </span>
+                )}
+              </p>
+            </>
+          ) : (
+            <span className="text-lg text-white/80">Descubre el kiosko digital de Empresas Alvarados</span>
+          )}
+        </div>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (item?.product) onOpenProduct?.(item.product);
+            else {
+              haptic(12);
+              onOrderNow?.();
+            }
+          }}
+          className="mt-10 showcase-pulse-cta px-8 py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-base font-black shadow-2xl shadow-teal-500/30 active:scale-95 transition-all"
+        >
+          {item?.product ? 'Ver detalle y agregar' : 'Pedir ahora'}
+        </button>
+
+        <p className="mt-6 text-[11px] text-white/50">Toca en cualquier lugar para continuar navegando</p>
+        {items.length > 1 && (
+          <div className="mt-3 flex gap-1.5">
+            {items.map((_, i) => (
+              <span key={i} className={`h-1.5 rounded-full transition-all ${i === stepIdx % items.length ? 'w-5 bg-white' : 'w-1.5 bg-white/25'}`} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Éxito de pedido cinematográfico: celebración full-screen tras confirmar la
+// compra. Confeti, número de pedido gigante, ETA y acciones para seguir o
+// compartir por WhatsApp.
+function OrderSuccessOverlay({ order, onClose, onTrack, onShare }) {
+  const orderNum = order?.id ?? order?.orderId ?? order?.number ?? '';
+  const isDelivery = order?.type === 'delivery';
+  const eta = order?.estimatedMinutes || (isDelivery ? 25 : 10);
+  const items = Array.isArray(order?.items) ? order.items : [];
+
+  // Partículas de confeti con parámetros aleatorios estables por render.
+  const confetti = useMemo(
+    () =>
+      Array.from({ length: 26 }).map((_, i) => ({
+        left: `${(i * 37) % 100}%`,
+        delay: `${(i % 9) * 0.18}s`,
+        dur: `${2.2 + (i % 5) * 0.4}s`,
+        rot: `${360 + (i % 3) * 240}deg`,
+        x: `${(i % 2 === 0 ? 1 : -1) * (24 + (i % 5) * 18)}px`,
+        color: ['#2dd4bf', '#34d399', '#fbbf24', '#f472b6', '#818cf8', '#38bdf8'][i % 6]
+      })),
+    []
+  );
+
+  return (
+    <div className="fixed inset-0 z-[85] overflow-hidden bg-gradient-to-br from-teal-900 via-slate-950 to-emerald-950 animate-fade-in select-none" role="dialog" aria-label="Pedido realizado con éxito">
+      {/* Confeti */}
+      {confetti.map((c, i) => (
+        <span
+          key={i}
+          className="confetti-piece"
+          style={{
+            left: c.left,
+            background: c.color,
+            '--confetti-delay': c.delay,
+            '--confetti-dur': c.dur,
+            '--confetti-rot': c.rot,
+            '--confetti-x': c.x
+          }}
+        />
+      ))}
+
+      <div className="relative h-full flex flex-col items-center justify-center px-6 text-center">
+        {/* Check dentro de anillo */}
+        <div className="success-ring w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-white/10 border-2 border-white/30 backdrop-blur-md flex items-center justify-center shadow-2xl shadow-teal-500/40 mb-8">
+          <svg className="success-check w-12 h-12 sm:w-14 sm:h-14 text-teal-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        </div>
+
+        <span className="text-[11px] font-bold uppercase tracking-[0.3em] text-teal-200/80 mb-3">Pedido confirmado</span>
+        <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight">¡Gracias por tu compra!</h2>
+
+        <div className="success-order-num mt-8 px-8 py-5 rounded-3xl bg-white/10 border border-white/20 backdrop-blur-md">
+          <span className="block text-[11px] font-bold uppercase tracking-widest text-white/60 mb-1">Tu número de pedido</span>
+          <span className="block font-display text-5xl sm:text-7xl font-black text-white tracking-tight">#{orderNum}</span>
+        </div>
+
+        <p className="mt-6 text-sm text-white/85 flex items-center gap-2">
+          <Icon name="clock" className="w-4 h-4 text-teal-300" />
+          Estimado: ~{eta} min {isDelivery ? 'para tu entrega' : 'para retirar en tienda'}
+        </p>
+
+        {items.length > 0 && (
+          <div className="mt-4 w-full max-w-sm max-h-28 overflow-y-auto space-y-1 text-left scrollbar-none">
+            {items.slice(0, 6).map((it, i) => (
+              <div key={i} className="flex items-center justify-between gap-3 text-xs text-white/80">
+                <span className="truncate">{it.quantity}× {it.name}</span>
+                {Number(it.price) > 0 && <span className="text-white/60 shrink-0">{formatUsd(it.price * it.quantity)}</span>}
+              </div>
+            ))}
+            {items.length > 6 && <p className="text-[11px] text-white/50 text-center pt-1">y {items.length - 6} más…</p>}
+          </div>
+        )}
+
+        <div className="mt-8 flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+          <button
+            onClick={onTrack}
+            className="flex-1 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-sm font-black shadow-xl shadow-teal-500/30 active:scale-95 transition-all showcase-pulse-cta"
+          >
+            <span className="flex items-center justify-center gap-2">
+              <Icon name="navigation" className="w-4 h-4" /> {isDelivery ? 'Seguir mi pedido' : 'Ver mi pedido'}
+            </span>
+          </button>
+          <button
+            onClick={onShare}
+            className="flex-1 px-5 py-3.5 rounded-2xl bg-green-500/20 border border-green-400/40 text-green-300 text-sm font-bold hover:bg-green-500/30 active:scale-95 transition-all"
+          >
+            <span className="flex items-center justify-center gap-2">
+              <Icon name="whatsapp" className="w-4 h-4" /> Compartir
+            </span>
+          </button>
+        </div>
+
+        <button
+          onClick={onClose}
+          className="mt-6 text-xs text-white/50 hover:text-white transition-colors"
+        >
+          Seguir comprando
+        </button>
       </div>
     </div>
   );

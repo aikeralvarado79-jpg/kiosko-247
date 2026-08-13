@@ -184,6 +184,38 @@ describe('fileStore', () => {
     expect(luis.isBenefited).toBe(true);
   });
 
+  it('inhabilita/habilita y elimina usuarios; el upsert conserva disabled', async () => {
+    const store = await freshStore();
+    await store.upsertCustomer({ phone: '41155550001', customerName: 'Maria' });
+
+    const disabled = await store.setCustomerDisabled('41155550001', true);
+    expect(disabled.disabled).toBe(true);
+    expect((await store.getCustomerByPhone('41155550001')).disabled).toBe(true);
+    expect((await store.listCustomers()).find((c) => c.phone === '41155550001').disabled).toBe(true);
+
+    // Un nuevo login/upsert del cliente NO re-habilita la cuenta.
+    await store.upsertCustomer({ phone: '41155550001', customerName: 'Maria G.' });
+    expect((await store.getCustomerByPhone('41155550001')).disabled).toBe(true);
+
+    await store.setCustomerDisabled('41155550001', false);
+    expect((await store.getCustomerByPhone('41155550001')).disabled).toBe(false);
+
+    expect(await store.deleteCustomer('41155550001')).toBe(true);
+    expect(await store.getCustomerByPhone('41155550001')).toBeNull();
+    expect(await store.deleteCustomer('41155550001')).toBe(false);
+  });
+
+  it('revoca y des-revoca teléfonos de admin (cierre remoto de sesión)', async () => {
+    const store = await freshStore();
+    expect(await store.listRevokedAdminPhones()).toEqual([]);
+    await store.revokeAdminPhone('04129862577');
+    expect(await store.listRevokedAdminPhones()).toEqual(['04129862577']);
+    await store.revokeAdminPhone('04129862577'); // idempotente
+    expect(await store.listRevokedAdminPhones()).toHaveLength(1);
+    await store.unrevokeAdminPhone('04129862577');
+    expect(await store.listRevokedAdminPhones()).toEqual([]);
+  });
+
   it('agrega un pedido a crédito a la cuenta al marcarlo entregado', async () => {
     const store = await freshStore();
     await store.upsertCustomer({ phone: '41166667777', customerName: 'Deudor' });

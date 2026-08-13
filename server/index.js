@@ -39,6 +39,24 @@ const ADMIN_PHONES = String(process.env.ADMIN_PHONES || '')
   .concat(config.adminPhones || [])
   .map((p) => String(p).replace(/\D/g, '').slice(-11));
 
+// Teléfonos del super administrador: tiene control total (empleados, sesiones).
+// Si no se define, el primer teléfono de ADMIN_PHONES actúa como super admin.
+const SUPER_ADMIN_PHONES = String(process.env.SUPER_ADMIN_PHONES || '')
+  .split(',')
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .concat(config.superAdminPhones || [])
+  .map((p) => String(p).replace(/\D/g, '').slice(-11));
+
+// Lista completa de admins = fijos (config/env) + empleados añadidos por el
+// super admin desde el panel (se guardan en el store, dinámicamente).
+async function getAllAdminPhones() {
+  const managed = await store.listManagedAdmins();
+  const all = new Set(ADMIN_PHONES);
+  (managed || []).forEach((p) => all.add(String(p).replace(/\D/g, '').slice(-11)));
+  return [...all];
+}
+
 const signToken = (payload) => {
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = crypto.createHmac('sha256', adminPassword).update(data).digest('base64url');
@@ -64,13 +82,49 @@ const decodeToken = (token) => {
   }
 };
 
-const requireAdmin = (req, res, next) => {
+const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
+
+const normalizePhoneDigits = (phone) => String(phone || '').replace(/\D/g, '').slice(-11);
+
+const requireAdmin = async (req, res, next) => {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token || !verifyToken(token)) {
     return res.status(401).json({ error: 'No autorizado' });
   }
+  const payload = decodeToken(token);
+  const phone = (payload && payload.phone) || '';
+  const role = (payload && payload.role) || (SUPER_ADMIN_PHONES.includes(phone) ? 'superadmin' : 'admin');
+  // Revocación global por teléfono: si el super admin cerró la sesión remota,
+  // ningún token de ese teléfono vale aunque su registro de sesión haya sido
+  // borrado o se re-registre (los tokens viejos no renacen).
+  const revokedList = await store.listRevokedAdminPhones();
+  if (Array.isArray(revokedList) && revokedList.includes(phone)) {
+    return res.status(401).json({ error: 'Sesión cerrada por el super administrador' });
+  }
+  const hash = sha256(token);
+  let session = await store.getAdminSession(hash);
+  if (!session) {
+    // Sesión emitida antes de activar el tracking: se registra implícitamente.
+    session = { phone, role, iat: (payload && payload.iat) || Date.now(), lastSeen: Date.now(), revoked: false };
+    await store.saveAdminSession(hash, session);
+  }
+  if (session.revoked) {
+    return res.status(401).json({ error: 'Sesión cerrada por el super administrador' });
+  }
+  session.lastSeen = Date.now();
+  await store.touchAdminSession(hash);
+  req.admin = { phone, role, tokenHash: hash };
   next();
+};
+
+const requireSuperAdmin = async (req, res, next) => {
+  await requireAdmin(req, res, () => {
+    if (req.admin?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Solo el super administrador puede hacer esto' });
+    }
+    next();
+  });
 };
 
 // Envía un error amigable al usuario sin filtrar el detalle técnico
@@ -85,7 +139,8 @@ const fail = (res, err, message) => {
 // valida contra ella; sino (o como fallback) usa la base (env > config).
 async function verifyAdminPassword(phone, input) {
   const key = String(phone || '').replace(/\D/g, '').slice(-11);
-  if (key && ADMIN_PHONES.includes(key)) {
+  const allPhones = await getAllAdminPhones();
+  if (key && allPhones.includes(key)) {
     const cred = await store.getAdminCredential(key);
     if (cred && cred.salt && cred.hash) {
       const hash = crypto.createHash('sha256').update(cred.salt + input).digest('hex');
@@ -127,10 +182,11 @@ async function notifyOrderStatus(order) {
 }
 
 async function notifyAdminsNewOrder(order) {
-  if (!order || ADMIN_PHONES.length === 0) return;
+  const allPhones = await getAllAdminPhones();
+  if (!order || allPhones.length === 0) return;
   try {
     const totalItems = (order.items || []).reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
-    await push.sendToPhone(ADMIN_PHONES, {
+    await push.sendToPhone(allPhones, {
       title: 'Nuevo pedido',
       body: `${order.id} · ${order.customerName} · ${totalItems} artículos · $${Number(order.total).toFixed(2)}`,
       url: '/'
@@ -145,13 +201,18 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { phone, password } = req.body || {};
     const key = String(phone || '').replace(/\D/g, '').slice(-11);
-    if (key && !ADMIN_PHONES.includes(key)) {
+    const allPhones = await getAllAdminPhones();
+    if (key && !allPhones.includes(key)) {
       return res.status(401).json({ error: 'Ese número no tiene acceso al panel' });
     }
     const ok = await verifyAdminPassword(key || phone, password);
     if (!ok) return res.status(401).json({ error: 'Contraseña incorrecta' });
-    const token = signToken({ role: 'admin', phone: key || '', iat: Date.now() });
-    res.json({ token });
+    const role = SUPER_ADMIN_PHONES.includes(key) ? 'superadmin' : 'admin';
+    const token = signToken({ role, phone: key || '', iat: Date.now() });
+    const hash = sha256(token);
+    await store.saveAdminSession(hash, { phone: key, role, iat: Date.now(), lastSeen: Date.now(), revoked: false });
+    await store.unrevokeAdminPhone(key);
+    res.json({ token, role, phone: key });
   } catch (err) {
     fail(res, err, 'No se pudo iniciar sesión. Intenta de nuevo.');
   }
@@ -181,19 +242,197 @@ app.post('/api/auth/recover', async (req, res) => {
   }
 });
 
+// Cerrar sesión del admin: elimina la sesión activa (el token deja de valer).
+app.post('/api/auth/logout', requireAdmin, async (req, res) => {
+  try {
+    if (req.admin?.tokenHash) await store.removeAdminSession(req.admin.tokenHash);
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'No se pudo cerrar la sesión.');
+  }
+});
+
+// Cambiar la propia contraseña del admin desde el panel (verifica la actual).
+app.post('/api/auth/change-password', requireAdmin, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    const phone = req.admin?.phone || '';
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+    }
+    const ok = await verifyAdminPassword(phone, currentPassword || '');
+    if (!ok) return res.status(401).json({ error: 'La contraseña actual no es correcta' });
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.createHash('sha256').update(salt + newPassword).digest('hex');
+    await store.setAdminCredential(phone, { salt, hash });
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'No se pudo cambiar la contraseña. Intenta de nuevo.');
+  }
+});
+
+// Perfil del admin autenticado (nombre, foto, teléfono, rol).
+app.get('/api/admin/profile', requireAdmin, async (req, res) => {
+  try {
+    const phone = req.admin?.phone || '';
+    const profile = await store.getAdminProfile(phone);
+    const customer = phone ? await store.getCustomerByPhone(phone) : null;
+    res.json({
+      phone,
+      role: req.admin.role,
+      name: profile?.name || customer?.customerName || '',
+      photo: profile?.photo || ''
+    });
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar el perfil.');
+  }
+});
+
+// Guarda el perfil visual del admin (nombre y foto).
+app.put('/api/admin/profile', requireAdmin, async (req, res) => {
+  try {
+    const phone = req.admin?.phone || '';
+    const { name, photo } = req.body || {};
+    const entry = {
+      name: String(name || '').slice(0, 80),
+      photo: typeof photo === 'string' && photo.startsWith('data:image/') ? photo : (await store.getAdminProfile(phone))?.photo || ''
+    };
+    await store.setAdminProfile(phone, entry);
+    res.json({ ok: true, profile: { phone, role: req.admin.role, name: entry.name, photo: entry.photo } });
+  } catch (err) {
+    fail(res, err, 'No se pudo guardar el perfil.');
+  }
+});
+
+// ---- Super admin: gestión de empleados (admins añadidos) y sesiones ----
+
+// Lista los empleados admin: fijos + gestionados, con nombre y rol.
+app.get('/api/admin/employees', requireSuperAdmin, async (req, res) => {
+  try {
+    const phones = await getAllAdminPhones();
+    const customers = await store.listCustomers();
+    const employees = phones.map((phone) => {
+      const customer = customers.find((c) => normalizePhoneDigits(c.phone) === phone);
+      return {
+        phone,
+        name: customer?.customerName || '',
+        role: SUPER_ADMIN_PHONES.includes(phone) ? 'superadmin' : 'admin',
+        isSuperAdmin: SUPER_ADMIN_PHONES.includes(phone)
+      };
+    });
+    res.json({ employees });
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar la lista de empleados.');
+  }
+});
+
+// Añade un empleado admin (solo super admin). Queda en el store.
+app.post('/api/admin/employees', requireSuperAdmin, async (req, res) => {
+  try {
+    const { phone, name } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!key || key.length < 7) return res.status(400).json({ error: 'Número de teléfono inválido' });
+    const managed = await store.listManagedAdmins();
+    if (!managed.includes(key)) {
+      await store.setManagedAdmins([...managed, key]);
+    }
+    if (name) {
+      const existing = await store.getCustomerByPhone(key);
+      await store.upsertCustomer({ phone: key, customerName: name, isBenefited: existing?.isBenefited || false });
+    }
+    res.json({ ok: true, employees: await store.listManagedAdmins() });
+  } catch (err) {
+    fail(res, err, 'No se pudo añadir el empleado.');
+  }
+});
+
+// Quita un empleado admin (solo super admin; no puede quitarse a sí mismo).
+app.delete('/api/admin/employees/:phone', requireSuperAdmin, async (req, res) => {
+  try {
+    const key = String(req.params.phone || '').replace(/\D/g, '').slice(-11);
+    if (!key) return res.status(400).json({ error: 'Número de teléfono inválido' });
+    if (SUPER_ADMIN_PHONES.includes(key)) {
+      return res.status(403).json({ error: 'No puedes quitar al super administrador' });
+    }
+    if (ADMIN_PHONES.includes(key)) {
+      return res.status(403).json({ error: 'Este administrador es fijo y no puede quitarse' });
+    }
+    if (req.admin?.phone === key) {
+      return res.status(403).json({ error: 'No puedes quitarte a ti mismo' });
+    }
+    const managed = await store.listManagedAdmins();
+    await store.setManagedAdmins(managed.filter((p) => p !== key));
+    res.json({ ok: true, employees: await store.listManagedAdmins() });
+  } catch (err) {
+    fail(res, err, 'No se pudo quitar el empleado.');
+  }
+});
+
+// Sesiones activas: quién está conectado al panel (solo super admin).
+app.get('/api/admin/sessions', requireSuperAdmin, async (req, res) => {
+  try {
+    const sessions = await store.listAdminSessions();
+    const customers = await store.listCustomers();
+    const enriched = sessions
+      .filter((s) => !s.revoked)
+      .map((s) => {
+        const customer = customers.find((c) => normalizePhoneDigits(c.phone) === s.phone);
+        return {
+          phone: s.phone,
+          name: customer?.customerName || '',
+          role: s.role || 'admin',
+          iat: s.iat,
+          lastSeen: s.lastSeen
+        };
+      });
+    res.json({ sessions: enriched });
+  } catch (err) {
+    fail(res, err, 'No se pudo cargar las sesiones.');
+  }
+});
+
+// Cierre remoto de una sesión admin (solo super admin). El token deja de valer.
+app.post('/api/admin/sessions/revoke', requireSuperAdmin, async (req, res) => {
+  try {
+    const { phone } = req.body || {};
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    if (!key) return res.status(400).json({ error: 'Indica el teléfono del admin a desconectar' });
+    if (req.admin?.phone === key) {
+      return res.status(403).json({ error: 'No puedes cerrar tu propia sesión desde aquí' });
+    }
+    // Veto global por teléfono: cubre cualquier token/sesión del admin, incluso
+    // los emitidos antes del tracking o cuyos registros hayan desaparecido.
+    await store.revokeAdminPhone(key);
+    const sessions = await store.listAdminSessions();
+    for (const s of sessions) {
+      if (s.phone === key && !s.revoked) {
+        await store.saveAdminSession(s.tokenHash, { ...s, revoked: true, lastSeen: Date.now() });
+      }
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'No se pudo cerrar la sesión remota.');
+  }
+});
+
 // Login admin por biometría: verifica huella/Face ID del teléfono admin y emite token.
 // El teléfono es obligatorio para saber qué admin está ingresando (evita la contraseña).
 app.post('/api/auth/admin/biometric-login', async (req, res) => {
   try {
     const { phone, response } = req.body || {};
     const key = String(phone || '').replace(/\D/g, '').slice(-11);
-    if (!ADMIN_PHONES.includes(key)) {
+    const allPhones = await getAllAdminPhones();
+    if (!allPhones.includes(key)) {
       return res.status(403).json({ error: 'Este número no tiene acceso al panel' });
     }
     const v = await webauthn.verifyAuth(key, response, req);
     if (!v.ok) return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
-    const token = signToken({ role: 'admin', phone: key, iat: Date.now() });
-    res.json({ token });
+    const role = SUPER_ADMIN_PHONES.includes(key) ? 'superadmin' : 'admin';
+    const token = signToken({ role, phone: key, iat: Date.now() });
+    const hash = sha256(token);
+    await store.saveAdminSession(hash, { phone: key, role, iat: Date.now(), lastSeen: Date.now(), revoked: false });
+    await store.unrevokeAdminPhone(key);
+    res.json({ token, role, phone: key });
   } catch (err) {
     fail(res, err, 'No se pudo verificar la biometría. Intenta de nuevo.');
   }
@@ -204,13 +443,18 @@ app.post('/api/auth/admin/biometric-register', async (req, res) => {
   try {
     const { phone, response } = req.body || {};
     const key = String(phone || '').replace(/\D/g, '').slice(-11);
-    if (!ADMIN_PHONES.includes(key)) {
+    const allPhones = await getAllAdminPhones();
+    if (!allPhones.includes(key)) {
       return res.status(403).json({ error: 'Este número no tiene acceso al panel' });
     }
     const v = await webauthn.verifyRegistration(phone, response, req);
     if (!v.ok) return res.status(v.status || 400).json({ error: v.error || 'No se pudo guardar la biometría' });
-    const token = signToken({ role: 'admin', phone: key, iat: Date.now() });
-    res.json({ token });
+    const role = SUPER_ADMIN_PHONES.includes(key) ? 'superadmin' : 'admin';
+    const token = signToken({ role, phone: key, iat: Date.now() });
+    const hash = sha256(token);
+    await store.saveAdminSession(hash, { phone: key, role, iat: Date.now(), lastSeen: Date.now(), revoked: false });
+    await store.unrevokeAdminPhone(key);
+    res.json({ token, role, phone: key });
   } catch (err) {
     fail(res, err, 'No se pudo guardar la biometría. Intenta de nuevo.');
   }
@@ -221,7 +465,8 @@ app.get('/api/state', async (req, res) => {
   try {
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId : undefined;
     const [state, rate] = await Promise.all([store.getPublicState(clientId), getBcvRate()]);
-    const payload = { ...state, rate };
+    const allPhones = await getAllAdminPhones();
+    const payload = { ...state, rate, adminPhones: allPhones };
     const body = JSON.stringify(payload);
     const etag = `"${crypto.createHash('sha1').update(body).digest('hex')}"`;
     // Revalidación condicional: si el cliente ya tiene este estado, no
@@ -273,7 +518,30 @@ app.get('/api/products/:id/image', async (req, res) => {
 
 app.post('/api/orders', async (req, res) => {
   try {
-    const result = await store.createOrder(req.body || {});
+    const body = req.body || {};
+    if (body.phone) {
+      const person = await store.getCustomerByPhone(body.phone);
+      if (person && person.disabled) {
+        return res.status(403).json({ error: 'Tu cuenta está inhabilitada por el kiosko. Contacta la tienda.' });
+      }
+    }
+    if (body.credit && body.phone) {
+      const customer = await store.getCustomerByPhone(body.phone);
+      if (!customer || !customer.isBenefited) {
+        return res.status(403).json({ error: 'Solo los clientes beneficiados pueden pedir a cuenta' });
+      }
+      const limit = Number(customer.creditLimit);
+      if (Number.isFinite(limit) && limit > 0) {
+        const used = Math.abs(Number(customer.balance) || 0) + (Number(body.total) || 0);
+        if (used > limit) {
+          return res.status(403).json({
+            error: 'Superaste el tope de fiado establecido por el kiosko',
+            creditLimit: limit
+          });
+        }
+      }
+    }
+    const result = await store.createOrder(body);
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
     notifyAdminsNewOrder(result.order).catch(() => {});
@@ -477,9 +745,10 @@ app.post('/api/payments', async (req, res) => {
     });
     if (!payment) return res.status(400).json({ error: 'No se pudo registrar el abono' });
     res.json({ payment });
-    if (ADMIN_PHONES.length > 0) {
+    const allPhones = await getAllAdminPhones();
+    if (allPhones.length > 0) {
       push
-        .sendToPhone(ADMIN_PHONES, {
+        .sendToPhone(allPhones, {
           title: 'Nuevo abono por aprobar',
           body: `${payment.id} · ${payment.customerName} · Bs ${payment.amountBs.toFixed(2)} (≈ $${payment.amountUsd.toFixed(2)})`,
           url: '/'
@@ -611,7 +880,8 @@ app.post('/api/push/broadcast', requireAdmin, async (req, res) => {
   try {
     const { title, body } = req.body || {};
     if (!title || !body) return res.status(400).json({ error: 'Faltan título o mensaje' });
-    const sent = await push.sendToAll({ title, body, url: '/' }, ADMIN_PHONES);
+    const allPhones = await getAllAdminPhones();
+    const sent = await push.sendToAll({ title, body, url: '/' }, allPhones);
     res.json({ ok: true, sent });
   } catch (err) {
     fail(res, err, 'No se pudo enviar la promoción.');
@@ -802,6 +1072,16 @@ app.post('/api/orders/:id/payment/credit', async (req, res) => {
     if (!customer || !customer.isBenefited) {
       return res.status(403).json({ error: 'Solo los clientes beneficiados pueden pedir a cuenta' });
     }
+    const limit = Number(customer.creditLimit);
+    if (Number.isFinite(limit) && limit > 0) {
+      const used = Math.abs(Number(customer.balance) || 0) + (Number(order.total) || 0);
+      if (used > limit) {
+        return res.status(403).json({
+          error: 'Superaste el tope de fiado establecido por el kiosko',
+          creditLimit: limit
+        });
+      }
+    }
     const result = await store.convertToCredit(req.params.id);
     if (result.error) return res.status(400).json({ error: result.error });
     res.json(result);
@@ -813,8 +1093,9 @@ app.post('/api/orders/:id/payment/credit', async (req, res) => {
         url: '/'
       }).catch(() => {});
     }
-    if (ADMIN_PHONES.length) {
-      push.sendToPhone(ADMIN_PHONES, {
+    const allPhonesCredit = await getAllAdminPhones();
+    if (allPhonesCredit.length) {
+      push.sendToPhone(allPhonesCredit, {
         title: `Pedido ${updated?.id || req.params.id} a cuenta`,
         body: `${order.customerName || 'Cliente'} convirtió su pago a cuenta (beneficiado).`,
         url: '/'
@@ -866,12 +1147,15 @@ app.post('/api/orders/:id/messages', async (req, res) => {
         body: text,
         url: '/'
       }).catch(() => {});
-    } else if (ADMIN_PHONES.length) {
-      push.sendToPhone(ADMIN_PHONES, {
-        title: `Mensaje del cliente · ${auth.order.id}`,
-        body: text,
-        url: '/'
-      }).catch(() => {});
+    } else {
+      const allPhonesChat = await getAllAdminPhones();
+      if (allPhonesChat.length) {
+        push.sendToPhone(allPhonesChat, {
+          title: `Mensaje del cliente · ${auth.order.id}`,
+          body: text,
+          url: '/'
+        }).catch(() => {});
+      }
     }
   } catch (err) {
     fail(res, err, 'No se pudo enviar el mensaje.');
@@ -980,6 +1264,41 @@ app.put('/api/customers/:phone/benefited', requireAdmin, async (req, res) => {
     res.json(customer);
   } catch (err) {
     fail(res, err, 'No se pudo actualizar el beneficio.');
+  }
+});
+
+// Parametriza el tope de fiado (crédito) de un cliente beneficiado. Un valor
+// vacío o 0 deja el fiado sin tope (sin límite).
+app.put('/api/customers/:phone/credit-limit', requireAdmin, async (req, res) => {
+  try {
+    const customer = await store.setCustomerCreditLimit(req.params.phone, req.body?.creditLimit);
+    if (!customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+    res.json(customer);
+  } catch (err) {
+    fail(res, err, 'No se pudo actualizar el tope de fiado.');
+  }
+});
+
+// Inhabilita o habilita la cuenta de un cliente (solo super admin). Un usuario
+// inhabilitado no puede pasar del login ni hacer pedidos.
+app.put('/api/customers/:phone/disabled', requireSuperAdmin, async (req, res) => {
+  try {
+    const customer = await store.setCustomerDisabled(req.params.phone, Boolean(req.body?.disabled));
+    if (!customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+    res.json(customer);
+  } catch (err) {
+    fail(res, err, 'No se pudo actualizar el estado del usuario.');
+  }
+});
+
+// Elimina por completo el perfil de un cliente (solo super admin).
+app.delete('/api/customers/:phone', requireSuperAdmin, async (req, res) => {
+  try {
+    const removed = await store.deleteCustomer(req.params.phone);
+    if (!removed) return res.status(404).json({ error: 'Cliente no encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'No se pudo eliminar el usuario.');
   }
 });
 

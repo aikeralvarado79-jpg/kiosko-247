@@ -5,6 +5,78 @@ import { api, getToken, setToken, clearToken } from './api.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+// ---------------------------------------------------------------------------
+// Mecanismo compartido de overlay: bloquea el scroll del body mientras hay una
+// capa abierta, cierra la capa superior con el botón "atrás" de Android
+// (history.popstate) y con la tecla ESC. Soporta capas apiladas (carrito →
+// checkout → detalle, etc.) manteniendo una entrada de historial por capa.
+// ---------------------------------------------------------------------------
+let overlayLayers = new Set();
+let overlayCount = 0;
+let scrollLocks = 0;
+let programmaticBack = false;
+let lastCloseViaBack = false;
+
+const closeTopOverlay = () => {
+  const top = [...overlayLayers].pop();
+  if (top) top();
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', () => {
+    if (programmaticBack) {
+      programmaticBack = false;
+      return;
+    }
+    lastCloseViaBack = true;
+    closeTopOverlay();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeTopOverlay();
+  });
+}
+
+const lockBodyScroll = () => {
+  scrollLocks += 1;
+  document.body.style.overflow = 'hidden';
+  document.body.style.overscrollBehaviorY = 'none';
+};
+
+const unlockBodyScroll = () => {
+  scrollLocks = Math.max(0, scrollLocks - 1);
+  if (scrollLocks === 0) {
+    document.body.style.overflow = '';
+    document.body.style.overscrollBehaviorY = '';
+  }
+};
+
+const useOverlay = (active, onClose) => {
+  const cbRef = useRef(onClose);
+  cbRef.current = onClose;
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const handler = () => cbRef.current();
+    overlayLayers.add(handler);
+    overlayCount += 1;
+    window.history.pushState({ __kioskoOverlay: overlayCount }, '');
+    lockBodyScroll();
+    return () => {
+      overlayLayers.delete(handler);
+      unlockBodyScroll();
+      if (overlayCount <= 0) return;
+      overlayCount -= 1;
+      const closedViaBack = lastCloseViaBack;
+      lastCloseViaBack = false;
+      const state = window.history.state;
+      if (!closedViaBack && state && state.__kioskoOverlay) {
+        programmaticBack = true;
+        window.history.back();
+      }
+    };
+  }, [active]);
+};
+
 // SVG Icons Helper Components for full visual depth without external dependencies
 const Icon = ({ name, className = "w-5 h-5", ...props }) => {
   const icons = {
@@ -22,15 +94,19 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     alertTriangle: <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3zM12 9v4M12 17h.01" />,
     trendingUp: <path d="m22 7-8.5 8.5-5-5L1 18M16 7h6v6" />,
     user: <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
+    userPlus: <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6" />,
     users: <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
     creditCard: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM2 10h20M6 15h4" />,
     chevronRight: <path d="m9 18 6-6-6-6" />,
     chevronLeft: <path d="m15 18-6-6 6-6" />,
+    chevronUp: <path d="m18 15-6-6-6 6" />,
+    chevronDown: <path d="m6 9 6 6 6-6" />,
     maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
     pin: <path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />,
     clock: <path d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
+    lock: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 8v8M8 8h8" />,
     filter: <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />,
     eye: <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
     dollarSign: <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
@@ -41,7 +117,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     sun: <path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />,
     moon: <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />,
     whatsapp: <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.297-.497.1-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />,
-     arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
+    arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
+    externalLink: <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3" />,
     image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
      xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
      checkCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9 12l2 2 4-4" />,
@@ -73,6 +150,27 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
       barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
       star: <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />,
       wallet: <path d="M21 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2M21 12h-5a2 2 0 0 0 0 4h5a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1z" />,
+      type: <path d="M4 7V4h16v3M9 20h6M12 4v16" />,
+      contrast: <><circle cx="12" cy="12" r="9" /><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor" stroke="none" /></>,
+      scan: <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />,
+      cube: <path d="m21 16-9 5-9-5V8l9-5 9 5v8zM3 8l9 5 9-5M12 13v8" />,
+      chat: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+      headphones: <path d="M3 18v-6a9 9 0 0 1 18 0v6M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />,
+      gift: <path d="M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />,
+      camera: <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" />,
+      navigation: <path d="M3 11 22 2l-9 19-2-8-8-2z" />,
+      download: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />,
+      radio: <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4M16.2 7.8c2.3 2.3 2.3 6.1 0 8.4M19.1 4.9C23 8.8 23 15.2 19.1 19.1M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+      percent: <path d="M19 5 5 19M6.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17.5 20a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />,
+      burger: <path d="M3 11h18a9 9 0 0 0-18 0zM3 15h18M7 11l.01.01M12 11l.01.01M17 11l.01.01M5 19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2M6 15a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2" />,
+      cup: <path d="M8 2v3M16 2v3M3 5h18M4 8h16l-1.5 12a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2L4 8zM7 14a5 5 0 0 0 10 0" />,
+      milk: <path d="M8 2h8v3l-1.5 2V21a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V7L8 5V2zM10 10h4M10 14h4M10 18h4" />,
+      candy: <path d="M7.5 6.5 4 4l2.5-2.5C7.5 2.5 7.5 5 7.5 6.5zM12.5 17.5 16 20l-2.5 2.5c-1-1-1-3.5-1-5zM6 6l12 12c1.5-1.5 1-4 0-6.5-2.5-1-5-1.5-6.5 0L6 6zM16 20 8 12M4 4l8 8" />,
+      spray: <path d="M9 4h6a2 2 0 0 1 2 2v2M9 4a2 2 0 0 0-2 2v2m2-4h6M7 8h10v12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V8zM17 6l3-3M14 6l1-1" />,
+      chips: <path d="M6 21h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM2 9h2M2 15h2M20 9h2M20 15h2M12 7v10" />,
+      pizza: <path d="M12 2 4 7l8 15 8-15-8-5zM12 2v5M4 7h16M9 7l3 6 3-6M12 13v9" />,
+      iceCream: <path d="M12 2a5 5 0 0 1 5 5c0 1.5-.5 2.5-1 3.5h-8C7.5 9.5 7 8.5 7 7a5 5 0 0 1 5-5zM8 11h8l-2.5 10a2 2 0 0 1-3 0L8 11z" />,
+      calculator: <path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM6 6h12M9.5 13.5v6M6.5 16.5h6M17 12.5v5M14.75 15h4.5" />,
     };
 
   return (
@@ -89,6 +187,111 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     >
       {icons[name] || <circle cx="12" cy="12" r="10" />}
     </svg>
+  );
+};
+
+// Logo de marca: carrito de compras de kiosko (venta y entrega) sobre un sello
+// redondeado con gradiente propio (no depende del tema) para que el logo se
+// reconozca igual en modo claro y oscuro.
+const BrandLogo = ({ className = 'w-9 h-9' }) => (
+  <span
+    className={`inline-flex items-center justify-center rounded-2xl bg-gradient-to-tr from-teal-500 via-emerald-500 to-cyan-400 shadow-lg shadow-teal-500/25 ring-2 ring-white/15 shrink-0 select-none ${className}`}
+    aria-hidden="true"
+  >
+    <svg viewBox="0 0 24 24" className="w-[66%] h-[66%] fill-slate-950" xmlns="http://www.w3.org/2000/svg">
+      <path d="M2 3h2.5l2.4 12.2a2 2 0 0 0 1.98 1.62h9.8a2 2 0 0 0 1.97-1.6L22 7H5.6M9 20a1.4 1.4 0 1 0 0-2.8A1.4 1.4 0 0 0 9 20zM17 20a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8z" />
+    </svg>
+  </span>
+);
+
+// Reveal on scroll: aplica reveal-on-scroll al envolver un bloque y activa la
+// clase is-revealed cuando entra al viewport. Respeto total a prefers-reduced-motion.
+const RevealOnScroll = ({ children, className = '', delay = 0, as: Tag = 'div', ...props }) => {
+  const ref = useRef(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    if (
+      typeof matchMedia !== 'undefined' &&
+      matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      setVisible(true);
+      return undefined;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            io.disconnect();
+          }
+        });
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -36px 0px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <Tag
+      ref={ref}
+      className={`reveal-on-scroll ${visible ? 'is-revealed' : ''} ${className}`.trim()}
+      style={{ '--reveal-delay': `${delay}ms`, ...props.style }}
+      {...props}
+    >
+      {children}
+    </Tag>
+  );
+};
+
+// Precio con count-up: anima el número del valor anterior al nuevo en ~0.5s.
+// Sin animación si el usuario prefiere reducir el movimiento del sistema.
+const useCountUp = (value, duration = 500) => {
+  const [display, setDisplay] = useState(value);
+  const [animKey, setAnimKey] = useState(0);
+
+  useEffect(() => {
+    const prev = display;
+    if (Number(display) === Number(value)) return undefined;
+    let raf = 0;
+    const start = performance.now();
+    const from = Number(prev) || 0;
+    const to = Number(value) || 0;
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(from + (to - from) * eased);
+      if (t < 1) raf = requestAnimationFrame(step);
+      else setAnimKey((k) => k + 1);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, duration]);
+
+  return { display, animKey };
+};
+
+// Precio con count-up listo para usarse junto a los helpers formatUsd/formatBs.
+const PriceCountUp = ({ value, rate, className = '', bsClass = '', donate = false }) => {
+  const { display, animKey } = useCountUp(value);
+  return (
+    <div className={`animate-price-pop ${className}`} key={`pc-${animKey}`}>
+      <span className="block">{formatUsd(display)}</span>
+      {rate?.rate > 0 && (
+        <span className={`block mt-0.5 truncate ${bsClass}`}>
+          {formatBs(usdToBs(display, rate.rate))}
+        </span>
+      )}
+      {donate && (
+        <span className="block text-[9px] text-slate-500 uppercase tracking-wide mt-0.5">
+          precio actualizado
+        </span>
+      )}
+    </div>
   );
 };
 
@@ -113,7 +316,7 @@ const Btn = ({
     'focus-visible:ring-teal-400 focus-visible:ring-offset-slate-900 ' +
     'active:scale-[0.96] active:transition-transform active:duration-75 ' +
     'disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ' +
-    'aria-disabled:opacity-50 aria-disabled:cursor-not-allowed';
+    'aria-disabled:opacity-50 aria-disabled:cursor-not-allowed btn-sink';
 
   const sizes = {
     sm: 'px-3 py-1.5 rounded-xl text-xs gap-1.5',
@@ -188,8 +391,38 @@ const IS_IOS =
   /iPad|iPhone|iPod/.test(typeof navigator !== 'undefined' ? navigator.userAgent : '') ||
   (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+// ¿El dispositivo tiene biometría REAL (huella/Face ID)? platformAuthenticatorIsAvailable()
+// también devuelve true en escritorios con Windows Hello por PIN o passcode de iCloud,
+// donde NO existe Face ID ni sensor de huella. Para no ofrecer "Entrar con biometría"
+// en equipos sin soporte, exigimos además que sea un dispositivo móvil o táctil.
+const hasRealBiometrics = async () => {
+  if (typeof navigator === 'undefined' || !browserSupportsWebAuthn()) return false;
+  let platformOk = false;
+  try {
+    platformOk = await platformAuthenticatorIsAvailable();
+  } catch {
+    platformOk = false;
+  }
+  if (!platformOk) return false;
+  return (
+    navigator.maxTouchPoints > 0 ||
+    'ontouchstart' in window ||
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '')
+  );
+};
+
 const formatTimestamp = (date = new Date()) =>
   date.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+// Tiempo relativo en español ("hace 3 min", "hace 2 h"), para sesiones activas.
+const formatRelative = (ts) => {
+  if (!ts) return 'ahora';
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 1000));
+  if (seconds < 60) return 'hace segundos';
+  if (seconds < 3600) return `hace ${Math.floor(seconds / 60)} min`;
+  if (seconds < 86400) return `hace ${Math.floor(seconds / 3600)} h`;
+  return `hace ${Math.floor(seconds / 86400)} d`;
+};
 
 const formatSize = (product) => {
   if (!product || product.sizeValue === undefined || product.sizeValue === null || product.sizeValue === '') return '';
@@ -383,7 +616,7 @@ function MiniCalendar({ value, onChange, onClose }) {
   const isSelected = (date) => value && date && toYMD(date) === value;
   const isToday = (date) => date && toYMD(date) === toYMD(today);
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-64 animate-fade-in">
+    <div className="glass-strong bg-slate-900 border border-slate-700 rounded-2xl p-4 w-64 animate-fade-in">
       <div className="flex items-center justify-between mb-3">
         <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth()-1, 1))} className="p-1 text-slate-400 hover:text-white"><Icon name="minus" className="w-4 h-4" /></button>
         <span className="font-semibold text-white text-sm">{monthNames[month.getMonth()]} {month.getFullYear()}</span>
@@ -508,6 +741,32 @@ const SEM_TONES = {
   rose: 'bg-rose-500/15 text-rose-300 border-rose-500/40'
 };
 
+// Identidad visual por categoría: cada categoría tiene su color (chip sólido y
+// oscuro para legibilidad sobre cualquier imagen), su tono sólido (estado
+// activo en los filtros) y su icono. El fallback genérico cubre categorías
+// nuevas sin necesidad de editar el código.
+const CATEGORY_IDENTITY = {
+  comida: { chip: 'bg-amber-500 text-slate-950 border-amber-400', solid: 'bg-amber-400 text-slate-950', accent: 'text-amber-400', icon: 'burger' },
+  confitería: { chip: 'bg-fuchsia-500 text-white border-fuchsia-400', solid: 'bg-fuchsia-400 text-slate-950', accent: 'text-fuchsia-400', icon: 'candy' },
+  golosinas: { chip: 'bg-fuchsia-500 text-white border-fuchsia-400', solid: 'bg-fuchsia-400 text-slate-950', accent: 'text-fuchsia-400', icon: 'candy' },
+  snacks: { chip: 'bg-orange-500 text-slate-950 border-orange-400', solid: 'bg-orange-400 text-slate-950', accent: 'text-orange-400', icon: 'chips' },
+  bebidas: { chip: 'bg-sky-500 text-slate-950 border-sky-400', solid: 'bg-sky-400 text-slate-950', accent: 'text-sky-400', icon: 'cup' },
+  lácteos: { chip: 'bg-indigo-500 text-white border-indigo-400', solid: 'bg-indigo-400 text-slate-950', accent: 'text-indigo-400', icon: 'milk' },
+  lacteos: { chip: 'bg-indigo-500 text-white border-indigo-400', solid: 'bg-indigo-400 text-slate-950', accent: 'text-indigo-400', icon: 'milk' },
+  higiene: { chip: 'bg-emerald-500 text-slate-950 border-emerald-400', solid: 'bg-emerald-400 text-slate-950', accent: 'text-emerald-400', icon: 'spray' },
+  farmacia: { chip: 'bg-emerald-500 text-slate-950 border-emerald-400', solid: 'bg-emerald-400 text-slate-950', accent: 'text-emerald-400', icon: 'spray' },
+  limpieza: { chip: 'bg-cyan-500 text-slate-950 border-cyan-400', solid: 'bg-cyan-400 text-slate-950', accent: 'text-cyan-400', icon: 'spray' },
+  panadería: { chip: 'bg-yellow-500 text-slate-950 border-yellow-400', solid: 'bg-yellow-400 text-slate-950', accent: 'text-yellow-400', icon: 'burger' },
+  helados: { chip: 'bg-violet-500 text-white border-violet-400', solid: 'bg-violet-400 text-slate-950', accent: 'text-violet-400', icon: 'iceCream' },
+  postres: { chip: 'bg-pink-500 text-white border-pink-400', solid: 'bg-pink-400 text-slate-950', accent: 'text-pink-400', icon: 'iceCream' },
+  pizza: { chip: 'bg-rose-500 text-white border-rose-400', solid: 'bg-rose-400 text-slate-950', accent: 'text-rose-400', icon: 'pizza' }
+};
+const CATEGORY_FALLBACK = { chip: 'bg-teal-600 text-white border-teal-500', solid: 'bg-teal-400 text-slate-950', accent: 'text-teal-400', icon: 'layers' };
+const categoryIdentity = (name) => {
+  const key = String(name || '').toLowerCase().trim();
+  return CATEGORY_IDENTITY[key] || CATEGORY_FALLBACK;
+};
+
 const playChime = (() => {
   let ctx = null;
   const note = (freq, start, dur, type = 'sine', gain = 0.12) => {
@@ -559,6 +818,28 @@ const loadFavorites = () => {
   }
 };
 
+// ------------------------------------------------------------------
+//  Alertas de Precio de Preferidos: registra el último precio conocido
+//  de cada favorito y detecta cambios para notificar al cliente.
+// ------------------------------------------------------------------
+const PRICE_WATCH_KEY = 'kiosko_price_watch';
+
+const loadPriceWatch = () => {
+  try {
+    const raw = localStorage.getItem(PRICE_WATCH_KEY);
+    const p = raw ? JSON.parse(raw) : {};
+    return p && typeof p === 'object' ? p : {};
+  } catch {
+    return {};
+  }
+};
+
+const savePriceWatch = (watch) => {
+  try {
+    localStorage.setItem(PRICE_WATCH_KEY, JSON.stringify(watch));
+  } catch {}
+};
+
 const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'en_camino', 'entregado'];
 
 const STATUS_LABELS = {
@@ -599,51 +880,81 @@ function OrderStepsTimeline({ order, className = '' }) {
   const isDelivery = order.type === 'delivery';
   const steps = isDelivery
     ? [
-        { key: 'pendiente', label: 'Pendiente', dot: 'bg-amber-400', text: 'text-amber-300' },
-        { key: 'en_preparacion', label: 'En prep.', dot: 'bg-cyan-400', text: 'text-cyan-300' },
-        { key: 'listo', label: 'Listo', dot: 'bg-emerald-400', text: 'text-emerald-300' },
-        { key: 'en_camino', label: 'En camino', dot: 'bg-sky-400', text: 'text-sky-300' },
-        { key: 'entregado', label: 'Entregado', dot: 'bg-violet-400', text: 'text-violet-300' }
+        { key: 'pendiente', label: 'Pendiente', color: '#fbbf24' },
+        { key: 'en_preparacion', label: 'En prep.', color: '#22d3ee' },
+        { key: 'listo', label: 'Listo', color: '#34d399' },
+        { key: 'en_camino', label: 'En camino', color: '#38bdf8' },
+        { key: 'entregado', label: 'Entregado', color: '#a78bfa' }
       ]
     : [
-        { key: 'pendiente', label: 'Pendiente', dot: 'bg-amber-400', text: 'text-amber-300' },
-        { key: 'en_preparacion', label: 'En prep.', dot: 'bg-cyan-400', text: 'text-cyan-300' },
-        { key: 'listo', label: 'Listo', dot: 'bg-emerald-400', text: 'text-emerald-300' },
-        { key: 'entregado', label: 'Retirado', dot: 'bg-indigo-400', text: 'text-indigo-300' }
+        { key: 'pendiente', label: 'Pendiente', color: '#fbbf24' },
+        { key: 'en_preparacion', label: 'En prep.', color: '#22d3ee' },
+        { key: 'listo', label: 'Listo', color: '#34d399' },
+        { key: 'entregado', label: 'Retirado', color: '#818cf8' }
       ];
   const curIdx = steps.findIndex((s) => s.key === order.status);
+  const n = steps.length;
+  const W = 100; // viewBox width units
+  const H = 26; // viewBox height units
+  const cy = H / 2;
+  const padX = 10; // dot radius + margin
+  const dotR = 4.5;
+  const space = (W - dotR * 2 - padX * 2) / (n - 1); // spacing between dot centers
+
+  // Posición x de cada paso y del punto activo (viaja proporcionalmente).
+  const xAt = (i) => padX + dotR + space * i;
+  const progressX = curIdx < 0 ? 0 : Math.min(xAt(curIdx), W - padX);
+
   return (
-    <div className={`flex items-stretch ${className}`}>
-      {steps.map((s, i) => {
-        const done = i < curIdx;
-        const active = i === curIdx;
-        return (
-          <Fragment key={s.key}>
-            <div className="flex flex-col items-center" style={{ width: `${100 / steps.length}%` }}>
-              <div className="relative w-full flex items-center justify-center">
-                {i > 0 && (
-                  <div className={`absolute right-1/2 top-1/2 -translate-y-1/2 h-0.5 w-full ${i <= curIdx ? 'bg-slate-500' : 'bg-slate-800'}`} />
-                )}
-                {i < steps.length - 1 && (
-                  <div className={`absolute left-1/2 top-1/2 -translate-y-1/2 h-0.5 w-full ${i < curIdx ? 'bg-slate-500' : 'bg-slate-800'}`} />
-                )}
-                <div
-                  className={`relative z-10 w-3 h-3 rounded-full border-2 transition-all ${
-                    active
-                      ? `${s.dot} border-white scale-125 shadow-lg`
-                      : done
-                        ? `${s.dot} border-transparent`
-                        : 'border-slate-600 bg-slate-800'
-                  }`}
-                />
-              </div>
-              <span className={`mt-1 text-[8px] font-bold whitespace-nowrap ${active ? s.text : done ? 'text-slate-400' : 'text-slate-600'}`}>
+    <div className={`w-full ${className}`} role="img" aria-label={`Avance del pedido: ${STATUS_LABELS[order.status] || order.status}`}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto block" preserveAspectRatio="none" aria-hidden="true">
+        {/* Trenzado de fondo */}
+        <line x1={xAt(0)} y1={cy} x2={xAt(n - 1)} y2={cy} stroke="currentColor" strokeOpacity="0.12" strokeWidth="2.5" strokeLinecap="round" className="order-timeline-track" />
+        {/* Progreso animado con stroke-dashoffset */}
+        <line
+          x1={xAt(0)}
+          y1={cy}
+          x2={xAt(n - 1)}
+          y2={cy}
+          stroke="url(#tsg)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          className="order-timeline-progress"
+          strokeDasharray={100}
+          strokeDashoffset={100 - progressX * (100 / (xAt(n - 1) - xAt(0)))}
+        />
+        <defs>
+          <linearGradient id="tsg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#2dd4bf" />
+            <stop offset="100%" stopColor="#34d399" />
+          </linearGradient>
+        </defs>
+      </svg>
+      {/* Puntos + etiquetas superpuestos */}
+      <div className="flex items-start" style={{ marginTop: -H * 0.45 }}>
+        {steps.map((s, i) => {
+          const done = i < curIdx;
+          const active = i === curIdx;
+          const isNext = i === curIdx + 1;
+          return (
+            <div key={s.key} style={{ width: `${100 / n}%` }} className="flex flex-col items-center">
+              <span
+                className={`rounded-full transition-all ${
+                  active
+                    ? `order-timeline-dot--active w-3.5 h-3.5 border-2 border-white shadow-lg`
+                    : done
+                      ? 'order-timeline-dot--done w-3 h-3'
+                      : `w-3 h-3 border-2 ${isNext ? 'bg-slate-700' : 'bg-slate-800 border-slate-600'}`
+                }`}
+                style={{ backgroundColor: done || active ? s.color : undefined }}
+              />
+              <span className={`mt-1 text-[8px] font-bold whitespace-nowrap leading-none ${active ? 'text-teal-300' : done ? 'text-slate-400' : 'text-slate-600'}`}>
                 {s.label}
               </span>
             </div>
-          </Fragment>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -719,15 +1030,38 @@ export default function App() {
   // App views: 'customer' | 'admin'
   const [activeView, setActiveView] = useState('customer');
 
-  // Theme: 'dark' | 'light'
+  // Theme: 'dark' | 'light' | 'neon' — se aplica como data-theme en <html>.
   const [theme, setTheme] = useState(() => localStorage.getItem('kiosko_theme') || 'dark');
 
   useEffect(() => {
-    document.documentElement.classList.toggle('light', theme === 'light');
+    document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('kiosko_theme', theme);
   }, [theme]);
 
-  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+  const THEME_ORDER = ['dark', 'light', 'neon'];
+  const toggleTheme = () =>
+    setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length]);
+
+  // Aviso de versión nueva (dispara main.jsx cuando el SW nuevo toma control,
+  // sin recargar) y estado de conexión para el badge "Modo sin conexión".
+  const [updateReady, setUpdateReady] = useState(false);
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+
+  useEffect(() => {
+    const onUpdate = () => setUpdateReady(true);
+    const onOnline = () => setIsOffline(false);
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener('kiosko:sw-update', onUpdate);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('kiosko:sw-update', onUpdate);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  // Auxiliar para persistir el contraste/letra grande del cliente (fallback a tema simple)
 
   // Alto del header sticky: se pasa a la tienda para anclar el buscador justo debajo
   const headerRef = useRef(null);
@@ -751,6 +1085,10 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
+  // Calculadora flotante de conversión $ ⇄ Bs: botón fijo que abre un panel no modal.
+  const [calcOpen, setCalcOpen] = useState(false);
+  const toggleCalc = () => setCalcOpen((v) => !v);
+
   // true cuando ya se cargaron datos en esta sesión. Se usa para que el ETag de
   // /api/state solo se envíe en recargas posteriores (polling), nunca en la carga
   // inicial: si llega 304 sin datos en memoria la app quedaría vacía.
@@ -759,6 +1097,48 @@ export default function App() {
   // Admin session state
   const [isAdminAuthed, setIsAdminAuthed] = useState(() => Boolean(getToken()));
   const [refreshingDb, setRefreshingDb] = useState(false);
+
+  // Admin actualmente autenticado: teléfono + rol ('admin' | 'superadmin').
+  // Se persiste en sessionStorage para sobrevivir recargas sin pedir login otra vez.
+  const [adminInfo, setAdminInfo] = useState(() => {
+    try {
+      const role = sessionStorage.getItem('kiosko_admin_role');
+      const phone = sessionStorage.getItem('kiosko_admin_phone');
+      return role && phone ? { role, phone } : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Perfil visual del admin autenticado (nombre, foto, teléfono).
+  const [adminProfile, setAdminProfile] = useState(null);
+
+  // Teléfonos que tienen acceso al panel: fijos (config) + empleados añadidos
+  // por el super admin. Viene en /api/state para que el cliente sepa quién
+  // puede entrar al panel sin depender de una lista hardcodeada.
+  const [adminPhones, setAdminPhones] = useState(ADMIN_PHONES);
+
+  // Carga el perfil del admin (nombre, foto) desde el servidor.
+  const loadAdminProfile = useCallback(async (phone) => {
+    const res = await api.getAdminProfile();
+    if (res.ok && res.data) {
+      setAdminProfile(res.data);
+      if (phone) {
+        try { sessionStorage.setItem('kiosko_admin_phone', phone); } catch {}
+      }
+    }
+  }, []);
+
+  // Guarda el admin logueado en sessionStorage y recarga su perfil.
+  const persistAdminInfo = (role, phone) => {
+    const info = { role, phone };
+    setAdminInfo(info);
+    try {
+      sessionStorage.setItem('kiosko_admin_role', role);
+      sessionStorage.setItem('kiosko_admin_phone', phone);
+    } catch {}
+    loadAdminProfile(phone);
+  };
 
   // Identidad de sesión para reservar stock en el servidor (persistente en la pestaña).
   const [clientId] = useState(() => {
@@ -805,6 +1185,7 @@ export default function App() {
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
+    if (Array.isArray(res.data.adminPhones)) setAdminPhones(res.data.adminPhones);
     hasDataRef.current = true;
     setIsLoading(false);
   }, [clientId, isAdminAuthed]);
@@ -829,6 +1210,25 @@ export default function App() {
       document.removeEventListener('visibilitychange', poll);
     };
   }, [loadState]);
+
+  // Al montar con sesión admin activa (recarga), recupera rol/teléfono y perfil.
+  useEffect(() => {
+    if (!isAdminAuthed) return;
+    if (!adminInfo) {
+      const res = api.getAdminProfile();
+      res.then((r) => {
+        if (r.ok && r.data?.phone) {
+          setAdminInfo({ role: r.data.role || 'admin', phone: r.data.phone });
+          try {
+            sessionStorage.setItem('kiosko_admin_role', r.data.role || 'admin');
+            sessionStorage.setItem('kiosko_admin_phone', r.data.phone);
+          } catch {}
+        }
+      }).catch(() => {});
+    }
+    if (!adminProfile) loadAdminProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdminAuthed]);
 
   // Mantiene sincronizadas las vistas del cliente (detalle / rastreo) con la
   // última copia del pedido que trae el polling, para que un cambio de pago o
@@ -865,6 +1265,39 @@ export default function App() {
       localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
     } catch {}
   }, [favorites]);
+
+  // Alertas de precio de preferidos: vigila el precio de los favoritos y
+  // notifica al cliente cuando cambia (sube o baja) entre cargas de estado.
+  const [priceWatch, setPriceWatch] = useState(loadPriceWatch);
+
+  useEffect(() => {
+    if (products.length === 0 || favorites.length === 0) return undefined;
+    const next = { ...priceWatch };
+    let changed = false;
+    favorites.forEach((id) => {
+      const p = products.find((x) => x.id === id);
+      if (!p) return;
+      const prev = next[id];
+      const cur = Number(p.price);
+      if (prev == null) {
+        next[id] = cur;
+        changed = true;
+      } else if (prev !== cur) {
+        if (cur < prev) {
+          addToast(`${p.name} bajó a ${formatUsd(cur)}`, 'success');
+        } else if (cur > prev) {
+          addToast(`${p.name} subió a ${formatUsd(cur)}`, 'warning');
+        }
+        next[id] = cur;
+        changed = true;
+      }
+    });
+    if (changed) {
+      setPriceWatch(next);
+      savePriceWatch(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, favorites]);
 
   const toggleFavorite = (id) => {
     setFavorites((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
@@ -906,17 +1339,34 @@ export default function App() {
   // Tour tutorial para usuarios nuevos (se muestra tras la bienvenida).
   const [showTour, setShowTour] = useState(false);
 
+  // Onboarding visual del kiosko: secuencia de bienvenida antes de entrar a la
+  // tienda. Se muestra una única vez (localStorage) o hasta que el usuario
+  // pulse "Entrar". Complementa el tour (NewUserTour) para usuarios nuevos.
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try { return localStorage.getItem('kiosko_onboarding_done') !== '1'; }
+    catch { return true; }
+  });
+
+  const finishOnboarding = () => {
+    try { localStorage.setItem('kiosko_onboarding_done', '1'); } catch {}
+    setShowOnboarding(false);
+  };
+
+  // Éxito de pedido cinematográfico: overlay de celebración tras confirmar.
+  const [successOrder, setSuccessOrder] = useState(null);
+
   // Banner de notificaciones: ocultable, se recuerda la decisión del usuario.
   const [pushBannerHidden, setPushBannerHidden] = useState(() => {
     try { return localStorage.getItem('kiosko_push_banner_hidden') === '1'; } catch { return false; }
   });
 
-  // True si el cliente identificado figura en la lista de administradores por teléfono
+  // True si el cliente identificado figura en la lista de administradores por
+  // teléfono (fijos de config + empleados añadidos por el super admin).
   const isCurrentAdmin = useMemo(() => {
     if (!savedCustomer?.phoneNumber) return false;
     const key = `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber}`.replace(/\D/g, '').slice(-11);
-    return ADMIN_PHONES.includes(key);
-  }, [savedCustomer]);
+    return adminPhones.includes(key);
+  }, [savedCustomer, adminPhones]);
 
   // Identificación obligatoria: se abre al entrar como cliente sin datos guardados.
   // identityMode: 'login' (formulario) | 'confirm' (solo biometría para volver/salir).
@@ -1036,6 +1486,9 @@ export default function App() {
   const [voiceItems, setVoiceItems] = useState([]);
   const [voiceLoading, setVoiceLoading] = useState(false);
 
+  // Asistente IA "Don Aiker"
+  const [isAikerOpen, setIsAikerOpen] = useState(false);
+
   // Carrito compartido (dueño e invitado)
   const [myShare, setMyShare] = useState(() => {
     try {
@@ -1064,6 +1517,56 @@ export default function App() {
   const [orderDetailOrder, setOrderDetailOrder] = useState(null);
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState(null);
   const [deleteOrderTarget, setDeleteOrderTarget] = useState(null);
+
+  // Modo vitrina "kiosko siempre abierto": tras ~60s de inactividad en la home
+  // se activa un carrusel de atracción. Cualquier tap reanuda la navegación.
+  const [showcaseActive, setShowcaseActive] = useState(false);
+  const lastActivityRef = useRef(Date.now());
+  const showcaseTimerRef = useRef(null);
+
+  // Reinicia el contador de inactividad con cualquier gesto del usuario.
+  const bumpActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    if (showcaseActive) setShowcaseActive(false);
+  }, [showcaseActive]);
+
+  useEffect(() => {
+    const events = ['pointerdown', 'touchstart', 'keydown', 'scroll', 'wheel'];
+    events.forEach((ev) => window.addEventListener(ev, bumpActivity, { passive: true }));
+    return () => events.forEach((ev) => window.removeEventListener(ev, bumpActivity));
+  }, [bumpActivity]);
+
+  const overlayBlockingShowcase = Boolean(
+    isIdentityOpen ||
+    welcome ||
+    showTour ||
+    showOnboarding ||
+    isCartOpen ||
+    isCheckoutOpen ||
+    productDetailModal ||
+    isOrdersDrawerOpen ||
+    isDebtDrawerOpen ||
+    isMyKioskoOpen ||
+    isAikerOpen ||
+    liveTrackingOrder ||
+    orderDetailOrder ||
+    showcaseActive
+  );
+
+  useEffect(() => {
+    const tick = () => {
+      if (
+        activeView === 'customer' &&
+        !isLoading &&
+        !overlayBlockingShowcase &&
+        Date.now() - lastActivityRef.current > 60000
+      ) {
+        setShowcaseActive(true);
+      }
+    };
+    showcaseTimerRef.current = setInterval(tick, 5000);
+    return () => clearInterval(showcaseTimerRef.current);
+  }, [activeView, isLoading, overlayBlockingShowcase]);
 
   // Clientes registrados (para Beneficiados / Lista Negra del panel admin)
   const [allCustomers, setAllCustomers] = useState([]);
@@ -1162,10 +1665,30 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
 
   const TOAST_META = {
-    success: { icon: 'checkCircle', color: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', text: 'text-emerald-300', bar: 'bg-emerald-400' },
-    error: { icon: 'xCircle', color: 'from-rose-500/20 to-rose-500/5', border: 'border-rose-500/40', text: 'text-rose-300', bar: 'bg-rose-400' },
-    warning: { icon: 'alertTriangle', color: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', text: 'text-amber-300', bar: 'bg-amber-400' },
-    info: { icon: 'info', color: 'from-sky-500/20 to-sky-500/5', border: 'border-sky-500/40', text: 'text-sky-300', bar: 'bg-sky-400' }
+    success: {
+      icon: 'checkCircle',
+      chip: 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/40 shadow-lg shadow-emerald-500/20',
+      progress: 'from-emerald-400 to-teal-300',
+      glow: 'rgba(16,185,129,0.25)'
+    },
+    error: {
+      icon: 'xCircle',
+      chip: 'bg-rose-500/15 text-rose-300 border border-rose-400/40 shadow-lg shadow-rose-500/20',
+      progress: 'from-rose-400 to-orange-300',
+      glow: 'rgba(244,63,94,0.25)'
+    },
+    warning: {
+      icon: 'alertTriangle',
+      chip: 'bg-amber-500/15 text-amber-300 border border-amber-400/40 shadow-lg shadow-amber-500/20',
+      progress: 'from-amber-400 to-orange-300',
+      glow: 'rgba(245,158,11,0.25)'
+    },
+    info: {
+      icon: 'info',
+      chip: 'bg-sky-500/15 text-sky-300 border border-sky-400/40 shadow-lg shadow-sky-500/20',
+      progress: 'from-sky-400 to-cyan-300',
+      glow: 'rgba(14,165,233,0.25)'
+    }
   };
 
   const addToast = (message, type = 'success') => {
@@ -1193,8 +1716,7 @@ export default function App() {
       
       pendingRef.current.add(key);
       setLoading(true);
-      addToast(message, 'info');
-      
+
       try {
         const result = await action(...args);
         addToast('Listo', 'success');
@@ -1225,6 +1747,7 @@ export default function App() {
       // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
       // desde el cliente reconocido, la lista de clientes o el perfil en el server.
       const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      persistAdminInfo(res.data.role || 'admin', res.data.phone || phoneKey);
       const adminName = await resolveAdminName(phoneKey);
       setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
       addToast('Sesión iniciada en el panel admin');
@@ -1247,6 +1770,7 @@ export default function App() {
       setToken(res.data.token);
       setIsAdminAuthed(true);
       const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      persistAdminInfo(res.data.role || 'admin', res.data.phone || phoneKey);
       const adminName = await resolveAdminName(phoneKey);
       setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
       addToast('Sesión iniciada en el panel admin');
@@ -1268,6 +1792,7 @@ export default function App() {
       setToken(res.data.token);
       setIsAdminAuthed(true);
       const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      persistAdminInfo(res.data.role || 'admin', res.data.phone || phoneKey);
       const adminName = await resolveAdminName(phoneKey);
       setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
       addToast('Sesión iniciada en el panel admin');
@@ -1299,12 +1824,43 @@ export default function App() {
   };
 
   const handleAdminLogout = () => {
+    // Cierra la sesión activa en el servidor (el token deja de valer).
+    api.adminLogout().catch(() => {});
     clearToken();
+    try {
+      sessionStorage.removeItem('kiosko_admin_role');
+      sessionStorage.removeItem('kiosko_admin_phone');
+    } catch {}
+    setAdminInfo(null);
+    setAdminProfile(null);
     setIsAdminAuthed(false);
     setActiveView('customer');
     setAdminTab('inventory');
     setCustomerTab('store');
     addToast('Sesión cerrada', 'info');
+  };
+
+  // Cambio de contraseña del admin desde el panel (verifica la actual).
+  const handleChangeAdminPassword = async (currentPassword, newPassword) => {
+    const res = await api.changeAdminPassword(currentPassword, newPassword);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo cambiar la contraseña', 'error');
+      return false;
+    }
+    addToast('Contraseña actualizada');
+    return true;
+  };
+
+  // Guarda el perfil visual del admin (nombre y foto) y refresca la copia local.
+  const handleSaveAdminProfile = async (data) => {
+    const res = await api.updateAdminProfile(data);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar el perfil', 'error');
+      return false;
+    }
+    setAdminProfile(res.data.profile || adminProfile);
+    addToast('Perfil guardado');
+    return true;
   };
 
   // Cambio de tab del admin desde la barra inferior: carga clientes/cobros
@@ -1324,6 +1880,16 @@ export default function App() {
     }
     await loadCustomers();
     addToast(benefited ? 'Cliente añadido a beneficiados' : 'Beneficio revocado');
+  };
+
+  const handleSetCreditLimit = async (phone, creditLimit) => {
+    const res = await api.setCustomerCreditLimit(phone, creditLimit);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el tope de fiado', 'error');
+      return;
+    }
+    await loadCustomers();
+    addToast(creditLimit > 0 ? `Tope de fiado fijado en ${formatUsd(creditLimit)}` : 'Fiado sin tope (sin límite)');
   };
 
   const handleAddToBlacklist = async (phone, name, amount) => {
@@ -1482,10 +2048,14 @@ export default function App() {
       const matchesCategory =
         selectedCategory === 'Todas' ||
         (selectedCategory === 'Favoritos' ? favorites.includes(p.id) : p.category === selectedCategory);
+      const q = searchQuery.toLowerCase();
       const matchesSearch =
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.code.toLowerCase().includes(searchQuery.toLowerCase());
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        (p.brand || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        p.code.toLowerCase().includes(q);
       return matchesCategory && matchesSearch;
     });
 
@@ -1594,6 +2164,9 @@ export default function App() {
 
       haptic([20, 40, 20]);
       playChime();
+      // Overlay de éxito cinematográfico: celebra la compra en pantalla completa
+      // con el número de pedido, ETA y acciones (seguir pedido / compartir).
+      setSuccessOrder(res.data.order || orderPayload);
       addToast('¡Pedido realizado con éxito!', 'success');
     } catch (err) {
       console.error('[kiosko] Error al crear pedido:', err);
@@ -1601,6 +2174,29 @@ export default function App() {
     } finally {
       setIsPlacingOrder(false);
     }
+  };
+
+  // Desde el overlay de éxito: cierra la celebración y abre el detalle del
+  // pedido recién creado (mismo modal que "Mis Pedidos" → ver pedido).
+  const handleSuccessTrack = () => {
+    const order = successOrder;
+    setSuccessOrder(null);
+    if (!order) return;
+    setCurrentOrderTracking(order.id || order);
+    setOrderDetailOrder(order);
+  };
+
+  // Compartir el pedido confirmado por WhatsApp (mensaje formateado con artículos).
+  const handleSuccessShareWhatsApp = () => {
+    const order = successOrder;
+    if (!order) return;
+    const items = (Array.isArray(order.items) ? order.items : []).map(
+      (it) => `• ${it.quantity}× ${it.name}` + (Number(it.price) > 0 ? ` — ${formatUsd(it.price * it.quantity)}` : '')
+    ).join('\n');
+    const text = encodeURIComponent(
+      `🍫 ¡Pedido realizado en el Kiosko 247!\n\nN° ${order.id} — Total ${formatUsd(order.total)}\n\n${items}\n\nGracias por tu compra.`
+    );
+    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
   };
 
   // Rellena el carrito con los artículos del último pedido del cliente reconocido
@@ -1720,6 +2316,7 @@ export default function App() {
 
   // ---- Compra rápida por voz ----
   const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceDialog, setVoiceDialog] = useState([]); // turnos conversacionales { kio, u }
   const voiceRecRef = useRef(null);
 
   const stopVoiceRec = () => {
@@ -1730,37 +2327,88 @@ export default function App() {
     setVoiceListening(false);
   };
 
-  const openVoiceOrder = () => {
-    if (!speechRecognitionAvailable()) {
-      addToast('Tu navegador no soporta reconocimiento de voz', 'error');
-      return;
-    }
-    setVoiceItems([]);
-    setIsVoiceOpen(true);
-    setVoiceListening(true);
-
+  // Inicia una escucha de voz; en el resultado decide si sigue conversando,
+  // acumula los artículos reconocidos, o pasa a confirmación cuando el usuario
+  // indica que ya terminó ("listo", "eso es todo", "completar pedido", etc).
+  const startVoiceListen = () => {
+    if (!speechRecognitionAvailable()) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const rec = new SR();
     voiceRecRef.current = rec;
     rec.lang = 'es-ES';
     rec.interimResults = false;
     rec.maxAlternatives = 1;
+    setVoiceListening(true);
 
     rec.onresult = (event) => {
       const transcript = event.results[0]?.[0]?.transcript || '';
       const parsed = parseVoiceOrder(transcript, products);
-      setVoiceItems(parsed);
-      setVoiceListening(false);
-      if (parsed.length === 0) {
-        speakText('No reconocí productos. Inténtalo de nuevo.');
+      const t = transcript.toLowerCase().trim();
+
+      // Frases de cierre de la conversación.
+      const done =
+        /\b(listo|terminar|terminé|termine|completar|completá|finalizar|confirmar|pagar|agregar al carrito|eso es todo|nada más|nada mas|no más|no mas|ya está|ya esta|listo ya)\b/.test(t) ||
+        (parsed.length === 0 && /\b(no|nada|eso es todo|solo eso|nada más|nada mas)\b/.test(t));
+
+      if (done) {
+        stopVoiceRec();
+        setVoiceDialog((d) => [...d, { u: transcript }]);
+        if (voiceItems.length > 0) {
+          speakText('Listo, pasamos tu pedido. Confirma y te lo agregamos al carrito.');
+        } else {
+          speakText('No reconocí productos. Tocá el micrófono o el botón para volver a intentar.');
+          setVoiceDialog((d) => [{ kio: '¿Qué productos quieres? Por ejemplo: "2 leche y 1 pan".' }, ...d]);
+        }
+        return;
       }
+
+      if (parsed.length === 0) {
+        setVoiceDialog((d) => [...d, { u: transcript }, { kio: 'No reconocí productos claros. Inténtalo de nuevo, por ejemplo: "2 leche y 1 pan".' }]);
+        speakText('No reconocí productos. Inténtalo de nuevo.');
+        setTimeout(() => {
+          if (voiceRecRef.current === rec) startVoiceListen();
+        }, 600);
+        return;
+      }
+
+      // Acumula los artículos (sumando cantidades del mismo producto).
+      setVoiceItems((prev) => {
+        const next = [...prev];
+        parsed.forEach((it) => {
+          const found = next.find((x) => x.product.id === it.product.id);
+          if (found) found.qty += it.qty;
+          else next.push(it);
+        });
+        return next;
+      });
+      setVoiceDialog((d) => [...d, { u: transcript }, { kio: `Listo, tengo ${parsed.length} artículo${parsed.length !== 1 ? 's' : ''}. ¿Algo más?` }]);
+      speakText(`Listo. ¿Algo más?`);
+      setTimeout(() => {
+        if (voiceRecRef.current === rec) startVoiceListen();
+      }, 600);
     };
     rec.onerror = () => {
+      voiceRecRef.current = null;
       setVoiceListening(false);
       addToast('No se pudo capturar la voz. Acepta el permiso del micrófono.', 'warning');
     };
-    rec.onend = () => setVoiceListening(false);
+    rec.onend = () => {
+      if (voiceRecRef.current === rec) voiceRecRef.current = null;
+      setVoiceListening(false);
+    };
     rec.start();
+  };
+
+  const openVoiceOrder = () => {
+    if (!speechRecognitionAvailable()) {
+      addToast('Tu navegador no soporta reconocimiento de voz', 'error');
+      return;
+    }
+    stopVoiceRec();
+    setVoiceItems([]);
+    setVoiceDialog([{ kio: 'Hola. Decime qué querés: por ejemplo "2 leche y 1 pan".' }]);
+    setIsVoiceOpen(true);
+    startVoiceListen();
   };
 
   const handleVoiceConfirm = async () => {
@@ -1778,6 +2426,7 @@ export default function App() {
       safe.forEach((it) => addToCart(it.product, it.qty));
       setIsVoiceOpen(false);
       setVoiceItems([]);
+      setVoiceDialog([]);
       speakText(`Listo, agregado ${safe.length} artículos a tu carrito`);
       haptic([20, 40, 20]);
       setIsCartOpen(true);
@@ -2080,7 +2729,7 @@ export default function App() {
       } else if (status === 'en_camino') {
         addToast(`¡Tu pedido ${trackedOrder.id} está en camino!`, 'warning');
       } else if (status === 'entregado') {
-        addToast(`¡Tu pedido ${trackedOrder.id} fue entregado! 🎉`, 'success');
+        addToast(`¡Tu pedido ${trackedOrder.id} fue entregado!`, 'success');
       } else if (status === 'cancelado') {
         addToast(`Tu pedido ${trackedOrder.id} fue cancelado.`, 'error');
       }
@@ -2101,7 +2750,7 @@ export default function App() {
         if (o.status === 'en_camino') {
           addToast(`¡Tu pedido ${o.id} está en camino!`, 'warning');
         } else if (o.status === 'entregado') {
-          addToast(`¡Tu pedido ${o.id} fue entregado! 🎉`, 'success');
+          addToast(`¡Tu pedido ${o.id} fue entregado!`, 'success');
         } else if (o.status === 'cancelado') {
           addToast(`Tu pedido ${o.id} fue cancelado.`, 'error');
         }
@@ -2113,42 +2762,79 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
       {/* Toast Notification Container */}
-      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2.5 pointer-events-none">
+      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
         {toasts.map((toast) => {
           const meta = TOAST_META[toast.type] || TOAST_META.success;
           return (
             <div
               key={toast.id}
               role="status"
-              className={`pointer-events-auto relative overflow-hidden p-3.5 pr-4 rounded-2xl shadow-2xl backdrop-blur-xl bg-gradient-to-r ${meta.color} border ${meta.border} flex items-center gap-3 text-sm font-medium transition-all duration-300 animate-toast-in`}
+              className="pointer-events-auto relative overflow-hidden rounded-xl bg-slate-950/90 backdrop-blur-xl border border-white/10 animate-toast-in"
+              style={{ boxShadow: `0 8px 32px -8px ${meta.glow}, 0 4px 16px rgba(0,0,0,0.5)` }}
             >
-              <span className={`shrink-0 p-2 rounded-xl bg-slate-950/40 border border-white/10 ${meta.text}`}>
-                <Icon name={meta.icon} className="w-5 h-5" />
-              </span>
-              <p className="flex-1 text-slate-100 leading-snug pr-2">{toast.message}</p>
-              <button
-                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
-                aria-label="Cerrar notificación"
-                className={`shrink-0 p-1.5 rounded-lg bg-slate-950/40 border border-white/10 ${meta.text} hover:bg-slate-950/70 transition-colors`}
-              >
-                <Icon name="x" className="w-4 h-4" />
-              </button>
-              <span className={`absolute bottom-0 left-0 h-0.5 ${meta.bar} animate-toast-progress`} />
+              <span className={`absolute top-0 left-0 h-full w-[3px] bg-gradient-to-b ${meta.progress} opacity-80`} />
+              <div className="flex items-center gap-2.5 py-2.5 pl-3.5 pr-2.5">
+                <span className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${meta.chip}`}>
+                  <Icon name={meta.icon} className="w-4 h-4" />
+                </span>
+                <p className="flex-1 text-[13px] text-slate-100 leading-snug min-w-0">{toast.message}</p>
+                <button
+                  onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                  aria-label="Cerrar notificación"
+                  className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <Icon name="x" className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <span className={`absolute bottom-0 left-0 h-[2px] bg-gradient-to-r ${meta.progress} animate-toast-progress`} />
             </div>
           );
         })}
       </div>
 
+      {/* Aviso de versión nueva: no recarga sola para no perder el estado */}
+      {updateReady && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[62] w-[92vw] max-w-sm rounded-2xl bg-slate-900 border border-teal-500/40 shadow-2xl shadow-teal-500/10 p-3.5 animate-fade-in">
+          <p className="text-xs font-bold text-white">Hay una versión nueva disponible</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Pulsa actualizar para recibir los últimos cambios. Si estás en un pedido, termínalo primero.
+          </p>
+          <div className="flex gap-2 mt-2.5">
+            <button
+              onClick={() => {
+                if (typeof window.__kioskoActivateUpdate === 'function') window.__kioskoActivateUpdate();
+                else window.location.reload();
+              }}
+              className="flex-1 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all"
+            >
+              Actualizar
+            </button>
+            <button
+              onClick={() => setUpdateReady(false)}
+              className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 transition-all"
+            >
+              Continuar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Badge de modo sin conexión: los datos se conservan en el buffer local */}
+      {isOffline && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[58] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/95 border border-slate-700 text-[11px] font-semibold text-slate-300 shadow-lg backdrop-blur-md animate-fade-in">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          Modo sin conexión · datos locales
+        </div>
+      )}
+
       {/* Modern Glassmorphic Top Navbar */}
-      <header ref={headerRef} className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
+      <header ref={headerRef} className="sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-teal-500/20 ring-2 ring-white/10 shrink-0 animate-glow-pulse">
-              <Icon name="store" className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
+            <BrandLogo className="w-10 h-10 sm:w-11 sm:h-11" />
             <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate">
+              <h1 className="font-display text-lg sm:text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate">
                 Empresas Alvarados
               </h1>
               <span className="hidden sm:flex text-xs text-teal-400/90 font-medium items-center gap-1.5">
@@ -2191,14 +2877,14 @@ export default function App() {
             )}
           </div>
 
-          {/* Theme toggle */}
+          {/* Theme toggle: dark → light → neon */}
           <button
             onClick={toggleTheme}
-            className="p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 shrink-0"
-            aria-label="Cambiar tema claro/oscuro"
-            title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+            className="p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 shrink-0 btn-sink"
+            aria-label="Cambiar tema"
+            title={theme === 'dark' ? 'Cambiar a modo claro' : theme === 'light' ? 'Cambiar a modo neón' : 'Cambiar a modo oscuro'}
           >
-            <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="w-5 h-5" />
+            <Icon name={theme === 'dark' ? 'sun' : theme === 'light' ? 'moon' : 'zap'} className="w-5 h-5" />
           </button>
 
           {/* Customer identity chip */}
@@ -2223,14 +2909,14 @@ export default function App() {
             <button
               data-cart-target
               onClick={() => setIsCartOpen(true)}
-              className="relative p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 group shrink-0"
+              className="relative p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 group shrink-0 btn-sink"
               aria-label="Abrir carrito"
             >
-              <Icon name="shoppingBag" className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110" />
+              <Icon key={`bag-${cartCount}`} name="shoppingBag" className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110 animate-cart-bounce" />
               {cartCount > 0 && (
                 <span
-                  key={cartCount}
-                  className="absolute -top-1.5 -right-1.5 bg-teal-400 text-slate-950 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg animate-badge-pop ring-2 ring-slate-900"
+                  key={`badge-${cartCount}`}
+                  className="absolute -top-1.5 -right-1.5 bg-teal-400 text-slate-950 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg animate-badge-spring ring-2 ring-slate-900"
                 >
                   {cartCount}
                 </span>
@@ -2240,8 +2926,9 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tasa BCV del día + Calculadora */}
+      {/* Tasa BCV del día + Calculadora flotante (botón fijo; en móvil se abre desde la barra inferior) */}
       <RateBanner rate={rate} />
+      {activeView === 'customer' && <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} />}
 
       {/* Main Container */}
       <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
@@ -2273,9 +2960,6 @@ export default function App() {
             customerOrders={customerOrders}
             orders={orders}
             customerProfile={customerProfile}
-            onViewOrderDetail={(order) => setOrderDetailOrder(order)}
-            onRequestCancelOrder={(order) => setCancelConfirmOrder(order)}
-            onTrackLiveOrder={(order) => setLiveTrackingOrder(order)}
             storeLocation={storeLocation}
             favorites={favorites}
             onToggleFavorite={toggleFavorite}
@@ -2317,6 +3001,7 @@ export default function App() {
             allCustomers={allCustomers}
             onLoadCustomers={loadCustomers}
             onToggleBenefited={handleToggleBenefited}
+            onSetCreditLimit={handleSetCreditLimit}
             onAddToBlacklist={handleAddToBlacklist}
             onAddBlacklistDebt={handleAddBlacklistDebt}
             collections={collections}
@@ -2331,7 +3016,13 @@ export default function App() {
             addToast={addToast}
             storeLocation={storeLocation}
             onSaveStoreLocation={handleSaveStoreLocation}
-            adminPhone={savedCustomer ? `${savedCustomer.phoneCode || ''} ${savedCustomer.phoneNumber || ''}`.trim() : ''}
+            adminPhone={adminInfo?.phone || `${savedCustomer ? `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber || ''}`.replace(/\D/g, '').slice(-11) : ''}`}
+            adminRole={adminInfo?.role || 'admin'}
+            adminProfile={adminProfile}
+            onChangePassword={handleChangeAdminPassword}
+            onSaveAdminProfile={handleSaveAdminProfile}
+            theme={theme}
+            onSetTheme={setTheme}
             headerHeight={headerHeight}
           />
         ) : (
@@ -2420,6 +3111,7 @@ export default function App() {
             items={voiceItems}
             loading={voiceLoading}
             listening={voiceListening}
+            dialog={voiceDialog}
             onConfirm={handleVoiceConfirm}
             onClose={() => setIsVoiceOpen(false)}
             onRetry={openVoiceOrder}
@@ -2470,6 +3162,7 @@ export default function App() {
           onSubmit={handlePlaceOrder}
           savedCustomer={savedCustomer}
           knownCustomers={knownCustomers}
+          allCustomers={allCustomers}
           onSaveCustomer={setSavedCustomer}
           customerProfile={customerProfile}
           onSaveAddress={handleSaveCustomerAddress}
@@ -2506,6 +3199,7 @@ export default function App() {
           isBenefited={Boolean(customerProfile?.isBenefited)}
           onOrderUpdated={handleOrderUpdated}
           addToast={addToast}
+          headerHeight={headerHeight}
           onClose={() => setOrderDetailOrder(null)}
           onTrackLiveOrder={(order) => {
             setOrderDetailOrder(null);
@@ -2527,6 +3221,7 @@ export default function App() {
           addToast={addToast}
           onClose={() => setLiveTrackingOrder(null)}
           storeLocation={storeLocation}
+          headerHeight={headerHeight}
         />
       )}
 
@@ -2565,6 +3260,7 @@ export default function App() {
       {isIdentityOpen && activeView === 'customer' && (
         <IdentityModal
           knownCustomers={knownCustomers}
+          allCustomers={allCustomers}
           savedCustomer={savedCustomer}
           mode={identityMode}
           confirmKind={identityConfirmKind}
@@ -2576,6 +3272,7 @@ export default function App() {
             setIsIdentityOpen(false);
             setActiveView('admin');
           }}
+          adminPhones={adminPhones}
         />
       )}
 
@@ -2613,6 +3310,8 @@ export default function App() {
         cartCount={cartCount}
         hasCustomer={Boolean(savedCustomer)}
         isAdmin={isCurrentAdmin || isAdminAuthed}
+        calcOpen={calcOpen}
+        onToggleCalc={toggleCalc}
         onOpenCart={() => {
           setActiveView('customer');
           setIsCartOpen(true);
@@ -2641,7 +3340,11 @@ export default function App() {
         style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
         className="mt-auto border-t border-slate-800/80 bg-slate-950/60 pt-5 pb-20 sm:py-6 px-4 text-center text-[11px] sm:text-xs text-slate-500"
       >
-        <p>© 2026 Empresas Alvarados • Gestión inteligente de inventario y pedidos al instante.</p>
+        <div className="inline-flex items-center gap-1.5 mb-1.5">
+          <BrandLogo className="w-5 h-5 !rounded-lg" />
+          <span className="font-display font-bold text-slate-300 text-xs tracking-wide">Kiosko 24/7 · Empresas Alvarados</span>
+        </div>
+        <p>Abierto todo el día, todos los días. Pedí, pagá y retirá sin filas o recibí en tu puerta.</p>
       </footer>
 
       {/* Banner de notificaciones push (solo cliente identificado y permiso sin decidir) */}
@@ -2660,6 +3363,36 @@ export default function App() {
         />
       )}
 
+      {/* Onboarding visual del kiosko: se muestra una vez antes de entrar */}
+      {showOnboarding && !isLoading && activeView === 'customer' && (
+        <KioskoOnboarding onFinish={finishOnboarding} />
+      )}
+
+      {/* Modo vitrina: carrusel de atracción tras inactividad */}
+      {showcaseActive && activeView === 'customer' && (
+        <ShowcaseMode
+          products={products}
+          promos={promos}
+          rate={rate}
+          onResume={() => setShowcaseActive(false)}
+          onOrderNow={() => setShowcaseActive(false)}
+          onOpenProduct={(p) => {
+            setShowcaseActive(false);
+            setProductDetailModal(p);
+          }}
+        />
+      )}
+
+      {/* Éxito de pedido cinematográfico */}
+      {successOrder && (
+        <OrderSuccessOverlay
+          order={successOrder}
+          onClose={() => setSuccessOrder(null)}
+          onTrack={handleSuccessTrack}
+          onShare={handleSuccessShareWhatsApp}
+        />
+      )}
+
       {/* Bienvenida a pantalla completa tras el inicio de sesión */}
       {welcome && (
         <WelcomeOverlay
@@ -2674,6 +3407,54 @@ export default function App() {
 
       {/* Tour tutorial para usuarios nuevos */}
       {showTour && <NewUserTour onClose={() => setShowTour(false)} />}
+
+      {/* Botón flotante del Asistente IA "Don Aiker" */}
+      {activeView === 'customer' && (
+        <button
+          onClick={() => setIsAikerOpen(true)}
+          className={`fixed right-3 sm:right-5 z-[55] p-3 sm:p-3.5 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white shadow-2xl shadow-indigo-500/40 border border-white/20 hover:scale-110 hover:shadow-indigo-500/60 active:scale-95 transition-all animate-glow-pulse ${
+            cartCount > 0
+              ? 'bottom-[10.5rem] sm:bottom-20'
+              : 'bottom-[4.8rem] sm:bottom-5'
+          }`}
+          aria-label="Abrir Asistente IA Don Aiker"
+          title="Asistente IA Don Aiker"
+        >
+          <Icon name="chat" className="w-5 h-5 sm:w-6 sm:h-6" />
+        </button>
+      )}
+
+      {/* Asistente IA "Don Aiker" */}
+      {isAikerOpen && (
+        <AikerAssistant
+          customer={customerProfile}
+          customerOrders={customerOrders}
+          products={products}
+          promos={promos}
+          rate={rate}
+          savedCustomer={savedCustomer}
+          headerHeight={headerHeight}
+          onClose={() => setIsAikerOpen(false)}
+          onOpenDebt={() => {
+            setDebtDrawerMode('deuda');
+            setIsAikerOpen(false);
+            setIsDebtDrawerOpen(true);
+          }}
+          onOpenOrders={() => {
+            setIsAikerOpen(false);
+            setIsOrdersDrawerOpen(true);
+          }}
+          onTrackOrder={(order) => {
+            setIsAikerOpen(false);
+            setLiveTrackingOrder(order);
+          }}
+          onAddToCart={(product) => addToCart(product, 1)}
+          onRepeatLastOrder={() => {
+            setIsAikerOpen(false);
+            handleRepeatLastOrder();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2703,7 +3484,7 @@ function WelcomeOverlay({ name, tag = 'Bienvenido', onDone }) {
         <p className="text-[11px] sm:text-xs font-bold uppercase tracking-[0.35em] text-teal-200/80 mb-3 animate-welcome-pop">
           {tag}
         </p>
-        <h2 className="text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
+        <h2 className="font-display text-4xl sm:text-6xl font-black text-white leading-tight mb-4 sm:mb-6 animate-welcome-name break-words max-w-[90vw]">
           {name}
         </h2>
         <p className="text-xs sm:text-sm text-teal-100/70 animate-welcome-pop">
@@ -2830,6 +3611,332 @@ function NewUserTour({ onClose }) {  const steps = [
   );
 }
 
+// Onboarding visual: secuencia de bienvenida antes de entrar a la tienda.
+// Tarjetas deslizables con identidad del negocio, qué vendemos, cómo pedir en
+// 3 pasos y métodos de pago. Se muestra una vez (localStorage).
+function KioskoOnboarding({ onFinish }) {
+  const steps = [
+    {
+      icon: 'store',
+      title: 'Kiosko 24/7',
+      subtitle: 'Empresas Alvarados',
+      desc: 'Tu kiosko de confianza, siempre abierto. Antojos, bebidas frías, snacks y todo lo que se te antoje.',
+      gradient: 'from-teal-600 via-cyan-700 to-slate-950',
+      chip: 'bg-teal-500/20 text-teal-300 border-teal-500/30'
+    },
+    {
+      icon: 'bag',
+      title: '¿Qué vendemos?',
+      subtitle: 'Anímate a explorar',
+      desc: 'Refrescos, papas, chichas, dulces, pan, huevos, queso… miles de productos con precios en $ y Bs.',
+      gradient: 'from-orange-600 via-amber-700 to-slate-950',
+      chip: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+    },
+    {
+      icon: 'shoppingBag',
+      title: 'Pedir es fácil',
+      subtitle: 'En 3 pasos',
+      desc: '① Elige tus productos · ② Confirma tu pedido · ③ Pagas a la entrega o retiras en tienda sin filas.',
+      gradient: 'from-indigo-600 via-violet-700 to-slate-950',
+      chip: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+    },
+    {
+      icon: 'creditCard',
+      title: 'Paga como quieras',
+      subtitle: 'Efectivo o digital',
+      desc: 'Pago móvil, transferencia, cartera de saldo e incluso a crédito si eres beneficiado. A domicilio o retiro.',
+      gradient: 'from-emerald-600 via-teal-700 to-slate-950',
+      chip: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+    }
+  ];
+  const [idx, setIdx] = useState(0);
+  const touchX = useRef(null);
+
+  const go = (next) => {
+    if (next === idx) return;
+    setIdx(next);
+  };
+
+  const s = steps[Math.min(Math.max(idx, 0), steps.length - 1)];
+
+  return (
+    <div
+      className="fixed inset-0 z-[95] flex flex-col overflow-hidden select-none touch-manipulation"
+      role="dialog"
+      aria-label="Bienvenida al Kiosko 24/7"
+      onTouchStart={(e) => (touchX.current = e.touches?.[0]?.clientX ?? null)}
+      onTouchEnd={(e) => {
+        if (touchX.current == null) return;
+        const delta = (e.changedTouches?.[0]?.clientX ?? 0) - touchX.current;
+        if (Math.abs(delta) > 45) go(Math.max(0, Math.min(steps.length - 1, idx + (delta < 0 ? 1 : -1))));
+        touchX.current = null;
+      }}
+    >
+      {/* Fondo con gradiente animado */}
+      <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient}`} />
+      <div className="absolute inset-0 onboard-bg-drift opacity-40 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.25),transparent_45%),radial-gradient(circle_at_80%_70%,rgba(45,212,191,0.3),transparent_45%)]" />
+
+      {/* Contenido de la pantalla actual */}
+      <div key={idx} className="relative flex-1 flex flex-col items-center justify-center px-8 text-center onboard-slide-in">
+        <div className="onboard-float w-24 h-24 sm:w-32 sm:h-32 mb-8 rounded-[2rem] bg-white/10 border border-white/20 backdrop-blur-md flex items-center justify-center shadow-2xl shadow-black/30">
+          <Icon name={s.icon} className="w-12 h-12 sm:w-16 sm:h-16 text-white" />
+        </div>
+        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider border ${s.chip} backdrop-blur-md mb-4 onboard-pop`}>
+          <Icon name="sparkles" className="w-3 h-3" /> {s.subtitle}
+        </span>
+        <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight mb-3 onboard-pop" style={{ animationDelay: '0.08s' }}>
+          {s.title}
+        </h2>
+        <p className="text-sm sm:text-base text-white/80 max-w-md leading-relaxed onboard-pop" style={{ animationDelay: '0.16s' }}>
+          {s.desc}
+        </p>
+      </div>
+
+      {/* Indicadores de punto + navegación */}
+      <div className="relative pb-10 px-6 flex flex-col items-center gap-5">
+        <div className="flex items-center gap-2">
+          {steps.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => go(i)}
+              aria-label={`Paso ${i + 1}`}
+              className={`h-2 rounded-full transition-all ${i === idx ? 'w-7 bg-white' : 'w-2 bg-white/30'}`}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-3 w-full max-w-sm">
+          {idx > 0 && (
+            <button
+              onClick={() => go(idx - 1)}
+              className="px-4 py-3 rounded-2xl bg-white/10 border border-white/15 text-white text-sm font-semibold backdrop-blur-md active:scale-95 transition-all"
+            >
+              Atrás
+            </button>
+          )}
+          <button
+            onClick={() => (idx < steps.length - 1 ? go(idx + 1) : onFinish())}
+            className={`flex-1 py-3 rounded-2xl bg-white text-slate-950 text-sm font-black shadow-xl shadow-black/20 active:scale-95 transition-all ${idx < steps.length - 1 ? '' : 'showcase-pulse-cta'}`}
+          >
+            {idx < steps.length - 1 ? 'Siguiente' : 'Entrar al kiosko'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modo vitrina "kiosko siempre abierto": carrusel de atracción que se enciende
+// tras inactividad. Rota promos y productos destacados; cualquier tap reanuda.
+function ShowcaseMode({ products, promos, rate, onResume, onOrderNow, onOpenProduct }) {
+  const [stepIdx, setStepIdx] = useState(0);
+
+  // Carrusel de items: promos con imagen + productos con stock.
+  const items = useMemo(() => {
+    const list = [];
+    const activePromos = Array.isArray(promos) ? promos.filter((p) => p.active && p.image) : [];
+    activePromos.forEach((p) => list.push({ kind: 'promo', label: p.title, sub: p.subtitle, image: p.image }));
+    const withImage = (Array.isArray(products) ? products : []).filter((p) => p.image && Math.max(0, (Number(p.stock) || 0) - (Number(p.reserved) || 0)) > 0);
+    withImage.slice(0, 8).forEach((p) => list.push({ kind: 'product', product: p, label: p.name, sub: p.brand || p.category, image: p.image }));
+    if (!list.length && Array.isArray(products) && products.length) {
+      products.slice(0, 6).forEach((p) => list.push({ kind: 'product', product: p, label: p.name, sub: p.category, image: p.image }));
+    }
+    return list;
+  }, [promos, products]);
+
+  useEffect(() => {
+    if (items.length <= 1) return undefined;
+    const id = setInterval(() => setStepIdx((i) => (i + 1) % items.length), 4000);
+    return () => clearInterval(id);
+  }, [items.length]);
+
+  // Silencio: cualquier tap reanuda la navegación normal.
+  const resume = () => {
+    haptic(8);
+    onResume?.();
+  };
+
+  const item = items.length ? items[stepIdx % items.length] : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] bg-slate-950 overflow-hidden select-none"
+      role="region"
+      aria-label="Modo vitrina del kiosko"
+      onClick={resume}
+    >
+      {/* Fondo de la tarjeta actual en rotación */}
+      {item?.image && (
+        <div
+          key={stepIdx}
+          className="absolute inset-0 bg-cover bg-center showcase-kenburns"
+          style={{ backgroundImage: `url(${item.image.replace('w=500', 'w=1400')})` }}
+        />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/55 to-slate-950/25" />
+
+      <div className="relative z-10 flex flex-col items-center justify-center h-full px-6 text-center">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-200 text-[10px] font-bold uppercase tracking-[0.25em] mb-6">
+          <Icon name="store" className="w-3 h-3" /> Kiosko 24/7 · Abierto
+        </span>
+
+        <div key={`card-${stepIdx}`} className="showcase-fade">
+          {item?.kind === 'promo' ? (
+            <>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 mb-2 block">Oferta especial</span>
+              <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight max-w-xl">{item.label}</h2>
+              {item.sub && <p className="text-white/80 text-sm mt-3 max-w-md">{item.sub}</p>}
+            </>
+          ) : item?.product ? (
+            <>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-teal-300 mb-2 block">
+                {item.product.category} {item.product.brand ? `· ${item.product.brand}` : ''}
+              </span>
+              <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight max-w-xl">{item.product.name}</h2>
+              <p className="text-amber-300 font-black text-2xl sm:text-4xl mt-3">
+                {formatUsd(item.product.price)}
+                {rate?.rate > 0 && (
+                  <span className="text-white/70 text-sm sm:text-base font-semibold block mt-1">
+                    {formatBs(usdToBs(item.product.price, rate.rate))}
+                  </span>
+                )}
+              </p>
+            </>
+          ) : (
+            <span className="text-lg text-white/80">Descubre el kiosko digital de Empresas Alvarados</span>
+          )}
+        </div>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (item?.product) onOpenProduct?.(item.product);
+            else {
+              haptic(12);
+              onOrderNow?.();
+            }
+          }}
+          className="mt-10 showcase-pulse-cta px-8 py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-base font-black shadow-2xl shadow-teal-500/30 active:scale-95 transition-all"
+        >
+          {item?.product ? 'Ver detalle y agregar' : 'Pedir ahora'}
+        </button>
+
+        <p className="mt-6 text-[11px] text-white/50">Toca en cualquier lugar para continuar navegando</p>
+        {items.length > 1 && (
+          <div className="mt-3 flex gap-1.5">
+            {items.map((_, i) => (
+              <span key={i} className={`h-1.5 rounded-full transition-all ${i === stepIdx % items.length ? 'w-5 bg-white' : 'w-1.5 bg-white/25'}`} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Éxito de pedido cinematográfico: celebración full-screen tras confirmar la
+// compra. Confeti, número de pedido gigante, ETA y acciones para seguir o
+// compartir por WhatsApp.
+function OrderSuccessOverlay({ order, onClose, onTrack, onShare }) {
+  const orderNum = order?.id ?? order?.orderId ?? order?.number ?? '';
+  const isDelivery = order?.type === 'delivery';
+  const eta = order?.estimatedMinutes || (isDelivery ? 25 : 10);
+  const items = Array.isArray(order?.items) ? order.items : [];
+
+  // Partículas de confeti con parámetros aleatorios estables por render.
+  const confetti = useMemo(
+    () =>
+      Array.from({ length: 26 }).map((_, i) => ({
+        left: `${(i * 37) % 100}%`,
+        delay: `${(i % 9) * 0.18}s`,
+        dur: `${2.2 + (i % 5) * 0.4}s`,
+        rot: `${360 + (i % 3) * 240}deg`,
+        x: `${(i % 2 === 0 ? 1 : -1) * (24 + (i % 5) * 18)}px`,
+        color: ['#2dd4bf', '#34d399', '#fbbf24', '#f472b6', '#818cf8', '#38bdf8'][i % 6]
+      })),
+    []
+  );
+
+  return (
+    <div className="fixed inset-0 z-[85] overflow-hidden bg-gradient-to-br from-teal-900 via-slate-950 to-emerald-950 animate-fade-in select-none" role="dialog" aria-label="Pedido realizado con éxito">
+      {/* Confeti */}
+      {confetti.map((c, i) => (
+        <span
+          key={i}
+          className="confetti-piece"
+          style={{
+            left: c.left,
+            background: c.color,
+            '--confetti-delay': c.delay,
+            '--confetti-dur': c.dur,
+            '--confetti-rot': c.rot,
+            '--confetti-x': c.x
+          }}
+        />
+      ))}
+
+      <div className="relative h-full flex flex-col items-center justify-center px-6 text-center">
+        {/* Check dentro de anillo */}
+        <div className="success-ring w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-white/10 border-2 border-white/30 backdrop-blur-md flex items-center justify-center shadow-2xl shadow-teal-500/40 mb-8">
+          <svg className="success-check w-12 h-12 sm:w-14 sm:h-14 text-teal-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        </div>
+
+        <span className="text-[11px] font-bold uppercase tracking-[0.3em] text-teal-200/80 mb-3">Pedido confirmado</span>
+        <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight">¡Gracias por tu compra!</h2>
+
+        <div className="success-order-num mt-8 px-8 py-5 rounded-3xl bg-white/10 border border-white/20 backdrop-blur-md">
+          <span className="block text-[11px] font-bold uppercase tracking-widest text-white/60 mb-1">Tu número de pedido</span>
+          <span className="block font-display text-5xl sm:text-7xl font-black text-white tracking-tight">#{orderNum}</span>
+        </div>
+
+        <p className="mt-6 text-sm text-white/85 flex items-center gap-2">
+          <Icon name="clock" className="w-4 h-4 text-teal-300" />
+          Estimado: ~{eta} min {isDelivery ? 'para tu entrega' : 'para retirar en tienda'}
+        </p>
+
+        {items.length > 0 && (
+          <div className="mt-4 w-full max-w-sm max-h-28 overflow-y-auto space-y-1 text-left scrollbar-none">
+            {items.slice(0, 6).map((it, i) => (
+              <div key={i} className="flex items-center justify-between gap-3 text-xs text-white/80">
+                <span className="truncate">{it.quantity}× {it.name}</span>
+                {Number(it.price) > 0 && <span className="text-white/60 shrink-0">{formatUsd(it.price * it.quantity)}</span>}
+              </div>
+            ))}
+            {items.length > 6 && <p className="text-[11px] text-white/50 text-center pt-1">y {items.length - 6} más…</p>}
+          </div>
+        )}
+
+        <div className="mt-8 flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+          <button
+            onClick={onTrack}
+            className="flex-1 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-sm font-black shadow-xl shadow-teal-500/30 active:scale-95 transition-all showcase-pulse-cta"
+          >
+            <span className="flex items-center justify-center gap-2">
+              <Icon name="navigation" className="w-4 h-4" /> {isDelivery ? 'Seguir mi pedido' : 'Ver mi pedido'}
+            </span>
+          </button>
+          <button
+            onClick={onShare}
+            className="flex-1 px-5 py-3.5 rounded-2xl bg-green-500/20 border border-green-400/40 text-green-300 text-sm font-bold hover:bg-green-500/30 active:scale-95 transition-all"
+          >
+            <span className="flex items-center justify-center gap-2">
+              <Icon name="whatsapp" className="w-4 h-4" /> Compartir
+            </span>
+          </button>
+        </div>
+
+        <button
+          onClick={onClose}
+          className="mt-6 text-xs text-white/50 hover:text-white transition-colors"
+        >
+          Seguir comprando
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LoadingScreen() {
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in" aria-busy="true" aria-label="Cargando la tienda">
@@ -2906,6 +4013,24 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const [bioOptions, setBioOptions] = useState(null);
   const [bioNeedsRegister, setBioNeedsRegister] = useState(false);
   const bioFetchKeyRef = useRef('');
+
+  // NEW: Detectar si el dispositivo soporta WebAuthn (huella/Face ID)
+  // Usamos los mismos checks que en la App principal para consistencia.
+  const [webauthnSupported, setWebauthnSupported] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supported = browserSupportsWebAuthn();
+      let platformOk = false;
+      if (supported) {
+        try { platformOk = await hasRealBiometrics(); } catch { platformOk = false; }
+      }
+      if (!cancelled) setWebauthnSupported(supported && platformOk);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Recovery state
 
   // Recovery state
   const [recoverMode, setRecoverMode] = useState(false);
@@ -3161,7 +4286,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                     onChange={(e) => setRecoverPhone({ ...recoverPhone, number: e.target.value.replace(/\D/g, '').slice(0, 7) })}
                     placeholder="1234567"
                     maxLength={7}
-                    className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                    className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -3190,7 +4315,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                   value={newPassword.a}
                   onChange={(e) => setNewPassword({ ...newPassword, a: e.target.value })}
                   placeholder="Mínimo 6 caracteres"
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
                 />
               </div>
               <div>
@@ -3200,7 +4325,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                   value={newPassword.b}
                   onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
                   placeholder="Repite la contraseña"
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
                 />
               </div>
               {recoverError && <p className="text-xs text-rose-400 mt-2">{recoverError}</p>}
@@ -3254,7 +4379,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                 onChange={(e) => setLoginPhone({ ...loginPhone, number: e.target.value.replace(/\D/g, '').slice(0, 7) })}
                 placeholder="1234567"
                 maxLength={7}
-                className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
+                className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
               />
             </div>
             {error && <p className="text-xs text-rose-400 mt-2">{error}</p>}
@@ -3268,7 +4393,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
+              className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
             />
           </div>
 
@@ -3282,30 +4407,32 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
           </button>
 
           {/* Biometría: debajo de Iniciar sesión, sin separador */}
-          <button
-            type="button"
-            onClick={handleBiometricLogin}
-            disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
-            className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl bg-slate-800/70 border border-cyan-500/30 hover:border-cyan-400/60 hover:bg-slate-700/60 text-slate-200 transition-all disabled:opacity-60"
-          >
-            {bioStatus === 'working' || bioStatus === 'register' ? (
-              <>
-                {IS_IOS ? <Icon name="apple" className="w-5 h-5" /> : <Icon name="fingerprint" className="w-5 h-5" />}
-                <span>{bioStatus === 'working' ? 'Esperando...' : 'Registrando...'}</span>
-              </>
-            ) : IS_IOS ? (
-              <>
-                <Icon name="apple" className="w-5 h-5" />
-                <Icon name="faceId" className="w-5 h-5" />
-                <span className="font-semibold">Entrar con Face ID</span>
-              </>
-            ) : (
-              <>
-                <Icon name="fingerprint" className="w-6 h-6" />
-                <span className="font-semibold">Entrar con huella</span>
-              </>
-            )}
-          </button>
+          {webauthnSupported && (
+            <button
+              type="button"
+              onClick={handleBiometricLogin}
+              disabled={isSubmitting || bioStatus === 'working' || bioStatus === 'register'}
+              className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl bg-slate-800/70 border border-cyan-500/30 hover:border-cyan-400/60 hover:bg-slate-700/60 text-slate-200 transition-all disabled:opacity-60"
+            >
+              {bioStatus === 'working' || bioStatus === 'register' ? (
+                <>
+                  {IS_IOS ? <Icon name="apple" className="w-5 h-5" /> : <Icon name="fingerprint" className="w-5 h-5" />}
+                  <span>{bioStatus === 'working' ? 'Esperando...' : 'Registrando...'}</span>
+                </>
+              ) : IS_IOS ? (
+                <>
+                  <Icon name="apple" className="w-5 h-5" />
+                  <Icon name="faceId" className="w-5 h-5" />
+                  <span className="font-semibold">Entrar con Face ID</span>
+                </>
+              ) : (
+                <>
+                  <Icon name="fingerprint" className="w-6 h-6" />
+                  <span className="font-semibold">Entrar con huella</span>
+                </>
+              )}
+            </button>
+          )}
         </form>
 
         <div className="pt-2 border-t border-slate-800 space-y-2">
@@ -3388,9 +4515,6 @@ function CustomerView({
   customerOrders,
   orders,
   customerProfile,
-  onViewOrderDetail,
-  onRequestCancelOrder,
-  onTrackLiveOrder,
   storeLocation,
   favorites,
   onToggleFavorite,
@@ -3402,12 +4526,9 @@ function CustomerView({
   guestAdded
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [showMyOrders, setShowMyOrders] = useState(false);
-  const [myOrdersPage, setMyOrdersPage] = useState(1);
-  const [orderDateFilter, setOrderDateFilter] = useState({ preset: 'all', date: null });
-  const [showCalendar, setShowCalendar] = useState(false);
   const [promoIdx, setPromoIdx] = useState(0);
-  const PAGE_SIZE = 5;
+  // Recorrido Horizontal: apagado por defecto; el usuario lo enciende con el switch.
+  const [shelvesEnabled, setShelvesEnabled] = useState(false);
 
   // Carrusel de promos con autoplay (solo cuando hay más de una activa)
   const activePromos = promos.filter((p) => p.active);
@@ -3422,37 +4543,14 @@ function CustomerView({
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
     return allProducts
-      .filter((p) => p.name.toLowerCase().includes(q))
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.brand || '').toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q)
+      )
       .slice(0, 6);
   }, [allProducts, searchQuery]);
-
-  const filteredOrders = useMemo(() => {
-    const now = new Date();
-    const todayStart = startOfDay(now);
-    const dow = (todayStart.getDay() + 6) % 7; // 0 = Monday
-    const thisMon = new Date(todayStart); thisMon.setDate(thisMon.getDate() - dow);
-    const thisSun = new Date(thisMon); thisSun.setDate(thisSun.getDate() + 6);
-    const lastMon = new Date(thisMon); lastMon.setDate(lastMon.getDate() - 7);
-    const lastSun = new Date(thisMon); lastSun.setDate(lastSun.getDate() - 1);
-
-    return customerOrders.filter((o) => {
-      const d = parseOrderDate(o);
-      if (isNaN(d)) return true;
-      switch (orderDateFilter.preset) {
-        case 'today': return startOfDay(d).getTime() === todayStart.getTime();
-        case 'thisWeek': return d >= thisMon && d <= thisSun;
-        case 'lastWeek': return d >= lastMon && d <= lastSun;
-        case 'day': return orderDateFilter.date && toYMD(d) === orderDateFilter.date;
-        default: return true;
-      }
-    });
-  }, [customerOrders, orderDateFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
-  const safePage = Math.min(myOrdersPage, totalPages);
-  const pagedOrders = filteredOrders.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-
-  useEffect(() => { setMyOrdersPage(1); }, [orderDateFilter]);
 
   // Producto habitual del cliente que esté por agotarse: alerta proactiva para
   // reponerlo antes de que se acabe. Basado en su historial de pedidos.
@@ -3478,38 +4576,151 @@ function CustomerView({
     );
   }, [customerOrders, allProducts, savedCustomer?.customerName]);
 
-  // La barra inferior (móvil) pide expandir y scrollear a Mis Pedidos o Mi Cuenta
+  // Radar de Ofertas "Novedades": combina productos nuevos, por agotarse
+  // y los más pedidos por este cliente, sin repetir, en orden de prioridad.
+  const radarProducts = useMemo(() => {
+    if (!Array.isArray(allProducts) || allProducts.length === 0) return [];
+    const freq = {};
+    (customerOrders || []).forEach((o) =>
+      (o.items || []).forEach((it) => {
+        freq[it.id] = (freq[it.id] || 0) + (Number(it.quantity) || 0);
+      })
+    );
+    const seen = new Set();
+    const list = [];
+    const push = (p, tag) => {
+      if (!p || seen.has(p.id)) return;
+      seen.add(p.id);
+      list.push({ product: p, tag });
+    };
+    (allProducts || [])
+      .filter(isNewProduct)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .forEach((p) => push(p, 'Nuevo'));
+    (allProducts || [])
+      .filter((p) => p.runOutDays != null && p.runOutDays > 0 && p.runOutDays <= 3)
+      .sort((a, b) => a.runOutDays - b.runOutDays)
+      .forEach((p) => push(p, 'Se agota'));
+    Object.entries(freq)
+      .map(([id, qty]) => ({ p: (allProducts || []).find((x) => x.id === id), qty }))
+      .filter((x) => x.p)
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 6)
+      .forEach((x) => push(x.p, 'Frecuente'));
+    return list.slice(0, 12);
+  }, [allProducts, customerOrders]);
+
+  // Vitrina "Los más pedidos": top de ventas globales derivado de los pedidos reales
+  // (no requiere campo featured en la base). Si aún no hay pedidos, cae a stock alto.
+  const topSellers = useMemo(() => {
+    if (!Array.isArray(allProducts) || allProducts.length === 0) return [];
+    const demand = {};
+    (orders || []).forEach((o) =>
+      (o.items || []).forEach((it) => {
+        demand[it.id] = (demand[it.id] || 0) + (Number(it.quantity) || 0);
+      })
+    );
+    const ranked = allProducts
+      .map((p) => ({ p, qty: demand[p.id] || 0 }))
+      .sort((a, b) => b.qty - a.qty || Number(b.p.stock || 0) - Number(a.p.stock || 0));
+    return ranked.slice(0, 5).map((x) => x.p);
+  }, [allProducts, orders]);
+
+  // Estantes del recorrido virtual: agrupa los productos visibles por categoría,
+  // en el orden de las categorías de la tienda (máx. 6 pisos × 8 ítems).
+  const shelfGroups = useMemo(() => {
+    if (!Array.isArray(products) || products.length === 0) return [];
+    const byCat = {};
+    products.forEach((p) => {
+      const c = p.category || 'Otros';
+      (byCat[c] = byCat[c] || []).push(p);
+    });
+    const order = [...new Set([...categories, ...Object.keys(byCat)])];
+    return order
+      .filter((c) => byCat[c] && byCat[c].length > 0)
+      .map((c) => ({ category: c, items: byCat[c].slice(0, 8) }))
+      .slice(0, 6);
+  }, [products, categories]);
+
+  // Efecto parallax del hero: la foto de fondo se desplaza más lento que el scroll.
+  const heroRef = useRef(null);
+  const [heroOffset, setHeroOffset] = useState(0);
+  const reducedMotionHero =
+    typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  useEffect(() => {
+    if (reducedMotionHero) return undefined;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const el = heroRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > window.innerHeight) return;
+        setHeroOffset(Math.max(-60, Math.min(60, r.top * -0.22)));
+      });
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [reducedMotionHero]);
+
+  // La barra inferior (móvil) pide expandir y scrollear a Mi Cuenta (Mis Pedidos viven en el drawer)
   useEffect(() => {
     if (!focusSection) return;
     const timer = setTimeout(() => {
-      const id = focusSection === 'orders' ? 'pedidos-seccion' : 'cuenta-seccion';
-      if (focusSection === 'orders') setShowMyOrders(true);
       if (focusSection === 'account') onOpenDebt?.('saldo');
-      const el = document.getElementById(id);
+      const el = document.getElementById('cuenta-seccion');
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
     return () => clearTimeout(timer);
-  }, [focusSection]);
+  }, [focusSection, onOpenDebt]);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
-      {/* Compact Hero Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-teal-900/40 via-slate-800 to-indigo-950/50 animate-gradient-x border border-slate-700/60 p-4 sm:p-8 shadow-2xl backdrop-blur-md">
-        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-5">
-          <div className="space-y-2 sm:space-y-3 max-w-xl">
-            <span className="px-2.5 sm:px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
-              ⚡ Pedidos al momento
+      {/* Hero editorial: foto real del producto estrella con efecto parallax */}
+      <RevealOnScroll>
+      <div
+        ref={heroRef}
+        className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-700/60 shadow-2xl min-h-[300px] sm:min-h-[340px]"
+      >
+        {/* Foto de fondo (más alta que el contenedor para permitir el parallax) */}
+        {topSellers[0]?.image ? (
+          <div
+            className="absolute inset-x-0 -top-16 -bottom-16 bg-cover bg-center will-change-transform"
+            style={{
+              backgroundImage: `url(${topSellers[0].image.replace('w=500', 'w=1600')})`,
+              transform: reducedMotionHero ? undefined : `translate3d(0, ${heroOffset}px, 0)`
+            }}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-teal-900/60 via-slate-900 to-indigo-950/70" />
+        )}
+        {/* Overlay oscuro para legibilidad del texto */}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-slate-950/20" />
+        <div className="absolute inset-0 bg-gradient-to-r from-teal-950/60 via-transparent to-transparent" />
+
+        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 sm:gap-6 p-5 sm:p-10 pt-8 sm:pt-14 min-h-[300px] sm:min-h-[340px]">
+          <div className="space-y-3 max-w-xl">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-500/25 text-teal-200 border border-teal-400/40 text-[10px] sm:text-xs font-semibold uppercase tracking-wider backdrop-blur-md">
+              <Icon name="zap" className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              Pedidos al momento
             </span>
-            <h2 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h2 className="font-display text-3xl sm:text-5xl font-black text-white tracking-tight leading-tight">
               ¿Qué se te antoja hoy?
             </h2>
-            <p className="hidden sm:block text-slate-300 text-sm leading-relaxed">
+            <p className="hidden sm:block text-slate-200 text-sm leading-relaxed max-w-md">
               Explora nuestros antojos, bebidas frías y snacks. Paga y retira sin hacer filas o recibe en tu puerta.
             </p>
           </div>
 
           {/* Tasa BCV card */}
-          <div className="w-full sm:w-auto shrink-0 p-3 sm:p-4 rounded-2xl bg-slate-950/60 border border-teal-500/30 backdrop-blur-md">
+          <div className="w-full sm:w-auto shrink-0 p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-teal-500/30 backdrop-blur-md shadow-lg">
             <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
               <Icon name="dollarSign" className="w-3.5 h-3.5 text-teal-400" />
               Tasa BCV
@@ -3524,9 +4735,8 @@ function CustomerView({
             )}
           </div>
         </div>
-        {/* Decorative graphic background */}
-        <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
       </div>
+      </RevealOnScroll>
 
       {/* Promos Carousel */}
       {activePromos.length > 0 && (
@@ -3596,8 +4806,8 @@ function CustomerView({
       {/* Alerta proactiva "Se acaba pronto": producto habitual del cliente */}
       {runOutAlertProduct && (
         <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-rose-500/15 via-orange-500/10 to-amber-500/15 border border-rose-500/30 flex items-center gap-3 sm:gap-4">
-          <img
-            src={runOutAlertProduct.image}
+          <ProductImg
+            product={runOutAlertProduct}
             alt={runOutAlertProduct.name}
             className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl object-cover border border-rose-500/30 shrink-0"
           />
@@ -3722,178 +4932,6 @@ function CustomerView({
         </div>
       )}
 
-      {/* Mis Pedidos: historial del cliente reconocido */}
-      {savedCustomer?.customerName && customerOrders.length > 0 && (
-        <div id="pedidos-seccion" className="rounded-2xl sm:rounded-3xl bg-slate-800/60 border border-slate-700/60 overflow-hidden backdrop-blur-md">
-          <button
-            onClick={() => setShowMyOrders((v) => !v)}
-            className="w-full p-3 sm:p-4 flex items-center gap-3 hover:bg-slate-800/80 transition-colors text-left"
-          >
-            <span className="p-2 sm:p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 shrink-0">
-              <Icon name="package" className="w-4 h-4 sm:w-5 sm:h-5" />
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-sm sm:text-base font-bold text-white">Mis Pedidos</span>
-              <span className="block text-[11px] sm:text-xs text-slate-400 truncate">
-                {customerOrders.length} pedido{customerOrders.length !== 1 ? 's' : ''}
-                {customerProfile && customerProfile.addresses?.length > 0 ? ' · direcciones guardadas' : ''}
-              </span>
-            </span>
-            <span className={`p-1.5 rounded-lg bg-slate-700/50 text-slate-300 transition-transform duration-300 ${showMyOrders ? 'rotate-180' : ''}`}>
-              <Icon name="minus" className="w-3.5 h-3.5" />
-            </span>
-          </button>
-
-          {showMyOrders && (
-            <div className="px-3 sm:px-4 pb-3 sm:pb-4 space-y-2 sm:space-y-2.5 animate-fade-in">
-              {/* Filtro de fecha + Paginación */}
-              <div className="space-y-3">
-                {/* Chips rápidos + selector fecha */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {[
-                      { key: 'all', label: 'Todos' },
-                      { key: 'today', label: 'Hoy' },
-                      { key: 'thisWeek', label: 'Esta semana' },
-                      { key: 'lastWeek', label: 'Semana anterior' }
-                    ].map((f) => (
-                      <button
-                        key={f.key}
-                        onClick={() => { setOrderDateFilter({ preset: f.key, date: null }); setMyOrdersPage(1); }}
-                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
-                          orderDateFilter.preset === f.key
-                            ? 'bg-teal-500 text-slate-950 shadow-sm'
-                            : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-700/60'
-                        }`}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowCalendar(!showCalendar)}
-                      className="px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-300 text-[11px] font-medium hover:bg-slate-700/60 flex items-center gap-1.5"
-                    >
-                      <Icon name="filter" className="w-3.5 h-3.5" />
-                      {orderDateFilter.preset === 'day' && orderDateFilter.date
-                        ? orderDateFilter.date
-                        : 'Calendario'}
-                    </button>
-                    {showCalendar && (
-                      <MiniCalendar
-                        value={orderDateFilter.date}
-                        onChange={(d) => { setOrderDateFilter({ preset: 'day', date: d }); setMyOrdersPage(1); }}
-                        onClose={() => setShowCalendar(false)}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {/* Paginación */}
-                <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
-                  <span>
-                    Mostrando {pagedOrders.length > 0 ? ((myOrdersPage - 1) * PAGE_SIZE + 1) : 0}–{Math.min(myOrdersPage * PAGE_SIZE, filteredOrders.length)} de {filteredOrders.length}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setMyOrdersPage(p => Math.max(1, p - 1))}
-                      disabled={myOrdersPage === 1}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
-                    >
-                      <Icon name="minus" className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="px-2 font-semibold text-white">{myOrdersPage} / {totalPages}</span>
-                    <button
-                      onClick={() => setMyOrdersPage(p => Math.min(totalPages, p + 1))}
-                      disabled={myOrdersPage === totalPages}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700/60"
-                    >
-                      <Icon name="plus" className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Lista paginada */}
-              {pagedOrders.map((o) => {
-                const style = STATUS_STYLES[o.status] || STATUS_STYLES.pendiente;
-                const cancellable = o.status === 'pendiente' || o.status === 'en_preparacion';
-                const payRejected = o.paymentMethod && o.paymentMethod !== 'efectivo' && o.paymentStatus === 'rechazado';
-                const payPending = needsPaymentValidation(o);
-                return (
-                  <div
-                    key={o.id}
-                    className={`p-3 rounded-xl sm:rounded-2xl bg-slate-900/60 border ${payRejected ? 'border-rose-500/50' : 'border-slate-700/50'}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs sm:text-sm font-bold text-white">
-                        Pedido <span className="text-teal-400">#{o.id}</span>
-                      </span>
-                      {payPending ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-500/40 text-amber-300">
-                          Pago en revisión
-                        </span>
-                      ) : (
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${payRejected ? STATUS_STYLES.cancelado.badge : style.badge}`}>
-                          {payRejected ? 'Pago rechazado' : STATUS_LABELS[o.status] || 'Pendiente'}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
-                      {o.timestamp} · {o.items.length} artículo{o.items.length !== 1 ? 's' : ''} · {formatUsd(o.total)}
-                    </p>
-                    {(o.paymentMethod === 'cartera' || Number(o.walletApplied) > 0) && (
-                      <p className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-[10px] font-bold">
-                        <Icon name="wallet" className="w-3 h-3" />
-                        Pagado con cartera
-                      </p>
-                    )}
-                    <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
-                      {o.type === 'delivery' ? `Envío a ${o.address || 'domicilio'}` : 'Retiro en tienda'}
-                    </p>
-                    {payRejected && (
-                      <div className="mt-2 flex items-start gap-1.5 rounded-xl bg-rose-500/10 border border-rose-500/40 p-2 text-[11px] text-rose-200/90">
-                        <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0 text-rose-400" />
-                        <span>Tu pago fue rechazado. Suministra otro comprobante
-                          {customerProfile?.isBenefited ? ' o pásalo a tu cuenta' : ''} en Ver detalle.</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 mt-2.5">
-                      <button
-                        onClick={() => onViewOrderDetail(o)}
-                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-1"
-                      >
-                        <Icon name="eye" className="w-3 h-3" />
-                        Ver detalle
-                      </button>
-                      {o.type === 'delivery' && o.status !== 'cancelado' && o.status !== 'entregado' && (
-                        <button
-                          onClick={() => onTrackLiveOrder(o)}
-                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1"
-                        >
-                          <Icon name="mapPin" className="w-3 h-3" />
-                          Rastrear
-                        </button>
-                      )}
-                      {cancellable && (
-                        <button
-                          onClick={() => onRequestCancelOrder(o)}
-                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1"
-                        >
-                          <Icon name="x" className="w-3 h-3" />
-                          Cancelar
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Live Order Tracker Banner (If customer placed an order recently) */}
       {currentOrderTracking && (
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-800/90 border border-teal-500/40 shadow-xl space-y-4 backdrop-blur-md relative overflow-hidden">
@@ -3943,12 +4981,12 @@ function CustomerView({
                       isPassed
                         ? 'bg-teal-400 shadow-lg shadow-teal-500/50'
                         : 'bg-slate-700/60'
-                    }`}
+                    } ${isCurrent ? 'animate-pulse' : ''}`}
                   />
                   <span
-                    className={`text-[9px] sm:text-xs font-semibold text-center leading-tight ${
+                    className={`text-[9px] sm:text-xs font-semibold text-center leading-tight transition-all ${
                       isCurrent
-                        ? 'text-teal-300 font-bold scale-105'
+                        ? 'text-teal-300 font-bold scale-110 order-timeline-dot--active'
                         : isPassed
                         ? 'text-slate-300'
                         : 'text-slate-500'
@@ -4036,7 +5074,7 @@ function CustomerView({
 
           {/* Autocomplete suggestions */}
           {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-2 z-20 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-scale-up">
+            <div className="absolute left-0 right-0 top-full mt-2 z-20 glass-strong bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-modal-spring">
               {suggestions.map((p) => (
                 <button
                   key={p.id}
@@ -4046,7 +5084,7 @@ function CustomerView({
                   }}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-800/80 transition-all text-left"
                 >
-                  <img src={p.image} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-800" />
+                  <ProductImg product={p} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-800 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className="block text-xs font-semibold text-slate-200 truncate">{p.name}</span>
                     <span className="text-[11px] text-teal-400 font-bold">{formatUsd(p.price)}</span>
@@ -4059,21 +5097,33 @@ function CustomerView({
         </div>
 
         <div className="space-y-2.5">
-          {/* Category Pills */}
+          {/* Category Pills: cada categoría tiene su color e icono de identidad */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {['Todas', 'Favoritos', ...categories].map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3.5 sm:px-4 py-2 rounded-2xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-300 border shrink-0 ${
-                  selectedCategory === cat
-                    ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20 scale-105'
-                    : 'bg-slate-800/60 text-slate-300 border-slate-700/80 hover:bg-slate-700/60 hover:text-white'
-                }`}
-              >
-                {cat === 'Favoritos' ? `❤ Favoritos (${favorites.length})` : cat}
-              </button>
-            ))}
+            {['Todas', 'Favoritos', ...categories].map((cat) => {
+              const isFav = cat === 'Favoritos';
+              const id = isFav ? null : categoryIdentity(cat);
+              const active = selectedCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-300 border-2 shrink-0 ${
+                    active
+                      ? isFav
+                        ? 'bg-rose-400 text-slate-950 border-rose-300 shadow-lg shadow-rose-500/25 scale-105'
+                        : `${id.solid} border-white/40 shadow-lg scale-105`
+                      : `bg-slate-800/80 text-slate-200 border-slate-600/80 hover:bg-slate-700/70 hover:text-white`
+                  }`}
+                >
+                  {isFav ? (
+                    <Icon name="heart" className={`w-3.5 h-3.5 ${active ? 'fill-current' : ''}`} />
+                  ) : (
+                    <Icon name={id.icon} className={`w-3.5 h-3.5 ${active ? '' : id.accent}`} />
+                  )}
+                  {isFav ? `Favoritos (${favorites.length})` : cat}
+                </button>
+              );
+            })}
           </div>
 
           {/* Sort Selector */}
@@ -4083,14 +5133,209 @@ function CustomerView({
             className="w-full px-3 py-2.5 rounded-2xl bg-slate-800/80 border border-slate-700/80 text-xs font-semibold text-slate-300 focus:border-teal-500 focus:outline-none"
             aria-label="Ordenar productos"
           >
-            <option value="relevancia">✨ Ordenar: Relevancia</option>
-            <option value="popular">🔥 Más vendidos</option>
-            <option value="precio-asc">💲 Precio: menor a mayor</option>
-            <option value="precio-desc">💲 Precio: mayor a menor</option>
-            <option value="stock">📦 Mayor stock</option>
+            <option value="relevancia">Ordenar: Relevancia</option>
+            <option value="popular">Más vendidos</option>
+            <option value="precio-asc">Precio: menor a mayor</option>
+            <option value="precio-desc">Precio: mayor a menor</option>
+            <option value="stock">Mayor stock</option>
           </select>
         </div>
       </div>
+
+      {/* Recorrido Horizontal: estantes interactivos por categoría. Apagado por defecto;
+        el switch lo enciende. Tocar una góndola filtra; tocar de nuevo vuelve a Todas. */}
+      {!searchQuery.trim() && shelfGroups.length > 0 && (
+        <RevealOnScroll delay={40}>
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={`p-2 rounded-xl border transition-colors ${shelvesEnabled ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-400' : 'bg-slate-800/60 border-slate-700/60 text-slate-500'}`}>
+                <Icon name="store" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-bold text-white">Recorrido Horizontal</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+                  Estantes interactivos · pasá de góndola en góndola como en el kiosko
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShelvesEnabled((v) => !v)}
+              role="switch"
+              aria-checked={shelvesEnabled}
+              aria-label="Activar o desactivar el Recorrido Horizontal"
+              className={`shrink-0 inline-flex items-center gap-2 px-2.5 py-1.5 rounded-full border text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 ${
+                shelvesEnabled
+                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
+                  : 'bg-slate-800/60 border-slate-700/60 text-slate-400'
+              }`}
+            >
+              <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${shelvesEnabled ? 'bg-indigo-500' : 'bg-slate-600'}`}>
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${shelvesEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+              </span>
+              {shelvesEnabled ? 'Encendido' : 'Apagado'}
+            </button>
+          </div>
+
+          {shelvesEnabled && (
+          <div className="estantes-scene space-y-3.5 sm:space-y-4">
+            {shelfGroups.map((shelf, idx) => (
+              <Shelf
+                key={shelf.category}
+                category={shelf.category}
+                items={shelf.items}
+                floor={idx + 1}
+                isActive={selectedCategory === shelf.category}
+                onAddToCart={onAddToCart}
+                onOpenProductModal={onOpenProductModal}
+                onSelectCategory={() =>
+                  setSelectedCategory((cur) => (cur === shelf.category ? 'Todas' : shelf.category))
+                }
+              />
+            ))}
+          </div>
+          )}
+        </section>
+        </RevealOnScroll>
+      )}
+
+      {/* Vitrina "Los más pedidos": carrusel horizontal, SOLO en móviles (lg:hidden) */}
+      {topSellers.length > 0 && (
+        <RevealOnScroll delay={80} className="lg:hidden">
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400">
+                <Icon name="star" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div>
+                <h3 className="font-display text-base sm:text-lg font-extrabold text-white">Los más pedidos</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400">Los favoritos que vuelan del kiosko</p>
+              </div>
+            </div>
+            <span className="px-2 py-1 rounded-full bg-teal-500/10 text-teal-400 text-[10px] font-bold uppercase tracking-wider border border-teal-500/20">
+              top ventas
+            </span>
+          </div>
+
+          <div className="flex gap-3 sm:gap-5 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+            {topSellers.map((product) => (
+              <article
+                key={product.id}
+                onClick={onOpenProductModal ? () => onOpenProductModal(product) : undefined}
+                className="snap-start shrink-0 w-[70vw] min-[480px]:w-[320px] sm:w-[340px] rounded-2xl sm:rounded-3xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-teal-500/50 hover:shadow-2xl hover:shadow-teal-500/10 hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+              >
+                <div className="relative aspect-[16/10] bg-slate-900">
+                  <ProductImg
+                    product={product}
+                    alt={product.name}
+                    loading="lazy"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <span className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
+                    <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
+                    {product.category}
+                  </span>
+                </div>
+                <div className="p-3 sm:p-4 flex flex-col gap-1.5 flex-1">
+                  <h4 className="font-display text-sm sm:text-base font-extrabold text-white truncate">{product.name}</h4>
+                  <p className="text-[11px] text-slate-400 line-clamp-1">
+                    {formatSize(product) || product.brand || 'Artículo'}
+                  </p>
+                  <div className="mt-auto pt-2 flex items-end justify-between gap-2 border-t border-slate-700/50">
+                    <div className="min-w-0">
+                      <PriceCountUp
+                        value={product.price}
+                        rate={rate}
+                        className="font-display text-xl sm:text-2xl font-black tracking-tight text-white"
+                        bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
+                      />
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(product, 1, e.currentTarget.getBoundingClientRect());
+                      }}
+                      className="shrink-0 p-2.5 rounded-xl bg-teal-500 text-slate-950 hover:bg-teal-400 transition-all active:scale-90 shadow-lg shadow-teal-500/20"
+                      aria-label={`Agregar ${product.name}`}
+                    >
+                      <Icon name="plus" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+        </RevealOnScroll>
+      )}
+
+      {/* Radar de Ofertas "Novedades": nuevos, por agotar y frecuentes */}
+      {radarProducts.length > 0 && (
+        <section className="animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                <Icon name="radio" className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-white">Radar de Novedades</h3>
+                <p className="text-[11px] sm:text-xs text-slate-400">Lo que se mueve hoy en la tienda</p>
+              </div>
+            </div>
+            <span className="px-2 py-1 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase tracking-wider border border-amber-500/20 animate-pulse">
+              en vivo
+            </span>
+          </div>
+
+          <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+            {radarProducts.map(({ product, tag }) => (
+              <article
+                key={product.id}
+                className="snap-start shrink-0 w-40 sm:w-44 rounded-2xl bg-slate-800/70 border border-slate-700/60 overflow-hidden flex flex-col hover:border-amber-500/50 hover:-translate-y-0.5 transition-all"
+              >
+                <div className="relative">
+                  <ProductImg
+                    product={product}
+                    alt={product.name}
+                    loading="lazy"
+                    className="w-full h-24 sm:h-28 object-cover bg-slate-900"
+                  />
+                  <span
+                    className={`absolute top-2 left-2 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
+                      tag === 'Nuevo'
+                        ? 'bg-teal-500/90 text-slate-950 border-teal-400'
+                        : tag === 'Se agota'
+                          ? 'bg-rose-500/90 text-white border-rose-400'
+                          : 'bg-indigo-500/90 text-white border-indigo-400'
+                    }`}
+                  >
+                    {tag}
+                  </span>
+                </div>
+                <div className="p-2.5 flex flex-col gap-1.5 flex-1">
+                  <h4 className="text-xs font-bold text-white truncate">{product.name}</h4>
+                  <p className="text-[11px] text-slate-400 line-clamp-1">
+                    {formatSize(product) || product.category || 'Artículo'}
+                  </p>
+                  <div className="mt-auto flex items-center justify-between gap-1">
+                    <span className="text-xs sm:text-sm font-extrabold text-teal-400">
+                      {formatUsd(product.price)}
+                    </span>
+                    <button
+                      onClick={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
+                      className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400 border border-teal-500/40 hover:bg-teal-500 hover:text-slate-950 transition-all active:scale-90"
+                      aria-label={`Agregar ${product.name}`}
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Product Grid */}
       {products.length === 0 ? (
@@ -4098,23 +5343,294 @@ function CustomerView({
           <Icon name="search" className="w-12 h-12 text-slate-600 mx-auto" />
           <h3 className="text-lg font-bold text-slate-300">No encontramos productos</h3>
           <p className="text-slate-500 text-xs">Intenta cambiar la categoría o limpiar el término de búsqueda.</p>
+          {(searchQuery.trim() || selectedCategory !== 'Todas') && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedCategory('Todas');
+              }}
+              className="inline-flex items-center gap-1.5 mx-auto px-4 py-2.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all active:scale-95"
+            >
+              <Icon name="refresh" className="w-3.5 h-3.5" />
+              Limpiar filtros
+            </button>
+          )}
+          {searchQuery.trim() && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="block mx-auto text-[11px] font-semibold text-teal-400 hover:text-teal-300 transition-colors"
+            >
+              Ver todo el catálogo
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
-          {products.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              rate={rate}
-              isFavorite={favorites.includes(product.id)}
-              onToggleFavorite={() => onToggleFavorite(product.id)}
-              onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
-              onOpenDetail={() => onOpenProductModal(product)}
-            />
+          {products.map((product, idx) => (
+            <RevealOnScroll key={product.id} delay={Math.min(idx, 8) * 60}>
+              <ProductCard
+                product={product}
+                rate={rate}
+                isFavorite={favorites.includes(product.id)}
+                onToggleFavorite={() => onToggleFavorite(product.id)}
+                onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
+                onOpenDetail={() => onOpenProductModal(product)}
+              />
+            </RevealOnScroll>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+// Imagen de producto con fallback: si la URL falla o está vacía muestra el logo
+// de marca + nombre (mismo fallback que usa KAPSULA AR) en vez del rompecabezas
+// roto del navegador. Aplica fade al cargar en todas las superficies.
+function ProductImg({ product, image, name, brand, alt, className = '', loading = 'lazy', onLoad, imgProps }) {
+  const [errored, setErrored] = useState(false);
+  const src = product?.image ?? image;
+  const label = product?.brand?.trim() || product?.name || brand || name || 'Producto';
+
+  if (!src || errored) {
+    return (
+      <div
+        className={`flex flex-col items-center justify-center gap-1.5 select-none ${className || ''}`}
+        style={{ background: 'linear-gradient(135deg, #0f172a, #1e293b)' }}
+        aria-hidden="true"
+      >
+        <BrandLogo className="w-6 h-6 !rounded-lg shrink-0" />
+        <span className="w-full truncate px-1.5 text-center text-[10px] font-bold text-slate-400">{label}</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt || label}
+      loading={loading}
+      draggable={false}
+      onError={() => setErrored(true)}
+      onLoad={(e) => {
+        e.currentTarget.classList.add('is-loaded');
+        onLoad?.(e);
+      }}
+      className={`img-load-fade ${className || ''}`}
+      {...imgProps}
+    />
+  );
+}
+
+// Estante interactivo: un anaquel (categoría) con los productos "de pie" sobre
+// el borde, en fila horizontal scrolleable con leve 3D al pasar el cursor.
+// Tocar el producto abre el detalle; el botón lo suma al carrito al instante.
+function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductModal, onSelectCategory }) {
+  const id = categoryIdentity(category);
+  const [justAddedId, setJustAddedId] = useState(null);
+
+  const handleAdd = (product, e) => {
+    if (justAddedId === product.id) return;
+    setJustAddedId(product.id);
+    setTimeout(() => setJustAddedId((cur) => (cur === product.id ? null : cur)), 1200);
+    haptic(8);
+    onAddToCart(product, 1, e.currentTarget.getBoundingClientRect());
+  };
+
+  return (
+    <article
+      className={`shelf-card rounded-2xl sm:rounded-3xl bg-slate-800/50 border backdrop-blur-sm transition-colors ${
+        isActive ? 'is-active border-indigo-500/50' : 'border-slate-700/60 hover:border-slate-600'
+      }`}
+    >
+      {/* Cabecera del anaquel: pisando la góndola se filtra esa categoría */}
+      <button
+        onClick={onSelectCategory}
+        className="w-full px-3 sm:px-4 pt-2.5 pb-1 flex items-center gap-2 min-w-0 text-left group"
+      >
+        <span className={`p-1.5 rounded-lg ${id.solid} shrink-0 shadow-sm`}>
+          <Icon name={id.icon} className="w-3.5 h-3.5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs sm:text-sm font-bold text-white truncate group-hover:text-indigo-300 transition-colors">
+            {category}
+          </span>
+          <span className="block text-[10px] text-slate-500 truncate">
+            {items.length} producto{items.length !== 1 ? 's' : ''} ·{' '}
+            {isActive ? 'tocá de nuevo para mostrar todas' : 'tocá la góndola para filtrar'}
+          </span>
+        </span>
+        <span className="shrink-0 text-[10px] font-mono text-slate-500 bg-slate-900/50 border border-slate-700/60 px-1.5 py-0.5 rounded-md">
+          piso {String(floor).padStart(2, '0')}
+        </span>
+      </button>
+
+      {/* Tablero del estante con los productos en fila */}
+      <div className="shelf-panel mt-2 px-3 sm:px-4 pb-3 pt-1">
+        <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-3 px-3 pt-1 pb-2">
+          {items.map((p, i) => {
+            const avail = Math.max(0, Number(p.stock) - Number(p.reserved || 0));
+            const out = avail <= 0;
+            return (
+              <div key={p.id} className="shelf-item" style={{ ['--sdel']: `${Math.min(i, 6) * 55}ms` }}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenProductModal(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onOpenProductModal(p);
+                    }
+                  }}
+                  aria-label={`Ver ${p.name}`}
+                  className="shelf-product"
+                >
+                  <div className="shelf-product__art">
+                    <ProductImg product={p} alt={p.name} loading="lazy" className="shelf-product__img" />
+                  </div>
+                  <span className="shelf-product__shadow" />
+                </div>
+                <div className="mt-2 space-y-1">
+                  <p className="truncate text-[10px] sm:text-[11px] font-semibold text-slate-200">{p.name}</p>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className={`min-w-0 text-[11px] sm:text-xs font-extrabold ${out ? 'text-slate-500 line-through' : 'text-teal-400'}`}>
+                      {formatUsd(p.price)}
+                    </span>
+                    <button
+                      onClick={(e) => handleAdd(p, e)}
+                      disabled={out}
+                      aria-label={`Agregar ${p.name}`}
+                      className={`shrink-0 p-1.5 rounded-lg transition-all active:scale-90 disabled:opacity-40 disabled:pointer-events-none ${
+                        justAddedId === p.id
+                          ? 'bg-emerald-500 text-slate-950 animate-add-pulse'
+                          : 'bg-teal-500/20 text-teal-300 border border-teal-500/40 hover:bg-teal-500 hover:text-slate-950'
+                      }`}
+                    >
+                      <Icon name={justAddedId === p.id ? 'check' : 'plus'} className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {out && (
+                    <span className="block text-[9px] text-rose-400 font-bold">Agotado</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="shelf-lip" />
+      </div>
+    </article>
+  );
+}
+
+// Calculadora flotante: botón fijo (solo escritorio; en móvil se abre desde la
+// barra inferior) que despliega un panel no modal de conversión $ ⇄ Bs. El panel
+// tiene pointer-events solo sobre sí mismo: no bloquea la navegación ni el scroll.
+function CalcFab({ open, onToggle, rate }) {
+  const [usdInput, setUsdInput] = useState('');
+  const [bsInput, setBsInput] = useState('');
+  const r = rate?.rate || 0;
+
+  const handleUsd = (value) => {
+    const v = value.replace(/[^\d.,]/g, '');
+    setUsdInput(v);
+    const num = parseAmount(v);
+    setBsInput(Number.isFinite(num) ? formatAmount(num * r) : '');
+  };
+
+  const handleBs = (value) => {
+    const v = value.replace(/[^\d.,]/g, '');
+    setBsInput(v);
+    const num = parseAmount(v);
+    setUsdInput(Number.isFinite(num) && r > 0 ? formatAmount(num / r) : '');
+  };
+
+  return (
+    <>
+      {/* Botón fijo: solo escritorio (en móvil el acceso vive en la barra inferior) */}
+      <button
+        onClick={onToggle}
+        aria-label={open ? 'Cerrar calculadora' : 'Abrir calculadora'}
+        aria-expanded={open}
+        className={`hidden sm:flex fixed right-5 bottom-6 z-[46] p-3.5 rounded-2xl shadow-xl border backdrop-blur-md transition-all active:scale-90 ${
+          open
+            ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-teal-500/30'
+            : 'bg-slate-800/90 text-teal-300 border-teal-500/40 shadow-teal-500/10 hover:bg-slate-800'
+        }`}
+      >
+        <Icon name="calculator" className="w-5 h-5 sm:w-6 sm:h-6" />
+      </button>
+
+      {/* Panel flotante no modal: no cubre toda la pantalla y deja navegar de fondo */}
+      {open && (
+        <div
+          className="fixed right-3 sm:right-5 bottom-[4.75rem] sm:bottom-24 z-[46] w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-modal-spring"
+        >
+          <div className="flex items-center justify-between px-3.5 pt-3 pb-1">
+            <span className="text-xs font-black text-white flex items-center gap-1.5 min-w-0">
+              <Icon name="calculator" className="w-4 h-4 text-teal-400 shrink-0" />
+              <span className="truncate">
+                Calculadora · tasa {r ? r.toLocaleString('es-AR') : '—'} Bs
+              </span>
+            </span>
+            <button
+              onClick={onToggle}
+              aria-label="Cerrar calculadora"
+              className="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
+            >
+              <Icon name="x" className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="px-3.5 pb-3.5 space-y-2">
+            <div>
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                US$ (divisas)
+              </span>
+              <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-2">
+                <Icon name="dollarSign" className="w-4 h-4 text-teal-400 shrink-0" />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={usdInput}
+                  onChange={(e) => handleUsd(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center text-slate-600">
+              <Icon name="refresh" className="w-4 h-4 rotate-90" />
+            </div>
+
+            <div>
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                Bs (bolívares)
+              </span>
+              <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-2">
+                <span className="text-teal-300 font-bold text-sm shrink-0">Bs</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={bsInput}
+                  onChange={(e) => handleBs(e.target.value)}
+                  placeholder="0,00"
+                  className="w-full bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {r > 0 && (
+              <p className="text-[10px] text-slate-500">
+                Calculado a la tasa BCV del día ({rate?.source}). Toque fuera o la X para cerrar.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -4133,10 +5649,13 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
   };
 
   return (
-    <div className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl overflow-hidden hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm">
+    <div
+      className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm"
+    >
+      <div className="flex flex-col flex-1 overflow-hidden rounded-2xl sm:rounded-3xl">
       <div onClick={onOpenDetail} className="cursor-pointer relative overflow-hidden aspect-square sm:aspect-[4/3] bg-slate-900">
-        <img
-          src={product.image}
+        <ProductImg
+          product={product}
           alt={product.name}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
@@ -4155,7 +5674,8 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
               {product.brand}
             </span>
           )}
-          <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-slate-950/80 backdrop-blur-md text-[10px] sm:text-xs font-medium text-slate-200 border border-white/10">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-[10px] sm:text-xs font-bold border shadow-sm`}>
+            <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
             {product.category}
           </span>
         </div>
@@ -4170,8 +5690,9 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
         >
           <Icon
+            key={isFavorite ? 'fav-on' : 'fav-off'}
             name={isFavorite ? 'heartFilled' : 'heart'}
-            className={`w-4 h-4 sm:w-5 sm:h-5 transition-all ${isFavorite ? 'text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.7)]' : 'text-slate-300'}`}
+            className={`w-4 h-4 sm:w-5 sm:h-5 transition-all icon-fill-hover ${isFavorite ? 'text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.7)] animate-icon-pop' : 'text-slate-300'}`}
           />
         </button>
 
@@ -4201,7 +5722,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div>
           <h3
             onClick={onOpenDetail}
-            className="font-bold text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1 text-sm sm:text-base"
+            className="font-display text-sm sm:text-base text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1"
           >
             {product.name}
           </h3>
@@ -4218,14 +5739,12 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
         <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-slate-700/50">
           <div>
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Precio</span>
-            <span className="text-base sm:text-lg font-black text-white">
-              {formatUsd(product.price)}
-            </span>
-            {rate?.rate > 0 && (
-              <span className="block text-[10px] sm:text-[11px] font-bold text-teal-300/90 mt-0.5 truncate">
-                {formatBs(usdToBs(product.price, rate.rate))}
-              </span>
-            )}
+            <PriceCountUp
+              value={product.price}
+              rate={rate}
+              className="font-display font-black tracking-tight text-white text-base sm:text-lg"
+              bsClass="text-[10px] sm:text-[11px] font-bold text-teal-300/90"
+            />
           </div>
 
           <Btn
@@ -4242,6 +5761,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           </Btn>
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -4254,6 +5774,13 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   const isOut = product.stock <= 0 || product.reserved >= product.stock;
   const unitBs = usdToBs(product.price, rate?.rate);
   const lineTotal = product.price * quantity;
+
+  // Cierra con botón "atrás"/ESC y bloquea el scroll del fondo. En pantalla
+  // completa cierra primero la imagen antes de cerrar el modal (como antes).
+  useOverlay(true, () => {
+    if (showFullscreen) setShowFullscreen(false);
+    else onClose();
+  });
 
   const currentIndex = useMemo(() => {
     const idx = (sameBrandProducts || []).findIndex((p) => p.id === product.id);
@@ -4284,26 +5811,23 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
     setTouchX(null);
   };
 
-  // Handle ESC key press
+  // Flechas de teclado para navegar entre productos de la marca. El ESC ya lo
+  // maneja el mecanismo compartido de overlay (cierra la capa superior).
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        if (showFullscreen) setShowFullscreen(false);
-        else onClose();
-      }
       if (e.key === 'ArrowLeft') goTo(-1);
       if (e.key === 'ArrowRight') goTo(1);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, showFullscreen, goTo]);
+  }, [goTo]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       {/* Backdrop Click */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+      <div className="relative w-full sm:max-w-2xl max-h-[92vh] glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
       {/* Handle visual para indicar arrastre en móvil */}
       <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
@@ -4334,13 +5858,10 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-          <img
-            src={product.image}
-            alt={product.name}
-            className="w-full h-full object-cover"
-          />
+          <ProductImg product={product} alt={product.name} className="w-full h-full object-cover" />
           <div className="absolute top-4 left-4 sm:left-4">
-            <span className="hidden sm:inline px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-semibold text-teal-300 border border-teal-500/30">
+            <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-xs font-bold border shadow-sm`}>
+              <Icon name={categoryIdentity(product.category).icon} className="w-3 h-3" />
               {product.category}
             </span>
           </div>
@@ -4396,7 +5917,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
                 }`}
                 aria-label={`Ver ${p.name}`}
               >
-                <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                <ProductImg product={p} alt={p.name} className="w-full h-full object-cover" />
                 {i === currentIndex && (
                   <span className="absolute inset-0 bg-teal-500/20" />
                 )}
@@ -4407,9 +5928,9 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
 
         <div
           key={`body-${product.id}`}
-          className={`p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
+          className={`p-4 sm:p-6 flex flex-col overflow-y-auto flex-1 min-h-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         >
-          <div>
+          <div className="mb-5 sm:mb-6">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-400 font-mono">CÓDIGO: {product.code}</span>
@@ -4428,7 +5949,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             <p className="text-slate-300 text-sm mt-3 leading-relaxed">{product.description}</p>
           </div>
 
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60">
+          <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 mb-5 sm:mb-6">
             <div>
               <span className="text-xs text-slate-400 block">Precio Unitario</span>
               <span className="text-2xl font-black text-white">{formatUsd(product.price)}</span>
@@ -4459,6 +5980,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
             )}
           </div>
 
+          <div>
           <Btn
             onClick={(e) => {
               onAddToCart(quantity, e.currentTarget.getBoundingClientRect());
@@ -4474,6 +5996,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
               ? 'Sin Stock Disponible'
               : `Agregar al Carrito • ${formatUsd(lineTotal)}${rate?.rate > 0 ? ` (${formatBs(usdToBs(lineTotal, rate.rate))})` : ''}`}
           </Btn>
+        </div>
         </div>
       </div>
 
@@ -4518,11 +6041,10 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
           </div>
 
           <div className="flex-1 flex items-center justify-center px-2 pb-6 min-h-0">
-            <img
-              src={product.image}
+            <ProductImg
+              product={product}
               alt={product.name}
               className="max-w-full max-h-full object-contain select-none"
-              draggable={false}
             />
           </div>
 
@@ -4539,7 +6061,8 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   );
 }
 
-function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, mode = 'login', confirmKind = 'switchback', onClose }) {
+function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, adminPhones, mode = 'login', confirmKind = 'switchback', onClose }) {
+  useOverlay(true, onClose);
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -4561,7 +6084,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
       const supported = browserSupportsWebAuthn();
       let platformOk = false;
       if (supported) {
-        try { platformOk = await platformAuthenticatorIsAvailable(); } catch { platformOk = false; }
+        try { platformOk = await hasRealBiometrics(); } catch { platformOk = false; }
       }
       if (!cancelled) setWebauthnSupported(supported && platformOk);
     })();
@@ -4579,17 +6102,38 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
     }
   }, []);
 
-  // Autocompleta el nombre cuando el teléfono ya está registrado (historial),
-  // sin interferir con el nombre que el usuario escriba manualmente.
+  // Autocompleta el nombre cuando el teléfono ya está registrado (historial local
+  // o clientes del servidor), sin interferir con lo que el usuario escriba a mano.
   const phoneKey = `${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11);
+  const nameRef = useRef('');
+  useEffect(() => {
+    nameRef.current = customerName;
+  }, [customerName]);
   useEffect(() => {
     if (phoneNumber.length < 7) return;
-    const match = (knownCustomers || []).find((c) => normalizePhoneDigits(c.phone) === phoneKey);
-    if (match && match.name && !customerName.trim()) {
-      setCustomerName(match.name);
+    let cancelled = false;
+    const applyName = (n) => {
+      if (n && !nameRef.current.trim()) setCustomerName(n);
+    };
+    const local = [
+      ...(knownCustomers || []),
+      ...(allCustomers || []).map((c) => ({ phone: c.phone, name: c.customerName || c.name }))
+    ].find((c) => normalizePhoneDigits(c.phone) === phoneKey);
+    if (local && local.name) {
+      applyName(local.name);
+      return;
     }
+    api
+      .getCustomer(phoneKey)
+      .then((res) => {
+        if (cancelled) return;
+        const n = res && res.ok && res.data ? res.data.customerName : '';
+        applyName(n);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phoneCode, phoneNumber, knownCustomers]);
+  }, [phoneCode, phoneNumber, knownCustomers, allCustomers]);
 
   const handlePhoneNumber = (value) => {
     setPhoneNumber(value.replace(/\D/g, '').slice(0, 7));
@@ -4657,6 +6201,16 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
   // Flujo del formulario (login o registro nuevo).
   const runWebAuthn = async () => {
     setWebauthnError('');
+    // Un usuario inhabilitado por el super admin no puede pasar del login.
+    if (phoneKey.length >= 7) {
+      try {
+        const existing = await api.getCustomer(phoneKey);
+        if (existing.ok && existing.data && existing.data.disabled) {
+          setWebauthnError('Tu cuenta está inhabilitada por el kiosko. Contacta la tienda.');
+          return;
+        }
+      } catch {}
+    }
     // Dispositivo sin biometría/Face ID: no bloquear el ingreso, se accede igual.
     if (!webauthnSupported) {
       persistRemember();
@@ -4734,7 +6288,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] overflow-y-auto">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="relative p-5 sm:p-7 border-b border-slate-800 text-center">
           {(savedCustomer?.customerName || panel === 'confirm') && (
@@ -4980,7 +6534,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
                   Volver a {savedCustomer.customerName.split(' ')[0]}
                 </button>
               )}
-              {(isCurrentAdmin || ADMIN_PHONES.includes(`${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11))) && (
+              {(isCurrentAdmin || adminPhones.includes(`${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11))) && (
                 <button
                   type="button"
                   onClick={onGoToAdmin}
@@ -5033,6 +6587,9 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
 
 function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRemove, onProceedToCheckout, holdDeadline, onShare }) {
   const [nowMs, setNowMs] = useState(Date.now());
+
+  useOverlay(isOpen, onClose);
+
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
@@ -5048,7 +6605,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
         {/* Drawer Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
@@ -5086,8 +6643,8 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
                 key={item.product.id}
                 className="flex items-center gap-3 sm:gap-4 p-3 sm:p-3.5 rounded-2xl bg-slate-800/60 border border-slate-700/60 group hover:border-slate-600 transition-all"
               >
-                <img
-                  src={item.product.image}
+                <ProductImg
+                  product={item.product}
                   alt={item.product.name}
                   className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover bg-slate-900 shrink-0"
                 />
@@ -5206,6 +6763,8 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
   const [showCalendar, setShowCalendar] = useState(false);
   const PAGE_SIZE = 6;
 
+  useOverlay(isOpen, onClose);
+
   const filtered = useMemo(() => {
     const now = new Date();
     const todayStart = startOfDay(now);
@@ -5240,7 +6799,7 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
         {/* Drawer Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
@@ -5426,12 +6985,12 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
       data-cart-target
       onClick={onOpen}
       style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
-      className="fixed bottom-[4.6rem] sm:bottom-4 left-0 right-0 sm:left-1/2 sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg z-40 px-4 sm:px-5 pt-3.5 sm:pt-4 bg-slate-950/90 sm:rounded-3xl border-t sm:border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-screen-up hover:border-teal-400/60 transition-all group"
+      className="fixed bottom-[4.6rem] sm:bottom-4 left-0 right-0 sm:left-1/2 sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg z-40 px-4 sm:px-5 pt-3.5 sm:pt-4 bg-slate-950/90 sm:rounded-3xl border-t sm:border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-screen-up hover:border-teal-400/60 transition-all group btn-sink"
     >
       <div className="flex items-center gap-2.5 sm:gap-3">
         <span className="relative p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-teal-500/15 text-teal-400">
-          <Icon name="shoppingBag" className="w-5 h-5" />
-          <span key={cartCount} className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-badge-pop">
+          <Icon key={`bag-${cartCount}`} name="shoppingBag" className="w-5 h-5 animate-cart-bounce" />
+          <span key={`badge-${cartCount}`} className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-badge-spring">
             {cartCount}
           </span>
         </span>
@@ -5476,7 +7035,9 @@ function BottomTabBar({
   pendingOrders,
   pendingPayments,
   onLogout,
-  isAdminAuthed
+  isAdminAuthed,
+  calcOpen,
+  onToggleCalc
 }) {
   const base =
     'flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 flex-[1_0_auto] min-w-[64px] max-w-[104px] rounded-2xl transition-all duration-300 active:scale-95';
@@ -5490,6 +7051,13 @@ function BottomTabBar({
       label: 'Tienda',
       icon: 'home',
       onClick: onGoStore,
+      badge: null
+    },
+    {
+      key: 'calc',
+      label: 'Calculadora',
+      icon: 'calculator',
+      onClick: onToggleCalc,
       badge: null
     },
     {
@@ -5533,7 +7101,8 @@ function BottomTabBar({
     { key: 'benefited', label: 'Beneficiados', icon: 'users', onClick: () => onAdminTab('benefited'), badge: null },
     { key: 'blacklist', label: 'Lista Negra', icon: 'alertTriangle', onClick: () => onAdminTab('blacklist'), badge: null },
     { key: 'abonos', label: 'Abonos', icon: 'wallet', onClick: () => onAdminTab('abonos'), badge: pendingPayments > 0 ? pendingPayments : null },
-    { key: 'analytics', label: 'Estadísticas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null }
+    { key: 'analytics', label: 'Finanzas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null },
+    { key: 'profile', label: 'Perfil', icon: 'user', onClick: () => onAdminTab('profile'), badge: null }
   ];
 
   const tabs = activeView === 'admin' && isAdminAuthed ? adminTabs : customerTabs;
@@ -5543,6 +7112,7 @@ function BottomTabBar({
   const isTabActive = (t) => {
     if (activeView === 'admin' && isAdminAuthed) return adminTab === t.key;
     if (t.key === 'cart') return cartCount > 0;
+    if (t.key === 'calc') return calcOpen;
     return customerTab === t.key;
   };
 
@@ -5627,9 +7197,76 @@ const makePinIcon = (color, label) =>
     iconAnchor: [13, 42]
   });
 
+// Marcador "repartidor" estilo Uber: núcleo circular emerald que viaja con el
+// repartidor, con un halo expansivo que pulsa (look de "entrega en vivo").
+const makeCourierIcon = () =>
+  L.divIcon({
+    className: '',
+    html: `
+      <div class="kiosko-courier-dot" style="filter:drop-shadow(0 3px 6px rgba(0,0,0,.45))">
+        <div class="kiosko-courier-core">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        </div>
+      </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+  });
+
+// Marcador "destino" estilo Uber Eats: círculo con paquete/bolsa en destino.
+const makeDestIcon = () =>
+  L.divIcon({
+    className: '',
+    html: `
+      <div style="display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 3px 6px rgba(0,0,0,.45))">
+        <div style="width:30px;height:30px;border-radius:9999px;background:#0f172a;border:3px solid #f43f5e;color:#fb7185;display:flex;align-items:center;justify-content:center">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
+        </div>
+      </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+  });
+
 // Mapa interactivo (Leaflet + OpenStreetMap, sin API key) para la entrega a
 // domicilio. Muestra el comercio (origen), el destino del cliente, la posición
 // en vivo del repartidor y el camino sugerido repartidor → destino (OSRM).
+
+// ETA Predictivo: calcula la distancia en línea recta entre el repartidor y el
+// destino y estima el tiempo de llegada asumiendo una velocidad promedio de
+// moto/delivery urbano (~20 km/h). Se refresca con cada actualización del rastreo.
+function EtaEstimate({ cLat, cLng, dLat, dLng }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const km = haversineKm(cLat, cLng, dLat, dLng);
+  const kmRoad = km * 1.3; // factor por caminos (no línea recta)
+  const minutes = Math.max(1, Math.round((kmRoad / 20) * 60));
+  const eta = new Date(now + minutes * 60000);
+  return (
+    <div className="grid grid-cols-3 gap-2 text-center">
+      <div className="rounded-xl bg-slate-900/60 border border-teal-500/20 p-2.5">
+        <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-semibold">Distancia</span>
+        <span className="block text-lg font-black text-white mt-0.5">
+          {km.toFixed(1)}<span className="text-[10px] font-semibold text-slate-400 ml-0.5">km</span>
+        </span>
+      </div>
+      <div className="rounded-xl bg-slate-900/60 border border-teal-500/20 p-2.5">
+        <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-semibold">Llegada</span>
+        <span className="block text-lg font-black text-teal-300 mt-0.5">
+          {eta.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+        </span>
+      </div>
+      <div className="rounded-xl bg-slate-900/60 border border-teal-500/20 p-2.5">
+        <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-semibold">Tiempo</span>
+        <span className="block text-lg font-black text-white mt-0.5">
+          ~{minutes}<span className="text-[10px] font-semibold text-slate-400 ml-0.5">min</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function DeliveryMap({ order, storeLocation }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -5681,15 +7318,13 @@ function DeliveryMap({ order, storeLocation }) {
     layerGroup.clearLayers();
     let courierMarker = courierMarkerRef.current;
     pts.forEach((m) => {
-      const icon =
-        m.kind === 'courier'
-          ? makePinIcon('#10b981', 'REPARTIDOR')
-          : m.kind === 'store'
-          ? makePinIcon('#22d3ee', 'COMERCIO')
-          : makePinIcon('#f43f5e', 'DESTINO');
+      let icon;
+      if (m.kind === 'courier') icon = makeCourierIcon();
+      else if (m.kind === 'store') icon = makePinIcon('#22d3ee', 'COMERCIO');
+      else icon = makeDestIcon();
       if (m.kind === 'courier') {
         if (!courierMarker) {
-          courierMarker = L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+          courierMarker = L.marker([m.lat, m.lng], { icon, zIndexOffset: 1000 }).addTo(layerGroup);
           courierMarkerRef.current = courierMarker;
         } else {
           courierMarker.setLatLng([m.lat, m.lng]);
@@ -5712,7 +7347,7 @@ function DeliveryMap({ order, storeLocation }) {
           [Number(order.courier_lat), Number(order.courier_lng)],
           [Number(order.lat), Number(order.lng)]
         ],
-        { color: '#10b981', weight: 3, dashArray: '6 6', opacity: 0.7 }
+        { color: '#a7f3d0', weight: 5, opacity: 0.5, className: 'kiosko-route-animated' }
       ).addTo(layerGroup);
       const url = `https://router.project-osrm.org/route/v1/driving/${Number(order.courier_lng)},${Number(order.courier_lat)};${Number(order.lng)},${Number(order.lat)}?overview=full&geometries=geojson`;
       fetch(url)
@@ -5723,7 +7358,7 @@ function DeliveryMap({ order, storeLocation }) {
           if (routeRef.current) layerGroup.removeLayer(routeRef.current);
           const poly = L.polyline(
             coords.map((c) => [c[1], c[0]]),
-            { color: '#10b981', weight: 5, opacity: 0.9 }
+            { color: '#10b981', weight: 5, opacity: 0.9, className: 'kiosko-route-animated' }
           ).addTo(layerGroup);
           routeRef.current = poly;
         })
@@ -5753,11 +7388,56 @@ function DeliveryMap({ order, storeLocation }) {
 
   if (!showMap) return null;
 
+  const statusLabel = order.status === 'en_camino' ? 'En camino a tu destino' : STATUS_LABELS[order.status] || 'En preparación';
+
   return (
-    <div className="space-y-2">
-      <div className="relative z-0 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
-        <div ref={containerRef} className="w-full h-44 sm:h-52" />
+    <div className="space-y-2.5">
+      {/* Cabecera de estado estilo Uber */}
+      <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-900/80 border border-slate-700/80">
+        <span className="relative flex w-3 h-3 shrink-0">
+          <span className={`absolute inline-flex h-full w-full rounded-full ${courier ? 'bg-emerald-400 opacity-75 animate-ping' : 'bg-teal-400 opacity-75 animate-ping'}`} />
+          <span className={`relative inline-flex rounded-full w-3 h-3 ${courier ? 'bg-emerald-400' : 'bg-teal-400'}`} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-white truncate">{statusLabel}</p>
+          <p className="text-[11px] text-slate-400 truncate">
+            {courier
+              ? 'Repartidor en vivo · la posición se actualiza cada 5 s'
+              : dest
+              ? 'Preparando tu pedido para la entrega'
+              : 'Tu pedido de reparto se está preparando'}
+          </p>
+        </div>
+        {courier && courierUrl && (
+          <a
+            href={courierUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+            title="Ver repartidor en Google Maps"
+          >
+            <Icon name="externalLink" className="w-3.5 h-3.5" />
+          </a>
+        )}
       </div>
+
+      <div className="relative z-0 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+        <div ref={containerRef} className="w-full h-48 sm:h-60" />
+        {/* Badge flotante: repartidor en vivo */}
+        {courier && (
+          <div className="absolute top-2.5 left-2.5 z-[1000] flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950/85 border border-emerald-500/40 backdrop-blur-md text-emerald-300 text-[10px] font-bold pointer-events-none">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            EN VIVO
+          </div>
+        )}
+      </div>
+
+      {/* ETA + distancia (estilo Uber: "llega en ~N min") */}
+      {courier && dest && (
+        <EtaEstimate cLat={Number(order.courier_lat)} cLng={Number(order.courier_lng)} dLat={Number(order.lat)} dLng={Number(order.lng)} />
+      )}
+
+      {/* Footer: enlaces rápidos a Google Maps */}
       <div className="flex flex-wrap gap-2">
         {store && storeUrl && (
           <a
@@ -5778,7 +7458,7 @@ function DeliveryMap({ order, storeLocation }) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
           >
             <Icon name="mapPin" className="w-3.5 h-3.5" />
-            Ubicación del repartidor
+            Repartidor
           </a>
         )}
         {dest && destUrl && (
@@ -5789,7 +7469,7 @@ function DeliveryMap({ order, storeLocation }) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-[11px] font-bold hover:bg-teal-500/25 transition-all"
           >
             <Icon name="mapPin" className="w-3.5 h-3.5" />
-            Destino de la entrega
+            Destino
           </a>
         )}
       </div>
@@ -5872,6 +7552,7 @@ function DeliveriesRouteMap({ storeLocation, deliveries, storeLabel = 'KIOSKO' }
 // cliente (para elegir dónde recibir distinto de su ubicación actual) y el
 // admin (para fijar la ubicación del comercio).
 function MapPickerModal({ title, initial, onPick, onClose }) {
+  useOverlay(true, onClose);
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markerRef = useRef(null);
@@ -5993,7 +7674,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-scale-up">
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
@@ -6078,7 +7759,8 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
 
 // Modal de rastreo en vivo para el cliente: consulta el estado del pedido y la
 // posición del repartidor cada 5s mientras está abierto, mostrando el mapa.
-function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrderUpdated, addToast }) {
+function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrderUpdated, addToast, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const [track, setTrack] = useState(order);
   const [error, setError] = useState('');
   const [messages, setMessages] = useState([]);
@@ -6142,10 +7824,14 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
     : null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-scale-up">
-        <div className="p-5 sm:p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 flex items-center justify-between gap-3">
+    <div
+      className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in"
+      style={{ top: headerHeight }}
+    >
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 shrink-0 bg-slate-900 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
               <Icon name="mapPin" className="w-5 h-5 text-emerald-400" />
@@ -6161,7 +7847,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
           </button>
         </div>
 
-        <div className="p-5 sm:p-6 space-y-4">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Stepper de estados: oculto hasta validar el pago digital */}
           {needsPaymentValidation(order) ? (
             <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
@@ -6175,8 +7861,8 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
               const isCurrent = idx === currentIdx;
               return (
                 <div key={step.key} className="flex flex-col items-center gap-1.5 sm:gap-2">
-                  <div className={`w-full h-1.5 sm:h-2 rounded-full transition-all duration-500 ${isPassed ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50' : 'bg-slate-700/60'}`} />
-                  <span className={`text-[9px] sm:text-xs font-semibold text-center leading-tight ${isCurrent ? 'text-emerald-300 font-bold scale-105' : isPassed ? 'text-slate-300' : 'text-slate-500'}`}>
+                  <div className={`w-full h-1.5 sm:h-2 rounded-full transition-all duration-500 ${isPassed ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50' : 'bg-slate-700/60'} ${isCurrent ? 'animate-pulse' : ''}`} />
+                  <span className={`text-[9px] sm:text-xs font-semibold text-center leading-tight transition-all ${isCurrent ? 'text-emerald-300 font-bold scale-110 order-timeline-dot--active' : isPassed ? 'text-slate-300' : 'text-slate-500'}`}>
                     {step.label}
                   </span>
                 </div>
@@ -6210,6 +7896,25 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
             <p className="text-slate-500">La posición se actualiza automáticamente cada 5 segundos.</p>
           </div>
 
+          {/* ETA Predictivo: distancia y hora estimada de llegada del repartidor */}
+          {status === 'en_camino' && courierLive && track?.courier_lat != null && track?.courier_lng != null && order?.lat != null && order?.lng != null && (
+            <div className="rounded-xl bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-cyan-500/10 border border-teal-500/25 p-3.5 animate-fade-in">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon name="navigation" className="w-4 h-4 text-teal-400" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-teal-300">ETA Predictivo</span>
+              </div>
+              <EtaEstimate
+                cLat={Number(track.courier_lat)}
+                cLng={Number(track.courier_lng)}
+                dLat={Number(order.lat)}
+                dLng={Number(order.lng)}
+              />
+              <p className="text-[10px] text-slate-500 mt-2">
+                Estimado según distancia y ritmo promedio de reparto; puede variar por tráfico.
+              </p>
+            </div>
+          )}
+
           {/* Chat del pedido con la tienda */}
           <div className="rounded-2xl bg-slate-800/60 border border-slate-700 overflow-hidden">
             <div className="p-3 border-b border-slate-700/70 flex items-center gap-2">
@@ -6236,7 +7941,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
                 }}
                 placeholder="Escribe un mensaje…"
                 maxLength={300}
-                className="flex-1 min-w-0 px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+                className="flex-1 min-w-0 px-3 py-2.5 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
               />
               <button
                 onClick={handleSendMessage}
@@ -6263,11 +7968,15 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
         </div>
       </div>
     </div>
+    </div>
   );
 }
 
-function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig, holdDeadline }) {
+function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmit, savedCustomer, knownCustomers, allCustomers, onSaveCustomer, customerProfile, onSaveAddress, addToast, paymentConfig, holdDeadline }) {
   const [nowMs, setNowMs] = useState(Date.now());
+
+  useOverlay(true, onClose);
+
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
@@ -6358,14 +8067,41 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     );
   };
 
-  // Autocompletado por teléfono: busca clientes conocidos cuyos 7 dígitos coincidan
+  // Autocompletado por teléfono: busca clientes conocidos (historial local) y
+  // registrados (servidor) cuyos 7 dígitos coincidan
   const phoneSuggestions = useMemo(() => {
     if (formData.phoneNumber.length < 3) return [];
     const q = formData.phoneNumber;
-    return knownCustomers
-      .filter((c) => (c.number || '').startsWith(q))
-      .slice(0, 3);
-  }, [knownCustomers, formData.phoneNumber]);
+    const known = (knownCustomers || []).filter((c) => (c.number || '').startsWith(q));
+    const server = (allCustomers || [])
+      .map((c) => ({
+        name: c.customerName || c.name || '',
+        code: String(c.phone || '').slice(0, 4),
+        number: String(c.phone || '').slice(-7),
+        address: Array.isArray(c.addresses) && c.addresses[0] ? c.addresses[0] : ''
+      }))
+      .filter((c) => c.number.startsWith(q));
+    const extra = server.filter((s) => !known.some((k) => k.number === s.number));
+    return [...known, ...extra].slice(0, 3);
+  }, [knownCustomers, allCustomers, formData.phoneNumber]);
+
+  // Autocompleta el nombre desde el servidor cuando el teléfono está completo
+  // y el cliente no escribió nada a mano.
+  useEffect(() => {
+    if (formData.phoneNumber.length !== 7 || formData.customerName.trim()) return;
+    let cancelled = false;
+    const phoneDigits = `${formData.phoneCode}${formData.phoneNumber}`.replace(/\D/g, '').slice(-11);
+    api
+      .getCustomer(phoneDigits)
+      .then((res) => {
+        if (cancelled) return;
+        const n = res && res.ok && res.data ? res.data.customerName : '';
+        if (n) setFormData((prev) => (prev.customerName.trim() ? prev : { ...prev, customerName: n }));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.phoneCode, formData.phoneNumber]);
 
   const applyCustomer = (customer) => {
     setFormData((prev) => ({
@@ -6407,9 +8143,20 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (isPlacingOrder) return;
+    if (/^\d{7}$/.test(formData.phoneNumber)) {
+      // Un usuario inhabilitado por el super admin no puede pedir.
+      const phoneDigits = `${formData.phoneCode}${formData.phoneNumber}`.replace(/\D/g, '').slice(-11);
+      try {
+        const existing = await api.getCustomer(phoneDigits);
+        if (existing.ok && existing.data && existing.data.disabled) {
+          setErrors({ phone: 'Tu cuenta está inhabilitada por el kiosko. Contacta la tienda.' });
+          return;
+        }
+      } catch {}
+    }
     if (validate()) {
       // Con "Mi Cartera": aplica el saldo a favor al total. Si cubre todo el
       // pedido, el pago queda confirmado con cartera; si no, el resto se paga
@@ -6453,7 +8200,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
         {/* Handle visual para indicar arrastre en móvil */}
         <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
@@ -7083,6 +8830,7 @@ function AdminView({
   allCustomers,
   onLoadCustomers,
   onToggleBenefited,
+  onSetCreditLimit,
   onAddToBlacklist,
   onAddBlacklistDebt,
   collections,
@@ -7098,6 +8846,12 @@ function AdminView({
   storeLocation,
   onSaveStoreLocation,
   adminPhone,
+  adminRole,
+  adminProfile,
+  onChangePassword,
+  onSaveAdminProfile,
+  theme,
+  onSetTheme,
   headerHeight
 }) {
   // Order status filter state + preferencias recordadas (filtro, vista, orden
@@ -7118,10 +8872,136 @@ function AdminView({
     }
   };
   const [initialOrderPrefs] = useState(loadOrderPrefs);
+  const [confirmRefresh, setConfirmRefresh] = useState(false);
   const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
   const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
   const [ageSortOldest, setAgeSortOldest] = useState(initialOrderPrefs.ageSortOldest);
+
+  // Preferencias del panel por administrador (tema, atajos, columnas visibles).
+  // Se guardan en localStorage con la clave del teléfono: cada admin conserva
+  // su propia configuración aunque compartan el mismo dispositivo.
+  const ADMIN_PREFS_KEY = adminPhone ? `kiosko_admin_prefs_${adminPhone}` : null;
+  const loadAdminPrefs = () => {
+    if (!ADMIN_PREFS_KEY) return null;
+    try {
+      return JSON.parse(localStorage.getItem(ADMIN_PREFS_KEY) || 'null');
+    } catch {
+      return null;
+    }
+  };
+  const [adminPrefs, setAdminPrefs] = useState(loadAdminPrefs);
+  const [showAdminProfile, setShowAdminProfile] = useState(false);
+  const saveAdminPrefs = (next) => {
+    const merged = { ...(adminPrefs || {}), ...next };
+    setAdminPrefs(merged);
+    if (ADMIN_PREFS_KEY) {
+      try { localStorage.setItem(ADMIN_PREFS_KEY, JSON.stringify(merged)); } catch {}
+    }
+  };
+  const isSuperAdmin = adminRole === 'superadmin';
+
+  // Empleados gestionados (solo super admin) + sesiones activas.
+  const [employees, setEmployees] = useState([]);
+  const [activeSessions, setActiveSessions] = useState([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const [newEmployeePhone, setNewEmployeePhone] = useState('');
+  const [newEmployeeName, setNewEmployeeName] = useState('');
+  const [usersFilter, setUsersFilter] = useState('');
+  const [usersBusy, setUsersBusy] = useState(false);
+
+  const loadEmployees = useCallback(async () => {
+    setLoadingEmployees(true);
+    try {
+      const [emp, ses] = await Promise.all([api.listAdminEmployees(), api.listAdminSessions()]);
+      if (emp.ok && Array.isArray(emp.data.employees)) setEmployees(emp.data.employees);
+      if (ses.ok && Array.isArray(ses.data.sessions)) setActiveSessions(ses.data.sessions);
+    } catch {}
+    setLoadingEmployees(false);
+  }, []);
+
+  const addEmployee = async () => {
+    const phone = newEmployeePhone.replace(/\D/g, '').slice(-11);
+    if (phone.length < 7) {
+      addToast('Ingresa un teléfono válido (7 dígitos o más)', 'error');
+      return;
+    }
+    const res = await api.addAdminEmployee({ phone, name: newEmployeeName.trim() });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo añadir el empleado', 'error');
+      return;
+    }
+    addToast('Empleado añadido al panel');
+    setNewEmployeePhone('');
+    setNewEmployeeName('');
+    loadEmployees();
+  };
+
+  const removeEmployee = async (phone) => {
+    const res = await api.removeAdminEmployee(phone);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo quitar el empleado', 'error');
+      return;
+    }
+    addToast('Empleado quitado del panel');
+    loadEmployees();
+  };
+
+  const revokeSession = async (phone) => {
+    const res = await api.revokeAdminSession(phone);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo cerrar la sesión', 'error');
+      return;
+    }
+    addToast('Sesión cerrada remotamente');
+    loadEmployees();
+  };
+
+  const toggleCustomerDisabled = async (customer) => {
+    if (usersBusy) return;
+    const next = !customer.disabled;
+    setUsersBusy(true);
+    const res = await api.setCustomerDisabled(customer.phone, next);
+    setUsersBusy(false);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el usuario', 'error');
+      return;
+    }
+    addToast(next ? 'Usuario inhabilitado. No podrá pasar del login.' : 'Usuario habilitado');
+    onLoadCustomers();
+  };
+
+  const deleteCustomerAccount = async (customer) => {
+    if (usersBusy) return;
+    if (!window.confirm(`¿Eliminar el perfil de "${customer.customerName || customer.phone}"? Esta acción no se puede deshacer.`)) return;
+    setUsersBusy(true);
+    const res = await api.deleteCustomer(customer.phone);
+    setUsersBusy(false);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo eliminar el usuario', 'error');
+      return;
+    }
+    addToast('Perfil eliminado del sistema');
+    onLoadCustomers();
+  };
+
+  const filteredSystemUsers = (allCustomers || []).filter((c) => {
+    const q = usersFilter.trim().toLowerCase();
+    if (!q) return true;
+    return String(c.phone).includes(q) || (c.customerName || '').toLowerCase().includes(q);
+  });
+
+  // Vista del inventario: 'lista' (tabla/tarjetas) | 'recorrido' (filas
+  // horizontales estilo tienda con las opciones del admin en cada tarjeta).
+  const [invView, setInvView] = useState('lista');
+
+  // Al entrar con un admin que tiene tema propio guardado, se aplica ese tema.
+  useEffect(() => {
+    if (adminPrefs?.theme && theme !== adminPrefs.theme) {
+      onSetTheme(adminPrefs.theme);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [pinnedOrders, setPinnedOrders] = useState(() => {
     try {
       const list = JSON.parse(localStorage.getItem(PINNED_KEY) || '[]');
@@ -7189,6 +9069,19 @@ function AdminView({
       .sort((a, b) => a.localeCompare(b))
       .map((br) => ({ brand: br, items: map[br] }));
   }, [filteredProducts, invGroupByBrand]);
+
+  // Agrupa los productos filtrados por categoría para la góndola del recorrido
+  // (misma forma que groupedByBrand, pero por categoría).
+  const inventoryProductsByCategory = () => {
+    const map = {};
+    filteredProducts.forEach((p) => {
+      const c = p.category || 'Otros';
+      (map[c] = map[c] || []).push(p);
+    });
+    return Object.keys(map)
+      .sort((a, b) => a.localeCompare(b))
+      .map((c) => ({ key: c, label: c, items: map[c] }));
+  };
   const clearInvFilters = () => {
     setInvSearch('');
     setInvCategory('todas');
@@ -7202,10 +9095,10 @@ function AdminView({
         key={p.id}
         className="flex items-center gap-3 p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60"
       >
-        <img
-          src={p.image}
+        <ProductImg
+          product={p}
           alt={p.name}
-          className="w-14 h-14 rounded-xl object-cover bg-slate-900 border border-slate-700 shrink-0"
+          className="w-14 h-14 rounded-xl object-cover glass-strong bg-slate-900 border border-slate-700 shrink-0"
         />
         <div className="flex-1 min-w-0">
           <p className="font-bold text-slate-100 text-sm truncate">{p.name}</p>
@@ -7258,10 +9151,10 @@ function AdminView({
     return (
       <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
         <td className="p-4 flex items-center gap-3">
-          <img
-            src={p.image}
+          <ProductImg
+            product={p}
             alt={p.name}
-            className="w-12 h-12 rounded-xl object-cover bg-slate-900 border border-slate-700"
+            className="w-12 h-12 rounded-xl object-cover glass-strong bg-slate-900 border border-slate-700"
           />
           <div>
             <p className="font-bold text-slate-100">{p.name}</p>
@@ -7272,7 +9165,7 @@ function AdminView({
         </td>
         <td className="p-4 font-mono text-xs text-slate-400">{p.code}</td>
         <td className="p-4">
-          <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-300">
+          <span className="px-2.5 py-1 rounded-xl glass-strong bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-300">
             {p.category}
           </span>
         </td>
@@ -7706,24 +9599,6 @@ function AdminView({
     setPromoDraft(null);
   };
 
-  const topByDemand = useMemo(() => {
-    const counts = {};
-    orders.forEach((o) =>
-      o.items.forEach((it) => {
-        counts[it.id] = (counts[it.id] || 0) + it.quantity;
-      })
-    );
-    return Object.entries(counts)
-      .map(([id, quantity]) => ({ id, quantity }))
-      .sort((a, b) => b.quantity - a.quantity)
-      .map(({ id, quantity }) => {
-        const p = products.find((prod) => prod.id === id);
-        return p ? { ...p, quantity } : null;
-      })
-      .filter(Boolean)
-      .slice(0, 4);
-  }, [orders, products]);
-
   // Tendencia de ventas por día (últimos 7 días): cantidad de pedidos y ventas en $.
   const salesByDay = useMemo(() => {
     const days = [];
@@ -7771,6 +9646,100 @@ function AdminView({
     return `⚠️ *ALERTA DE STOCK BAJO* en Kiosko 247\n\nProductos con pocas unidades:\n${lines.join('\n')}\n\nRevisa el inventario y repón lo antes posible.`;
   }, [lowStockProducts]);
 
+  // Pedido de reabastecimiento al proveedor: productos con stock bajo y cantidad
+  // sugerida para reponer (mín. 10 unidades), listo para enviar por WhatsApp.
+  const reorderMessage = useMemo(() => {
+    if (lowStockProducts.length === 0) return '';
+    const lines = lowStockProducts.slice(0, 15).map((p) => `• ${p.name}: ${Math.max(10, Math.ceil(p.stock * 2))} un.`);
+    return `📦 *PEDIDO DE REABASTECIMIENTO — Kiosko 247*\n\nNecesito reponer:\n${lines.join('\n')}\n\nPor favor confírmame disponibilidad y precio.`;
+  }, [lowStockProducts]);
+
+  // ===== Dashboard financiero en vivo =====
+  // KPIs del día (hoy y ayer) a partir de pedidos pagados/entregados.
+  const finDash = useMemo(() => {
+    const today = toYMD(new Date());
+    const yesterday = toYMD(new Date(Date.now() - 86400000));
+    const byDay = { [today]: { orders: 0, revenue: 0, cash: 0, digital: 0, credit: 0, tickets: 0 }, [yesterday]: { orders: 0, revenue: 0, cash: 0, digital: 0, credit: 0, tickets: 0 } };
+    const todayItems = {};
+    orders.forEach((o) => {
+      const day = toYMD(parseOrderDate(o));
+      if (!byDay[day]) return;
+      const isSale = o.status === 'entregado';
+      if (o.status !== 'cancelado') byDay[day].tickets += 1;
+      if (!isSale) return;
+      const total = Number(o.total) || 0;
+      byDay[day].orders += 1;
+      byDay[day].revenue += total;
+      if (o.credit) byDay[day].credit += total;
+      else if (o.paymentMethod === 'efectivo') byDay[day].cash += total;
+      else byDay[day].digital += total;
+      if (day === today) {
+        o.items.forEach((it) => {
+          todayItems[it.id] = (todayItems[it.id] || 0) + it.quantity;
+        });
+      }
+    });
+    const t = byDay[today];
+    const y = byDay[yesterday];
+    const topToday = Object.entries(todayItems)
+      .map(([id, quantity]) => {
+        const p = products.find((prod) => prod.id === id);
+        return p ? { ...p, quantity } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 5);
+    return {
+      today: t,
+      yesterday: y,
+      ticketAvg: t.orders > 0 ? t.revenue / t.orders : 0,
+      revenueDelta: y.revenue > 0 ? ((t.revenue - y.revenue) / y.revenue) * 100 : (t.revenue > 0 ? 100 : 0),
+      ticketsDelta: y.tickets > 0 ? ((t.tickets - y.tickets) / y.tickets) * 100 : (t.tickets > 0 ? 100 : 0),
+      topToday
+    };
+  }, [orders, products]);
+
+  // Total fiado pendiente (deuda activa de todos los clientes).
+  const totalFiado = useMemo(
+    () => (allCustomers || []).reduce((acc, c) => acc + Math.max(0, Number(c.balance) || 0), 0),
+    [allCustomers]
+  );
+
+  // Pedidos pagados digitales pendientes de validar (caja).
+  const cashDigitalTotal = useMemo(() => {
+    let cash = 0;
+    let digital = 0;
+    completedOrders.forEach((o) => {
+      if (o.credit) return;
+      if (o.paymentMethod === 'efectivo') cash += Number(o.total) || 0;
+      else digital += Number(o.total) || 0;
+    });
+    return { cash, digital };
+  }, [completedOrders]);
+
+  // ===== Kiosko Operator: resumen de jornada (cierre del día) =====
+  const jornadaSummary = useMemo(() => {
+    const t = finDash.today;
+    const top = finDash.topToday.slice(0, 3).map((p) => `• ${p.name}: ${p.quantity} un.`).join('\n') || '• Sin ventas aún';
+    const lines = [
+      `📊 *RESUMEN DE JORNADA — Kiosko 247*`,
+      `🗓️ Hoy, ${new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}`,
+      ``,
+      `💰 Ventas: ${formatUsd(t.revenue)} (${t.orders} entregados)`,
+      `🎫 Tickets: ${t.tickets} pedidos`,
+      `🧾 Ticket promedio: ${finDash.ticketAvg > 0 ? formatUsd(finDash.ticketAvg) : '—'}`,
+      `💵 Efectivo: ${formatUsd(t.cash)}`,
+      `📲 Digital: ${formatUsd(t.digital)}`,
+      `📒 Fiado: ${formatUsd(t.credit)}`,
+      `🧮 Deuda total pendiente: ${formatUsd(totalFiado)}`,
+      ``,
+      `🏆 Top productos:`,
+      top,
+      ``,
+      `Comparado con ayer: ventas ${finDash.revenueDelta >= 0 ? `▲ +${finDash.revenueDelta.toFixed(0)}%` : `▼ ${finDash.revenueDelta.toFixed(0)}%`}`
+    ];
+    return lines.join('\n');
+  }, [finDash, totalFiado]);
 
   const renderOrderCard = (order, { inFicha = false } = {}) => {
     const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
@@ -7872,8 +9841,9 @@ function AdminView({
             </div>
             {order.type === 'delivery' ? (
               inFicha ? (
-                <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
-                  🚚 Entrega a Domicilio
+                <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
+                  <Icon name="mapPin" className="w-3 h-3" />
+                  Entrega a Domicilio
                 </span>
               ) : (
                 <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
@@ -7898,8 +9868,9 @@ function AdminView({
                 </p>
               )
             ) : (
-              <span className="inline-block mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
-                🛍️ Retiro por Mostrador
+              <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
+                <Icon name="store" className="w-3 h-3" />
+                Retiro por Mostrador
               </span>
             )}
           </div>
@@ -8112,20 +10083,86 @@ function AdminView({
     );
   };
 
+  const openProfile = () => {
+    // En móvil el perfil es una vista completa; en escritorio, el modal clásico.
+    if (window.innerWidth < 640) setAdminTab('profile');
+    else setShowAdminProfile(true);
+  };
+
+  if (adminTab === 'profile') {
+    return (
+      <AdminProfileView
+        phone={adminPhone}
+        role={adminRole}
+        profile={adminProfile}
+        onChangePassword={onChangePassword}
+        onSaveProfile={onSaveAdminProfile}
+        adminPrefs={adminPrefs}
+        onSavePrefs={saveAdminPrefs}
+        theme={theme}
+        onSetTheme={onSetTheme}
+        onBack={() => setAdminTab('inventory')}
+      />
+    );
+  }
+
   return (
     <div className="space-y-5 sm:space-y-8 animate-fade-in">
       {/* Admin Top Dashboard Header */}
       <div className="flex flex-col sm:flex-row md:items-center justify-between gap-4 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md">
         <div>
-          <span className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold uppercase tracking-wider">
-            🛡️ Panel Administrativo
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold uppercase tracking-wider">
+            <Icon name="layers" className="w-3.5 h-3.5" />
+            Panel Administrativo
           </span>
-          <h2 className="text-lg sm:text-2xl font-black text-white mt-2">Control de Inventario y Ventas</h2>
+          <h2 className="font-display text-lg sm:text-2xl font-black text-white mt-2">Control de Inventario y Ventas</h2>
           <p className="text-xs text-slate-400 mt-1">Gestiona tus productos en tiempo real y atiende pedidos entrantes.</p>
+
+          {/* Identidad del admin logueado: avatar, nombre, rol. Abre el perfil. */}
+          <button
+            onClick={openProfile}
+            className="mt-3 inline-flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-2xl bg-slate-900/60 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-900 transition-all group"
+            title="Abrir mi perfil de administrador"
+          >
+            {adminProfile?.photo ? (
+              <img
+                src={adminProfile.photo}
+                alt={adminProfile.name || 'Admin'}
+                className="w-9 h-9 rounded-xl object-cover bg-slate-800 border border-slate-600/60 shrink-0"
+              />
+            ) : (
+              <span className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-teal-400 text-slate-950 text-sm font-black flex items-center justify-center shrink-0">
+                {(adminProfile?.name || 'A').charAt(0).toUpperCase()}
+              </span>
+            )}
+            <span className="text-left min-w-0">
+              <span className="block text-xs font-bold text-white truncate max-w-40">
+                {adminProfile?.name || (adminPhone ? `Admin ${adminPhone.slice(-4)}` : 'Administrador')}
+              </span>
+              <span className="block text-[10px] text-slate-400 truncate">
+                {isSuperAdmin ? (
+                  <span className="inline-flex items-center gap-1 text-amber-300 font-semibold">
+                    <Icon name="star" className="w-3 h-3" /> Super Admin
+                  </span>
+                ) : (
+                  adminPhone
+                )}
+              </span>
+            </span>
+            <Icon name="chevronRight" className="w-3.5 h-3.5 text-slate-500 group-hover:text-teal-400 transition-colors" />
+          </button>
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={openProfile}
+            className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2"
+            title="Perfil del administrador y preferencias"
+          >
+            <Icon name="user" className="w-4 h-4" />
+            <span className="hidden sm:inline">Mi Perfil</span>
+          </button>
           <button
             onClick={onOpenAddModal}
             className="flex-1 sm:flex-none px-4 sm:px-5 py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-cyan-400 shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
@@ -8135,11 +10172,7 @@ function AdminView({
           </button>
           {window.location.hostname === 'kiosko-247-staging.onrender.com' && (
             <button
-              onClick={() => {
-                if (window.confirm('¿Reemplazar los datos de calidad con una copia de producción? Esta acción no se puede deshacer.')) {
-                  onRefreshDb();
-                }
-              }}
+              onClick={() => setConfirmRefresh(true)}
               disabled={refreshingDb}
               className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
               title="Copiar datos de producción hacia calidad (reemplaza el contenido actual de calidad)"
@@ -8157,6 +10190,20 @@ function AdminView({
             <span className="hidden sm:inline">Salir</span>
           </button>
         </div>
+
+        {confirmRefresh && (
+          <ConfirmActionModal
+            title="¿Reemplazar los datos de calidad?"
+            message="Se copiará una muestra de producción sobre esta base. Todo lo que cambió en calidad se perderá."
+            note="Esta acción no se puede deshacer."
+            confirmLabel="Reemplazar"
+            onConfirm={() => {
+              setConfirmRefresh(false);
+              onRefreshDb();
+            }}
+            onClose={() => setConfirmRefresh(false)}
+          />
+        )}
       </div>
 
       {/* Analytics Summary Bar */}
@@ -8219,7 +10266,8 @@ function AdminView({
           { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
           { key: 'abonos', label: `Abonos (${pendingPayments})`, full: `Abonos por Aprobar (${pendingPayments})`, icon: 'wallet' },
           { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
-          { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Negocio', icon: 'trendingUp' }
+          { key: 'analytics', label: 'Finanzas', full: 'Finanzas & Métricas', icon: 'trendingUp' },
+          ...(isSuperAdmin ? [{ key: 'equipo', label: 'Equipo', full: 'Equipo y Sesiones Activas', icon: 'users' }] : [])
         ].map((tab) => (
           <button
             key={tab.key}
@@ -8227,6 +10275,7 @@ function AdminView({
               if (tab.key === 'benefited' || tab.key === 'blacklist') onLoadCustomers();
               if (tab.key === 'blacklist') onLoadCollections();
               if (tab.key === 'abonos') onLoadPayments();
+              if (tab.key === 'equipo') loadEmployees();
               setAdminTab(tab.key);
             }}
             className={`pb-3 sm:pb-4 text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-all whitespace-nowrap shrink-0 ${
@@ -8250,16 +10299,65 @@ function AdminView({
       {/* Tab 1: Inventory Management */}
       {adminTab === 'inventory' && (
         <div className="space-y-4">
-          {/* Filtros: búsqueda en tiempo real + categoría + agrupación por marca */}
-          <div className="space-y-3">
-            <div className="flex flex-col sm:flex-row gap-2.5">
+          {/* Reorden de compras al proveedor: lista de productos con stock bajo
+              y cantidades sugeridas para reponer, lista para enviar por WhatsApp */}
+          {lowStockProducts.length > 0 && (
+            <div className="rounded-2xl border border-amber-500/40 bg-gradient-to-br from-amber-500/15 via-slate-900/80 to-slate-900/80 overflow-hidden">
+              <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 shrink-0 self-start sm:self-center">
+                  <Icon name="refresh" className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                    Reorden al proveedor
+                    <span className="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/25 text-amber-300">
+                      {lowStockProducts.length} por reponer
+                    </span>
+                  </h4>
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {lowStockProducts.slice(0, 6).map((p) => (
+                      <span
+                        key={p.id}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700/70 text-[10px] font-semibold text-slate-300"
+                      >
+                        {p.name}
+                        <span className="text-amber-400 font-black">x{Math.max(10, Math.ceil(p.stock * 2))}</span>
+                      </span>
+                    ))}
+                    {lowStockProducts.length > 6 && (
+                      <span className="inline-flex items-center px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700/70 text-[10px] font-semibold text-slate-400">
+                        +{lowStockProducts.length - 6} más
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2">
+                    Cantidad sugerida para reponer (mín. 10 un.) según el stock actual.
+                  </p>
+                </div>
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(reorderMessage)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-all text-xs font-bold w-full sm:w-auto"
+                >
+                  <Icon name="whatsapp" className="w-4 h-4" />
+                  Enviar pedido
+                </a>
+              </div>
+            </div>
+          )}
+
+          {/* Filtros: búsqueda en tiempo real + categoría + agrupación por marca.
+              La barra queda fija al hacer scroll (sticky) para no perder el filtro. */}
+          <div className="space-y-3" style={{ position: 'sticky', top: headerHeight, zIndex: 30 }}>
+            <div className="flex flex-col sm:flex-row gap-2.5 rounded-2xl bg-slate-900/85 backdrop-blur-md border border-slate-700/80 p-2.5 sm:p-3 shadow-2xl shadow-slate-950/60">
               <div className="relative flex-1">
                 <Icon name="search" className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
                   value={invSearch}
                   onChange={(e) => setInvSearch(e.target.value)}
                   placeholder="Buscar por nombre, código o marca…"
-                  className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-slate-900/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500/60 transition-all"
+                  className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-slate-800/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500/60 transition-all"
                 />
                 {invSearch && (
                   <button
@@ -8271,34 +10369,60 @@ function AdminView({
                   </button>
                 )}
               </div>
-              <button
-                onClick={() => setInvGroupByBrand((v) => !v)}
-                className={`shrink-0 px-3.5 py-2.5 rounded-2xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
-                  invGroupByBrand
-                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
-                    : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
-                }`}
-                title="Agrupar la lista por marca"
-              >
-                <Icon name="layers" className="w-4 h-4" />
-                {invGroupByBrand ? 'Agrupado por marca' : 'Agrupar por marca'}
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
-              {inventoryCategories.map((c) => (
+              <div className="flex items-center gap-2">
                 <button
-                  key={c}
-                  onClick={() => setInvCategory(c)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
-                    invCategory === c
-                      ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                  onClick={() => setInvGroupByBrand((v) => !v)}
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                    invGroupByBrand
+                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
                       : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
                   }`}
+                  title="Agrupar la lista por marca"
                 >
-                  {c === 'todas' ? 'Todas' : c}
-                  <span className="ml-1.5 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{catCount(c)}</span>
+                  <Icon name="layers" className="w-4 h-4" />
+                  <span className="hidden md:inline">{invGroupByBrand ? 'Agrupado por marca' : 'Agrupar por marca'}</span>
+                  <Icon name={invGroupByBrand ? 'check' : 'x'} className="w-3.5 h-3.5 md:hidden" />
                 </button>
-              ))}
+                <button
+                  onClick={() => setInvView((v) => (v === 'lista' ? 'recorrido' : 'lista'))}
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                    invView === 'recorrido'
+                      ? 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-lg shadow-teal-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title="Alternar entre lista y recorrido estilo tienda"
+                >
+                  <Icon name={invView === 'recorrido' ? 'list' : 'store'} className="w-4 h-4" />
+                  <span className="hidden md:inline">{invView === 'recorrido' ? 'Ver lista' : 'Recorrido tienda'}</span>
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
+              {inventoryCategories.map((c) => {
+                const id = c === 'todas' ? null : categoryIdentity(c);
+                const isActive = invCategory === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setInvCategory(c)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0 ${
+                      isActive
+                        ? c === 'todas'
+                          ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-lg shadow-teal-500/20'
+                          : `${id.solid} border-transparent shadow-lg`
+                        : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                    }`}
+                  >
+                    {c === 'todas' ? (
+                      <Icon name="layers" className="w-3 h-3" />
+                    ) : (
+                      <Icon name={id.icon} className="w-3 h-3" />
+                    )}
+                    {c === 'todas' ? 'Todas' : c}
+                    <span className="ml-1 px-1.5 py-0.5 rounded-lg bg-black/20 text-[10px]">{catCount(c)}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -8315,7 +10439,92 @@ function AdminView({
             </div>
           )}
 
-          {/* Mobile: card list */}
+          {/* Recorrido estilo tienda: góndolas horizontales con las mismas
+              acciones del admin (editar / eliminar) en cada producto. */}
+          {invView === 'recorrido' && filteredProducts.length > 0 && (
+            <div className="space-y-5">
+              {(invGroupByBrand
+                ? groupedByBrand.map((g) => ({ key: g.brand, label: g.brand, items: g.items }))
+                : inventoryProductsByCategory()
+              ).map((group) => (
+                <div key={group.key}>
+                  <div className="flex items-center gap-2 px-1 pb-2">
+                    <span className="px-2.5 py-1 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[10px] font-black uppercase tracking-wider">
+                      {group.label}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {group.items.length} producto{group.items.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="shelf-panel px-3 sm:px-4 pb-3 pt-2 bg-slate-900/40 border border-slate-700/50 rounded-2xl">
+                    <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-1 px-1 pt-1 pb-2">
+                      {group.items.map((p, i) => {
+                        const isLow = p.stock <= 5;
+                        const isOut = p.stock === 0;
+                        return (
+                          <div key={p.id} className="shelf-item" style={{ ['--sdel']: `${Math.min(i, 6) * 45}ms` }}>
+                            <div className="shelf-product">
+                              <div className="shelf-product__art">
+                                <ProductImg product={p} alt={p.name} loading="lazy" className="shelf-product__img" />
+                              </div>
+                              <span className="shelf-product__shadow" />
+                            </div>
+                            <div className="mt-2 space-y-1.5">
+                              <div className="flex items-center justify-between gap-1">
+                                <p className="truncate text-[11px] font-bold text-slate-100">{p.name}</p>
+                                <span
+                                  className={`shrink-0 px-1.5 py-0.5 rounded-md text-[9px] font-black border ${
+                                    isOut
+                                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                      : isLow
+                                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                      : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                  }`}
+                                >
+                                  {isOut ? 'Agotado' : `${p.stock} un.`}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 truncate">{p.code}</p>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="min-w-0 text-[11px] font-extrabold text-teal-400">
+                                  {formatUsd(p.price)}
+                                  {rate?.rate > 0 && (
+                                    <span className="block text-[9px] text-slate-500 font-semibold">
+                                      {formatBs(usdToBs(p.price, rate.rate))}
+                                    </span>
+                                  )}
+                                </span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    onClick={() => onEditProduct(p)}
+                                    className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
+                                    title="Editar producto"
+                                  >
+                                    <Icon name="edit" className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => onDeleteProduct(p)}
+                                    className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
+                                    title="Eliminar producto"
+                                  >
+                                    <Icon name="trash" className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="shelf-lip" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Mobile: card list (oculta en modo recorrido, que ya muestra góndolas) */}
+          {invView === 'lista' && (
           <div className="grid grid-cols-1 gap-3 sm:hidden">
             {invGroupByBrand
               ? groupedByBrand.map((g) => (
@@ -8335,8 +10544,10 @@ function AdminView({
                 ))
               : filteredProducts.map((p) => renderMobileCard(p))}
           </div>
+          )}
 
-          {/* Desktop: table */}
+          {/* Desktop: table (oculta en modo recorrido) */}
+          {invView === 'lista' && (
           <div className="hidden sm:block bg-slate-800/60 border border-slate-700/60 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -8372,6 +10583,7 @@ function AdminView({
               </table>
             </div>
           </div>
+          )}
         </div>
       )}
 
@@ -8580,7 +10792,12 @@ function AdminView({
                                   : 'text-teal-300 border-teal-500/40 bg-teal-500/10'
                               }`}
                             >
-                              {o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}
+                              {o.type === 'delivery' ? (
+                                <Icon name="mapPin" className="w-3 h-3" />
+                              ) : (
+                                <Icon name="store" className="w-3 h-3" />
+                              )}
+                              {o.type === 'delivery' ? 'Entrega' : 'Retiro'}
                             </span>
                           </div>
                           <OrderStepsTimeline order={o} />
@@ -8968,7 +11185,7 @@ function AdminView({
                               <td className="p-3 text-xs text-slate-400 whitespace-nowrap">
                                 {isNaN(d) ? '—' : `${d.toLocaleDateString('es-VE')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                               </td>
-                              <td className="p-3 text-xs text-slate-300">{o.type === 'delivery' ? '🚚 Entrega' : '🛍️ Retiro'}</td>
+                              <td className="p-3 text-xs text-slate-300">{o.type === 'delivery' ? 'Entrega a domicilio' : 'Retiro por mostrador'}</td>
                               <td className="p-3 text-xs text-slate-400 line-clamp-1 max-w-xs">
                                 {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
                               </td>
@@ -9208,7 +11425,7 @@ function AdminView({
           {/* Promo Editor Modal */}
           {isPromoModalOpen && promoDraft && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm">
-              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl animate-screen-up space-y-4 max-h-[92vh] overflow-y-auto">
+              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl glass-strong bg-slate-900 border border-slate-700 shadow-2xl animate-screen-up space-y-4 max-h-[92vh] overflow-y-auto">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-white text-lg">{promoDraft.id.startsWith('promo-') ? 'Nueva Promo' : 'Editar Promo'}</h4>
                   <button onClick={() => setIsPromoModalOpen(false)} className="text-slate-400 hover:text-white">
@@ -9306,7 +11523,7 @@ function AdminView({
               {allCustomers.map((c) => (
                 <div
                   key={c.phone}
-                  className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60"
+                  className="flex flex-wrap items-center gap-3 p-3 rounded-2xl glass-strong bg-slate-900 border border-slate-700/60"
                 >
                   <span
                     className={`p-2 rounded-xl shrink-0 ${
@@ -9319,6 +11536,9 @@ function AdminView({
                     <p className="text-sm font-bold text-slate-100 truncate">{c.customerName || 'Cliente'}</p>
                     <p className="text-[11px] text-slate-400">{c.phone}</p>
                   </div>
+                  {c.isBenefited && (
+                    <CreditLimitInput customer={c} onSetCreditLimit={onSetCreditLimit} />
+                  )}
                   <button
                     onClick={() => onToggleBenefited(c.phone, !c.isBenefited)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
@@ -9379,7 +11599,7 @@ function AdminView({
           </div>
 
           {storeLocation ? (
-            <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/60 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
               <span className="p-2.5 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
                 <Icon name="store" className="w-5 h-5" />
               </span>
@@ -9403,7 +11623,7 @@ function AdminView({
               </a>
             </div>
           ) : (
-            <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
+            <div className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
               Aún no configuraste la ubicación del comercio. Usa el botón para elegirla en el mapa.
             </div>
           )}
@@ -9430,14 +11650,19 @@ function AdminView({
         </div>
       )}
 
-      {/* Tab 6: Analytics */}
+      {/* Tab 6: Analytics / Finanzas */}
       {adminTab === 'analytics' && (
         <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl space-y-5 sm:space-y-6 backdrop-blur-md">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-              <Icon name="trendingUp" className="w-5 h-5 text-teal-400" />
-              Resumen de Métricas del Negocio
-            </h3>
+            <div>
+              <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                <Icon name="trendingUp" className="w-5 h-5 text-teal-400" />
+                Finanzas en Vivo
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                KPIs del día actualizados con cada pedido · {formatTimestamp()}
+              </p>
+            </div>
             {lowStockMessage && (
               <a
                 href={`https://wa.me/?text=${encodeURIComponent(lowStockMessage)}`}
@@ -9446,59 +11671,180 @@ function AdminView({
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all text-xs font-bold w-fit"
               >
                 <Icon name="whatsapp" className="w-4 h-4" />
-                Enviar alerta de stock bajo por WhatsApp
+                Alerta de stock bajo
               </a>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <h4 className="font-bold text-slate-200 text-sm">Productos con Mayor Demanda</h4>
-              {topByDemand.length === 0 ? (
-                <p className="text-xs text-slate-400">Aún no hay ventas registradas para calcular la demanda.</p>
-              ) : (
-                <ul className="space-y-3">
-                  {topByDemand.map((p, idx) => (
-                    <li key={p.id} className="flex items-center justify-between text-xs">
-                      <span className="text-slate-300 font-medium">#{idx + 1} {p.name}</span>
-                      <span className="text-teal-400 font-bold">{p.quantity} un. vendidas</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+          {/* KPIs hero del día */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-teal-500/20 to-emerald-500/10 border border-teal-500/40 shadow-lg shadow-teal-500/10">
+              <span className="text-[10px] sm:text-xs text-teal-300 font-semibold block">Ventas Hoy</span>
+              <span className="text-2xl sm:text-3xl font-black text-white block mt-1">
+                {formatUsd(finDash.today.revenue)}
+              </span>
+              <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-1">
+                {finDash.revenueDelta >= 0 ? (
+                  <span className="text-emerald-400 flex items-center gap-0.5 font-bold"><Icon name="chevronUp" className="w-3 h-3" />{Math.abs(finDash.revenueDelta).toFixed(0)}%</span>
+                ) : (
+                  <span className="text-rose-400 flex items-center gap-0.5 font-bold"><Icon name="chevronDown" className="w-3 h-3" />{Math.abs(finDash.revenueDelta).toFixed(0)}%</span>
+                )}
+                vs ayer ({formatUsd(finDash.yesterday.revenue)})
+              </span>
             </div>
 
-            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <h4 className="font-bold text-slate-200 text-sm">Estado de Stock Crítico</h4>
-              <ul className="space-y-3">
-                {lowStockProducts.length === 0 ? (
-                  <p className="text-xs text-emerald-400">¡Excelente! Todo el catálogo cuenta con stock suficiente.</p>
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-700/80">
+              <span className="text-[10px] sm:text-xs text-slate-400 font-semibold block">Tickets Hoy</span>
+              <span className="text-2xl sm:text-3xl font-black text-white block mt-1">{finDash.today.tickets}</span>
+              <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-1">
+                {finDash.ticketsDelta >= 0 ? (
+                  <span className="text-emerald-400 flex items-center gap-0.5 font-bold"><Icon name="chevronUp" className="w-3 h-3" />{Math.abs(finDash.ticketsDelta).toFixed(0)}%</span>
                 ) : (
-                  lowStockProducts.map((p) => (
-                    <li key={p.id} className="flex items-center justify-between text-xs">
-                      <span className="text-slate-300 font-medium">{p.name}</span>
-                      <span className="text-amber-400 font-bold">{p.stock} un. restantes</span>
-                    </li>
-                  ))
+                  <span className="text-rose-400 flex items-center gap-0.5 font-bold"><Icon name="chevronDown" className="w-3 h-3" />{Math.abs(finDash.ticketsDelta).toFixed(0)}%</span>
                 )}
-              </ul>
+                vs ayer ({finDash.yesterday.tickets})
+              </span>
+            </div>
+
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-700/80">
+              <span className="text-[10px] sm:text-xs text-slate-400 font-semibold block">Ticket Promedio</span>
+              <span className="text-2xl sm:text-3xl font-black text-white block mt-1">
+                {finDash.ticketAvg > 0 ? formatUsd(finDash.ticketAvg) : '—'}
+              </span>
+              <span className="text-[10px] text-slate-400 mt-1 block">{finDash.today.orders} pedidos entregados</span>
+            </div>
+
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-700/80">
+              <span className="text-[10px] sm:text-xs text-slate-400 font-semibold block">Fiado Pendiente</span>
+              <span className="text-2xl sm:text-3xl font-black text-amber-400 block mt-1">{formatUsd(totalFiado)}</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">Deuda activa de clientes</span>
+            </div>
+          </div>
+
+          {/* Kiosko Operator: resumen de jornada */}
+          <div className="rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-indigo-500/15 via-slate-900/80 to-slate-900/80 overflow-hidden">
+            <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="p-3 rounded-2xl bg-indigo-500/20 text-indigo-300 shrink-0 self-start sm:self-center">
+                <Icon name="zap" className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="font-bold text-white text-base flex items-center gap-2">
+                  Kiosko Operator
+                  <span className="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-indigo-500/25 text-indigo-300">Resumen de jornada</span>
+                </h4>
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-xs">
+                  <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-2.5">
+                    <span className="text-slate-400 block text-[9px] font-semibold uppercase tracking-wider">Ventas hoy</span>
+                    <span className="text-white font-black">{formatUsd(finDash.today.revenue)}</span>
+                  </div>
+                  <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-2.5">
+                    <span className="text-slate-400 block text-[9px] font-semibold uppercase tracking-wider">Tickets</span>
+                    <span className="text-white font-black">{finDash.today.tickets}</span>
+                  </div>
+                  <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-2.5">
+                    <span className="text-slate-400 block text-[9px] font-semibold uppercase tracking-wider">Entregados</span>
+                    <span className="text-white font-black">{finDash.today.orders}</span>
+                  </div>
+                  <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-2.5">
+                    <span className="text-slate-400 block text-[9px] font-semibold uppercase tracking-wider">vs ayer</span>
+                    <span className={`font-black ${finDash.revenueDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {finDash.revenueDelta >= 0 ? '▲' : '▼'} {Math.abs(finDash.revenueDelta).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(jornadaSummary)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-all text-xs font-bold w-full sm:w-auto"
+              >
+                <Icon name="whatsapp" className="w-4 h-4" />
+                Compartir jornada
+              </a>
+            </div>
+          </div>
+
+          {/* Efectivo vs digital */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="dollarSign" className="w-4 h-4 text-emerald-400" />
+                Efectivo vs Digital (hoy)
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-400">Efectivo</span>
+                    <span className="text-emerald-400 font-bold">{formatUsd(finDash.today.cash)}</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-slate-700/60 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-700"
+                      style={{ width: `${finDash.today.revenue > 0 ? (finDash.today.cash / finDash.today.revenue) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-400">Digital (pago móvil / transferencia / cartera)</span>
+                    <span className="text-sky-400 font-bold">{formatUsd(finDash.today.digital)}</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-slate-700/60 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-sky-500 to-indigo-400 transition-all duration-700"
+                      style={{ width: `${finDash.today.revenue > 0 ? (finDash.today.digital / finDash.today.revenue) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+                {finDash.today.credit > 0 && (
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-400">Fiado del día</span>
+                      <span className="text-amber-400 font-bold">{formatUsd(finDash.today.credit)}</span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-slate-700/60 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-700"
+                        style={{ width: `${finDash.today.revenue > 0 ? (finDash.today.credit / finDash.today.revenue) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-500">
+                  Histórico total: <span className="text-emerald-400 font-bold">{formatUsd(cashDigitalTotal.cash)}</span> efectivo ·{' '}
+                  <span className="text-sky-400 font-bold">{formatUsd(cashDigitalTotal.digital)}</span> digital
+                </p>
+              </div>
             </div>
 
             {/* Tendencia de ventas por día */}
             <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <h4 className="font-bold text-slate-200 text-sm">Ventas por Día (últimos 7 días)</h4>
-              <div className="flex items-end gap-2 h-32">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="barChart" className="w-4 h-4 text-teal-400" />
+                Ventas por Día (últimos 7 días)
+              </h4>
+              <div className="flex items-end gap-2 h-36">
                 {salesByDay.map((d) => {
-                  const max = Math.max(...salesByDay.map((x) => x.orders), 1);
-                  const h = Math.round((d.orders / max) * 100);
+                  const max = Math.max(...salesByDay.map((x) => x.revenue), 1);
+                  const h = Math.round((d.revenue / max) * 100);
+                  const isToday = d.key === toYMD(new Date());
                   return (
                     <div key={d.key} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                      <span className="text-[10px] font-bold text-slate-300">{d.orders}</span>
-                      <div
-                        className={`w-full rounded-t-lg ${d.orders > 0 ? 'bg-gradient-to-t from-teal-600 to-emerald-400' : 'bg-slate-700/50'}`}
-                        style={{ height: `${Math.max(d.orders > 0 ? h : 4, 4)}%` }}
-                      />
-                      <span className="text-[9px] text-slate-500 capitalize truncate">{d.label}</span>
+                      <span className="text-[9px] font-bold text-slate-300 truncate max-w-full">{d.revenue > 0 ? formatUsd(d.revenue) : ''}</span>
+                      <div className="w-full flex items-end justify-center h-16">
+                        <div
+                          className={`w-full rounded-t-lg transition-all duration-700 ${
+                            d.revenue > 0
+                              ? isToday
+                                ? 'bg-gradient-to-t from-teal-500 to-emerald-300 shadow-lg shadow-teal-500/30'
+                                : 'bg-gradient-to-t from-teal-700 to-teal-500'
+                              : 'bg-slate-700/50'
+                          }`}
+                          style={{ height: `${Math.max(d.revenue > 0 ? h : 4, 4)}%` }}
+                        />
+                      </div>
+                      <span className="text-[9px] text-slate-500 capitalize truncate">{isToday ? 'Hoy' : d.label}</span>
                     </div>
                   );
                 })}
@@ -9510,10 +11856,53 @@ function AdminView({
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="package" className="w-4 h-4 text-teal-400" />
+                Top Productos de Hoy
+              </h4>
+              {finDash.topToday.length === 0 ? (
+                <p className="text-xs text-slate-400">Aún no hay ventas registradas hoy.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {finDash.topToday.map((p, idx) => (
+                    <li key={p.id} className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-slate-300 font-medium truncate">#{idx + 1} {p.name}</span>
+                      <span className="text-teal-400 font-bold shrink-0">{p.quantity} un.</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="alertTriangle" className="w-4 h-4 text-amber-400" />
+                Estado de Stock Crítico
+              </h4>
+              <ul className="space-y-3">
+                {lowStockProducts.length === 0 ? (
+                  <p className="text-xs text-emerald-400">¡Excelente! Todo el catálogo cuenta con stock suficiente.</p>
+                ) : (
+                  lowStockProducts.slice(0, 6).map((p) => (
+                    <li key={p.id} className="flex items-center justify-between text-xs">
+                      <span className="text-slate-300 font-medium">{p.name}</span>
+                      <span className="text-amber-400 font-bold">{p.stock} un. restantes</span>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
 
             {/* Segmentación de clientes */}
             <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <h4 className="font-bold text-slate-200 text-sm">Clientes con Mayor Actividad</h4>
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="users" className="w-4 h-4 text-indigo-400" />
+                Clientes con Mayor Actividad
+              </h4>
               {topCustomers.length === 0 ? (
                 <p className="text-xs text-slate-400">Aún no hay pedidos registrados.</p>
               ) : (
@@ -9532,6 +11921,220 @@ function AdminView({
                 Total clientes registrados: <span className="font-bold text-white">{allCustomers.length}</span>
               </p>
             </div>
+          </div>
+        </div>
+      )}
+      {isSuperAdmin && adminTab === 'equipo' && (
+        <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl space-y-5 sm:space-y-6 backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <Icon name="users" className="w-5 h-5 text-amber-300" />
+            <h3 className="text-lg sm:text-xl font-bold text-white">Equipo y Sesiones Activas</h3>
+          </div>
+
+          {/* Sesiones activas */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 sm:p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <Icon name="clock" className="w-4 h-4 text-teal-400" />
+                Quién está conectado ahora
+              </h4>
+              <button
+                onClick={loadEmployees}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-xs font-bold text-slate-300 hover:text-teal-300 hover:border-teal-500/40 transition-all"
+              >
+                <Icon name="refresh" className="w-3.5 h-3.5" />
+                Refrescar
+              </button>
+            </div>
+            {loadingEmployees ? (
+              <p className="text-xs text-slate-400">Cargando sesiones...</p>
+            ) : activeSessions.length === 0 ? (
+              <p className="text-xs text-slate-400">No hay sesiones activas de administradores.</p>
+            ) : (
+              <ul className="space-y-2">
+                {activeSessions.map((s, i) => {
+                  const isSelf = s.phone === adminPhone;
+                  const emp = employees.find((e) => e.phone === s.phone);
+                  const displayName = emp?.name || s.name || (s.phone ? `Admin ${s.phone.slice(-4)}` : 'Desconocido');
+                  return (
+                    <li key={s.id || i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70">
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isSelf ? 'bg-emerald-400 animate-pulse' : 'bg-teal-400'}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-white truncate">
+                          {displayName}
+                          {s.role === 'superadmin' && (
+                            <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-black align-middle">
+                              Super Admin
+                            </span>
+                          )}
+                          {isSelf && (
+                            <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-black align-middle">
+                              Este dispositivo
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          {s.phone} · Última actividad {formatRelative(s.lastSeen)}
+                        </p>
+                      </div>
+                      {!isSelf && (
+                        <button
+                          onClick={() => revokeSession(s.phone)}
+                          className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[10px] sm:text-xs font-bold hover:bg-rose-500/25 transition-all shrink-0"
+                        >
+                          <Icon name="logOut" className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
+                          Cerrar sesión
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* Gestión de empleados */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 sm:p-5 space-y-3">
+            <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Icon name="userPlus" className="w-4 h-4 text-teal-400" />
+              Administradores del panel
+            </h4>
+            <p className="text-[11px] text-slate-400">
+              Añade o quita teléfonos autorizados para entrar al panel. Los administradores fijos de la configuración
+              no pueden quitarse desde aquí.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                value={newEmployeeName}
+                onChange={(e) => setNewEmployeeName(e.target.value)}
+                placeholder="Nombre (opcional)"
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+              />
+              <input
+                value={newEmployeePhone}
+                onChange={(e) => setNewEmployeePhone(e.target.value.replace(/[^\d+]/g, ''))}
+                placeholder="Teléfono (ej. 04129862577)"
+                inputMode="tel"
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+              />
+              <button
+                onClick={addEmployee}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-950 text-xs sm:text-sm font-bold hover:from-teal-400 hover:to-cyan-400 transition-all inline-flex items-center justify-center gap-1.5"
+              >
+                <Icon name="plus" className="w-4 h-4" />
+                Añadir
+              </button>
+            </div>
+            {employees.length === 0 ? (
+              <p className="text-xs text-slate-400">No hay administradores gestionados por el super admin.</p>
+            ) : (
+              <ul className="space-y-2">
+                {employees.map((e) => {
+                  const isSelf = e.phone === adminPhone;
+                  const active = activeSessions.some((s) => s.phone === e.phone);
+                  return (
+                    <li key={e.phone} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70">
+                      <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${active ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40' : 'bg-slate-700 text-slate-400'}`}>
+                        {(e.name || e.phone.slice(-2)).toUpperCase().slice(0, 2)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-white truncate">
+                          {e.name || `Admin ${e.phone.slice(-4)}`}
+                          {active && (
+                            <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-teal-500/20 text-teal-300 font-black align-middle">
+                              En línea
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[10px] text-slate-400">{e.phone}</p>
+                      </div>
+                      {!isSelf && (
+                        <button
+                          onClick={() => removeEmployee(e.phone)}
+                          className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[10px] sm:text-xs font-bold hover:bg-rose-500/25 transition-all shrink-0"
+                        >
+                          <Icon name="trash" className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
+                          Quitar
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* Usuarios en el sistema */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 sm:p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <Icon name="users" className="w-4 h-4 text-amber-300" />
+                Usuarios en el sistema
+              </h4>
+              <button
+                onClick={() => { onLoadCustomers(); loadEmployees(); }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-xs font-bold text-slate-300 hover:text-teal-300 hover:border-teal-500/40 transition-all"
+              >
+                <Icon name="refresh" className="w-3.5 h-3.5" />
+                Refrescar
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Todos los perfiles de clientes registrados. Un usuario inhabilitado no podrá pasar del login ni hacer pedidos.
+            </p>
+            <input
+              value={usersFilter}
+              onChange={(e) => setUsersFilter(e.target.value)}
+              placeholder="Buscar por nombre o teléfono"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+            />
+            {allCustomers.length === 0 ? (
+              <p className="text-xs text-slate-400">No hay usuarios registrados.</p>
+            ) : filteredSystemUsers.length === 0 ? (
+              <p className="text-xs text-slate-400">Ningún usuario coincide con la búsqueda.</p>
+            ) : (
+              <ul className="space-y-2 max-h-[60vh] min-h-24 overflow-y-auto overscroll-contain pr-1">
+                {filteredSystemUsers.map((c) => (
+                  <li key={c.phone} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70">
+                    <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${c.disabled ? 'bg-slate-700 text-slate-500' : 'bg-teal-500/20 text-teal-300 border border-teal-500/40'}`}>
+                      {(c.customerName || c.phone.slice(-2)).toUpperCase().slice(0, 2)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-white truncate">
+                        {c.customerName || `Cliente ${c.phone.slice(-4)}`}
+                        {c.disabled && (
+                          <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-rose-500/20 text-rose-300 font-black align-middle">
+                            Inhabilitado
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-slate-400">{c.phone}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => toggleCustomerDisabled(c)}
+                        disabled={usersBusy}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all disabled:opacity-50 shrink-0 ${
+                          c.disabled
+                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                            : 'bg-amber-500/10 border-amber-500/40 text-amber-300 hover:bg-amber-500/25'
+                        }`}
+                      >
+                        {c.disabled ? 'Habilitar' : 'Inhabilitar'}
+                      </button>
+                      <button
+                        onClick={() => deleteCustomerAccount(c)}
+                        disabled={usersBusy}
+                        className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[10px] font-bold hover:bg-rose-500/25 transition-all disabled:opacity-50 shrink-0"
+                        title="Eliminar perfil"
+                      >
+                        <Icon name="trash" className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       )}
@@ -9567,7 +12170,7 @@ function AdminView({
         >
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={closeFicha} />
           <div className="relative h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
-            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col max-h-full">
+            <div className="pointer-events-auto relative w-full max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring flex flex-col max-h-full">
               <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">
                 <div>
                   <h3 className="font-black text-white text-sm flex items-center gap-2">
@@ -9594,6 +12197,20 @@ function AdminView({
           </div>
         </div>
       )}
+      {showAdminProfile && (
+        <AdminProfileModal
+          phone={adminPhone}
+          role={adminRole}
+          profile={adminProfile}
+          onClose={() => setShowAdminProfile(false)}
+          onChangePassword={onChangePassword}
+          onSaveProfile={onSaveAdminProfile}
+          adminPrefs={adminPrefs}
+          onSavePrefs={saveAdminPrefs}
+          theme={theme}
+          onSetTheme={onSetTheme}
+        />
+      )}
     </div>
   );
 }
@@ -9602,6 +12219,7 @@ function AdminView({
 // y confirme o rechace el pago digital. El comprobante no viaja en el estado
 // público: se descarga bajo demanda por el dueño del pedido o el admin.
 function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
+  useOverlay(true, onClose);
   const [proof, setProof] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -9626,7 +12244,7 @@ function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up">
+      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring">
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm sm:text-base font-black text-white">
@@ -9694,6 +12312,273 @@ function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Perfil visual del admin: nombre, foto, teléfono y rol. Incluye cambio de
+// contraseña y preferencias personales (tema) que se guardan por admin.
+function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, onSaveProfile, adminPrefs, onSavePrefs, theme, onSetTheme }) {
+  const [name, setName] = useState(profile?.name || '');
+  const [photo, setPhoto] = useState(profile?.photo || '');
+  const [saving, setSaving] = useState(false);
+
+  // Cambio de contraseña
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwDone, setPwDone] = useState(false);
+
+  const fileInputRef = useRef(null);
+
+  const pickPhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    compressImage(file, 800, 0.8)
+      .then(setPhoto)
+      .catch(() => {});
+  };
+
+  const saveProfile = async () => {
+    if (saving) return;
+    setSaving(true);
+    await onSaveProfile({ name: name.trim(), photo });
+    setSaving(false);
+  };
+
+  const submitPassword = async () => {
+    setPwError('');
+    setPwDone(false);
+    if (!currentPassword) { setPwError('Ingresa tu contraseña actual.'); return; }
+    if (newPassword.length < 4) { setPwError('La nueva contraseña debe tener al menos 4 caracteres.'); return; }
+    if (newPassword !== confirmPassword) { setPwError('La confirmación no coincide con la nueva contraseña.'); return; }
+    if (changingPassword) return;
+    setChangingPassword(true);
+    const ok = await onChangePassword(currentPassword, newPassword);
+    setChangingPassword(false);
+    if (ok) {
+      setPwDone(true);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    }
+  };
+
+  const applyPrefsTheme = (t) => {
+    onSetTheme(t);
+    onSavePrefs({ theme: t });
+  };
+
+  const THEME_OPTIONS = [
+    { key: 'dark', label: 'Oscuro', icon: 'moon', desc: 'El clásico para la noche' },
+    { key: 'light', label: 'Claro', icon: 'sun', desc: 'Ideal para el día' },
+    { key: 'neon', label: 'Neón', icon: 'zap', desc: 'Brillante y llamativo' }
+  ];
+
+  return (
+    <>
+      <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <Icon name="user" className="w-5 h-5 text-teal-400" />
+              Mi Perfil de Administrador
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Personaliza tu identidad, cambia tu contraseña y ajusta tus preferencias.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
+          {/* Datos del perfil */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 space-y-3">
+            <div className="flex items-center gap-4">
+              {photo ? (
+                <img src={photo} alt={name || 'Admin'} className="w-16 h-16 rounded-2xl object-cover border-2 border-teal-500/50" />
+              ) : (
+                <span className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-500 to-teal-400 text-slate-950 text-xl font-black flex items-center justify-center">
+                  {(name || 'A').charAt(0).toUpperCase()}
+                </span>
+              )}
+              <div className="space-y-2 flex-1">
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  onChange={pickPhoto}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-600 text-slate-200 text-xs font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all inline-flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="image" className="w-3.5 h-3.5" />
+                  {photo ? 'Cambiar foto' : 'Subir foto'}
+                </button>
+                {photo && (
+                  <button
+                    onClick={() => setPhoto('')}
+                    className="w-full px-3 py-1.5 rounded-xl text-rose-300 text-[11px] font-bold hover:bg-rose-500/10 transition-all"
+                  >
+                    Quitar foto
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1">Nombre visible</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Tu nombre (ej: María)"
+                maxLength={80}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1">Teléfono</label>
+                <p className="px-3.5 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/60 text-sm text-slate-300 font-bold truncate">
+                  {phone}
+                </p>
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1">Rol</label>
+                <p className="px-3.5 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/60 text-sm font-bold truncate flex items-center gap-1.5">
+                  {role === 'superadmin' ? (
+                    <>
+                      <Icon name="star" className="w-4 h-4 text-amber-300" />
+                      <span className="text-amber-300">Super Admin</span>
+                    </>
+                  ) : (
+                    <span className="text-teal-300">Administrador</span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={saveProfile}
+              disabled={saving}
+              className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-cyan-400 transition-all disabled:opacity-60 active:scale-[0.99]"
+            >
+              {saving ? 'Guardando…' : 'Guardar perfil'}
+            </button>
+          </div>
+
+          {/* Preferencias por admin */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 space-y-3">
+            <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Icon name="settings" className="w-4 h-4 text-teal-400" />
+              Mis preferencias
+            </h4>
+            <p className="text-[11px] text-slate-400">
+              El tema que eliges aquí solo se aplica cuando tú entras al panel; no cambia el tema de los clientes.
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {THEME_OPTIONS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => applyPrefsTheme(t.key)}
+                  className={`p-3 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1.5 transition-all ${
+                    (adminPrefs?.theme || theme) === t.key
+                      ? 'bg-teal-500/15 border-teal-500/50 text-teal-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-teal-500/40'
+                  }`}
+                >
+                  <Icon name={t.icon} className="w-4 h-4" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-500">{THEME_OPTIONS.find((t) => t.key === (adminPrefs?.theme || theme))?.desc}</p>
+          </div>
+
+          {/* Cambio de contraseña */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 space-y-3">
+            <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Icon name="lock" className="w-4 h-4 text-teal-400" />
+              Cambiar contraseña
+            </h4>
+            {pwDone ? (
+              <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/40 p-3 text-center space-y-2">
+                <p className="text-xs text-emerald-300 font-bold">¡Contraseña actualizada!</p>
+                <button
+                  onClick={() => setPwDone(false)}
+                  className="text-[11px] text-teal-300 font-bold hover:underline"
+                >
+                  Cambiarla de nuevo
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Contraseña actual"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+                />
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Nueva contraseña (mín. 4 caracteres)"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+                />
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repite la nueva contraseña"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+                />
+                {pwError && (
+                  <p className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5">
+                    {pwError}
+                  </p>
+                )}
+                <button
+                  onClick={submitPassword}
+                  disabled={changingPassword}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 text-slate-200 font-bold text-sm hover:border-teal-500/50 hover:text-teal-300 transition-all disabled:opacity-60 active:scale-[0.99]"
+                >
+                  {changingPassword ? 'Actualizando…' : 'Actualizar contraseña'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+    </>
+  );
+}
+
+// Modal clásico de perfil (escritorio / pantallas grandes).
+function AdminProfileModal({ onClose, ...rest }) {
+  useOverlay(true, onClose);
+  return (
+    <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
+        <AdminProfilePanel onClose={onClose} {...rest} />
+      </div>
+    </div>
+  );
+}
+
+// Vista completa "Mi perfil administrador" (móvil): en vez de modal, cambia
+// la vista de la app entera. Se abre desde la barra inferior de opciones.
+function AdminProfileView({ onBack, ...rest }) {
+  return (
+    <div className="fixed inset-0 z-[70] bg-slate-950 flex flex-col">
+      <AdminProfilePanel onClose={onBack} {...rest} />
     </div>
   );
 }
@@ -9806,6 +12691,7 @@ function OverdueCollectionToast({ collection, onSend, onDismiss }) {
 // Modal con todos los cobros vencidos. El admin los envía uno a uno; al
 // enviar uno se quita de la lista. Si lo descarta, se oculta en esta sesión.
 function OverdueCollectionsModal({ collections, onSend, onDismiss }) {
+  useOverlay(true, onDismiss);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
@@ -9863,6 +12749,7 @@ function BlacklistAdminView({
   const [isAddProductsOpen, setIsAddProductsOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isAddAmountOpen, setIsAddAmountOpen] = useState(false);
+  const [clearDebtTarget, setClearDebtTarget] = useState(null);
 
   const debtors = customers.filter((c) => (Number(c.balance) || 0) > 0);
 
@@ -9877,9 +12764,7 @@ function BlacklistAdminView({
   };
 
   const handleClearDebt = (customer) => {
-    if (window.confirm(`¿Saldar la deuda de ${customer.customerName || customer.phone}?`)) {
-      onAddToBlacklist(customer.phone.replace(/\D/g, ''), customer.customerName, '0');
-    }
+    setClearDebtTarget(customer);
   };
 
   return (
@@ -9915,7 +12800,7 @@ function BlacklistAdminView({
           {debtors.map((c) => (
             <div
               key={c.phone}
-              className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60 hover:border-amber-500/40 cursor-pointer transition-all"
+              className="flex items-center gap-3 p-3 rounded-2xl glass-strong bg-slate-900 border border-slate-700/60 hover:border-amber-500/40 cursor-pointer transition-all"
               onClick={() => setSelectedDebtor(c)}
             >
               <span className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
@@ -9980,7 +12865,7 @@ function BlacklistAdminView({
           >
             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsRegisterOpen(false)} />
             <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-              <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-full flex flex-col">
+              <div className="pointer-events-auto relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring max-h-full flex flex-col">
                 <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
                   <div>
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10061,6 +12946,22 @@ function BlacklistAdminView({
           />,
           document.body
         )}
+
+      {clearDebtTarget && (
+        <ConfirmActionModal
+          title={`¿Saldar deuda de ${clearDebtTarget.customerName || clearDebtTarget.phone}?`}
+          message={`${clearDebtTarget.customerName || 'Cliente'} debe ${formatUsd(Number(clearDebtTarget.balance) || 0)}. Al saldar, el saldo queda en cero.`}
+          note="Esta acción no se puede deshacer."
+          confirmLabel="Saldar"
+          icon="checkCircle"
+          tone="danger"
+          onConfirm={() => {
+            onAddToBlacklist(clearDebtTarget.phone.replace(/\D/g, ''), clearDebtTarget.customerName, '0');
+            setClearDebtTarget(null);
+          }}
+          onClose={() => setClearDebtTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -10069,6 +12970,7 @@ function BlacklistAdminView({
 // deudas anteriores a la app). Muestra el catálogo actual y deja elegir
 // cantidades; al confirmar crea un pedido a crédito entregado para el cliente.
 function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [category, setCategory] = useState('Todas');
@@ -10126,7 +13028,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, h
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-      <div className="pointer-events-auto relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+      <div className="pointer-events-auto relative w-full sm:max-w-2xl glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10217,8 +13119,8 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, h
                     key={p.id}
                     className={`flex items-center gap-3 p-2.5 rounded-xl border transition-all ${n > 0 ? 'bg-amber-500/10 border-amber-500/40' : 'bg-slate-950 border-slate-800'}`}
                   >
-                    <img
-                      src={p.image}
+                    <ProductImg
+                      product={p}
                       alt={p.name}
                       className="w-11 h-11 rounded-lg object-cover bg-slate-900 shrink-0"
                     />
@@ -10300,6 +13202,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, h
 // monto y motivo). Al confirmar crea un pedido a crédito entregado con un
 // único ítem "Deuda manual" y la descripción como nota del pedido.
 function AddDebtAmountModal({ customers, rate, onClose, onConfirm, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerAmount, setCustomerAmount] = useState('');
@@ -10344,7 +13247,7 @@ function AddDebtAmountModal({ customers, rate, onClose, onConfirm, headerHeight 
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-      <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+      <div className="pointer-events-auto relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10490,7 +13393,9 @@ function DebtDetailModal({
   payments,
   headerHeight = 0
 }) {
+  useOverlay(true, onClose);
   const [showScheduler, setShowScheduler] = useState(false);
+  const [confirmSaldar, setConfirmSaldar] = useState(false);
 
   const key = normalizePhoneDigits(customer.phone);
   // Pedidos del cliente que han sido entregados y a crédito = deuda contraída.
@@ -10557,7 +13462,7 @@ function DebtDetailModal({
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-      <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+      <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10778,12 +13683,7 @@ function DebtDetailModal({
               {overdue > 0 ? `${overdue} cobro(s) vencido(s)` : 'Sin cobros programados pendientes'}
             </span>
             <button
-              onClick={() => {
-                if (window.confirm(`¿Saldar la deuda de ${customer.customerName || customer.phone}?`)) {
-                  onClearDebt(customer);
-                  onClose();
-                }
-              }}
+              onClick={() => setConfirmSaldar(true)}
               className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all"
             >
               Saldar deuda
@@ -10792,6 +13692,23 @@ function DebtDetailModal({
         </div>
       </div>
       </div>
+
+      {confirmSaldar && (
+        <ConfirmActionModal
+          title={`¿Saldar deuda de ${customer.customerName || customer.phone}?`}
+          message={`${customer.customerName || 'Cliente'} debe ${formatUsd(Number(customer.balance) || 0)}. Al saldar, el saldo queda en cero.`}
+          note="Esta acción no se puede deshacer."
+          confirmLabel="Saldar"
+          icon="checkCircle"
+          tone="danger"
+          onConfirm={() => {
+            setConfirmSaldar(false);
+            onClearDebt(customer);
+            onClose();
+          }}
+          onClose={() => setConfirmSaldar(false)}
+        />
+      )}
     </div>
   );
 }
@@ -10799,6 +13716,7 @@ function DebtDetailModal({
 // Modal que el cliente ve en "Mi Cuenta": desglose de su deuda con conversión
 // a bolívares según la tasa del día.
 function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = 'deuda', headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const key = normalizePhoneDigits(customer.phone);
   const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
@@ -10873,6 +13791,24 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
   });
   const monthName = monthStart.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
 
+  // Fiado Digital: el admin parametriza un tope por cliente beneficiado. Si no
+  // lo definió (creditLimit null/0) el cliente fiado NO tiene límite.
+  const fiadoTope = useMemo(() => {
+    const adminLimit = Number(customer?.creditLimit);
+    return Number.isFinite(adminLimit) && adminLimit > 0 ? adminLimit : null;
+  }, [customer?.creditLimit]);
+  const fiadoUso = fiadoTope ? Math.min(100, (Math.abs(balance) / fiadoTope) * 100) : 0;
+
+  // Abono rápido 1-toque: rellena el monto en Bs (según el % del total a pagar).
+  const quickAbono = (pct) => {
+    if (!(rate?.rate > 0) || !(balance > 0)) return;
+    const montoUsd = (balance * pct) / 100;
+    const montoBs = montoUsd * Number(rate.rate);
+    setAmountBs(formatAmountBsInput(montoBs.toFixed(2).replace('.', ',')));
+    setShowAbono(true);
+    addToast(`Monto listo: abonar ${pct}% (${formatUsd(montoUsd)})`, 'success');
+  };
+
   const handleAbono = async (e) => {
     e.preventDefault();
     if (sending) return;
@@ -10919,7 +13855,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -10960,7 +13896,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                 <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
                   <span className="text-[11px] uppercase tracking-wider text-emerald-400/80 font-semibold">Disponible para usar</span>
                   <div className="flex items-end justify-between mt-1">
-                    <span className="text-3xl font-black text-emerald-400">{formatUsd(walletAmount)}</span>
+                    <span className="font-display text-3xl font-black tracking-tight text-emerald-400">{formatUsd(walletAmount)}</span>
                     {rate?.rate > 0 && (
                       <span className="text-[10px] text-emerald-400/70">{formatBs(usdToBs(walletAmount, rate.rate))}</span>
                     )}
@@ -10974,7 +13910,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                 <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-rose-300">
                   <span className="text-[11px] uppercase tracking-wider text-rose-400/80 font-semibold">Saldo pendiente por pagar</span>
                   <div className="flex items-end justify-between mt-1">
-                    <span className="text-3xl font-black text-rose-400">{formatUsd(balance)}</span>
+                    <span className="font-display text-3xl font-black tracking-tight text-rose-400">{formatUsd(balance)}</span>
                     {rate?.rate > 0 && (
                       <span className="text-[10px] text-rose-400/70">{formatBs(usdToBs(balance, rate.rate))}</span>
                     )}
@@ -10987,7 +13923,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
               ) : (
                 <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700">
                   <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Saldo disponible</span>
-                  <div className="text-3xl font-black text-slate-500 mt-1">{formatUsd(0)}</div>
+                  <div className="font-display text-3xl font-black tracking-tight text-slate-500 mt-1">{formatUsd(0)}</div>
                   <p className="text-xs text-slate-400 mt-2">
                     Sin saldo a favor por el momento.
                   </p>
@@ -11107,6 +14043,75 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
 
           {!isSaldoView && !hasWallet && (
             <div className="space-y-2">
+              {/* Billetera Fiado Digital: tope de crédito + abonos rápidos 1-toque */}
+              {balance > 0 && (
+                <div className="rounded-2xl bg-gradient-to-br from-indigo-500/15 via-slate-900 to-teal-500/10 border border-indigo-500/30 p-4 animate-fade-in">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                      <Icon name="wallet" className="w-4 h-4" /> Billetera Fiado
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {fiadoTope ? (
+                        <>Tope <b className="text-teal-400">{formatUsd(fiadoTope)}</b></>
+                      ) : (
+                        <><b className="text-teal-400">Sin tope</b> · sin límite</>
+                      )}
+                    </span>
+                  </div>
+                  {fiadoTope ? (
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-xs mb-1.5">
+                        <span className="text-slate-300">Uso del fiado</span>
+                        <span className={`font-black ${fiadoUso >= 85 ? 'text-rose-400' : fiadoUso >= 60 ? 'text-amber-400' : 'text-teal-400'}`}>
+                          {Math.round(fiadoUso)}% · {formatUsd(Math.abs(balance))}
+                        </span>
+                      </div>
+                      <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 ${
+                            fiadoUso >= 85
+                              ? 'bg-gradient-to-r from-rose-500 to-orange-500'
+                              : fiadoUso >= 60
+                                ? 'bg-gradient-to-r from-amber-500 to-orange-400'
+                                : 'bg-gradient-to-r from-teal-500 to-emerald-400'
+                          }`}
+                          style={{ width: `${Math.max(4, fiadoUso)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1.5">
+                        {fiadoUso >= 85
+                          ? 'Estás cerca del tope. Considera abonar para liberar tu fiado.'
+                          : fiadoUso >= 60
+                            ? 'Has usado buena parte de tu fiado. Abona para seguir comprando a cuenta.'
+                            : 'Tu fiado tiene espacio disponible para tus próximos pedidos.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 mt-3">
+                      El kiosko te dio fiado sin tope de crédito. Puedes comprar a cuenta y abonar cuando quieras.
+                    </p>
+                  )}
+                  {rate?.rate > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <span className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Abono rápido</span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[25, 50, 100].map((pct) => (
+                          <button
+                            key={pct}
+                            onClick={() => quickAbono(pct)}
+                            className="py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200 hover:border-teal-500/60 hover:text-teal-300 transition-all active:scale-95"
+                          >
+                            {pct}%
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        Toca el % y completa con tu comprobante para aplicar el abono al instante.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
               <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
                 <span>Detalle de la deuda ({debtOrders.length} pedidos)</span>
                 <span className="text-red-400 font-black text-sm">{formatUsd(debtTotal)}</span>
@@ -11491,7 +14496,7 @@ function buildAccountMessage(customer, orders) {
   ];
   if (debtOrders.length > 0) {
     debtOrders.forEach((o) => {
-      lines.push(`▫️ Pedido ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}):`);
+      lines.push(`· Pedido ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}):`);
       o.items.forEach((it) => lines.push(`   - ${it.quantity}x ${it.name} = ${formatUsd(it.price * it.quantity)}`));
       lines.push(`   Total: ${formatUsd(o.total)}`);
       lines.push('');
@@ -11499,7 +14504,7 @@ function buildAccountMessage(customer, orders) {
   }
   lines.push(`*Total a pagar: ${formatUsd(debtTotal)}*`);
   lines.push('');
-  lines.push('Gracias por tu prontitud. 🙌');
+  lines.push('Gracias por tu prontitud.');
   return lines.join('\n');
 }
 
@@ -11590,7 +14595,62 @@ const searchWikimedia = async (query) => {
     .filter((r) => r.thumb && r.full);
 };
 
+// Tope de fiado por cliente beneficiado: input compacto para el panel admin.
+// Un valor vacío o 0 = fiado sin tope (sin límite).
+function CreditLimitInput({ customer, onSetCreditLimit }) {
+  const [value, setValue] = useState(customer?.creditLimit != null ? String(customer.creditLimit) : '');
+  const [saving, setSaving] = useState(false);
+  const limit = customer?.creditLimit != null ? Number(customer.creditLimit) : null;
+
+  const save = async () => {
+    if (saving) return;
+    const raw = String(value || '').trim().replace(',', '.');
+    const num = raw === '' ? null : Number(raw);
+    const amount = num != null && Number.isFinite(num) && num > 0 ? num : null;
+    setSaving(true);
+    await onSetCreditLimit(customer.phone, amount);
+    setSaving(false);
+    if (amount == null) setValue('');
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center gap-1 rounded-xl bg-slate-800 border border-slate-700 px-2 py-1">
+        <span className="text-[10px] text-slate-500 font-semibold">Tope</span>
+        <span className="text-teal-400 text-xs font-bold">$</span>
+        <input
+          type="number"
+          min="0"
+          step="any"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save();
+          }}
+          placeholder="sin tope"
+          className="w-16 bg-transparent text-slate-100 text-xs font-bold focus:outline-none"
+          aria-label={`Tope de fiado de ${customer.customerName || customer.phone}`}
+        />
+        {limit != null ? (
+          <span className="text-[10px] font-bold text-teal-400 shrink-0">{formatUsd(limit)}</span>
+        ) : (
+          <span className="text-[10px] font-semibold text-slate-500 shrink-0">∞</span>
+        )}
+      </div>
+      <button
+        onClick={save}
+        disabled={saving}
+        className="shrink-0 px-2 py-1.5 rounded-lg bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[10px] font-bold hover:bg-teal-500/25 transition-all disabled:opacity-50"
+        title="Guardar tope (vacío = sin límite)"
+      >
+        {saving ? '…' : 'OK'}
+      </button>
+    </div>
+  );
+}
+
 function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
+  useOverlay(true, onClose);
   const [formData, setFormData] = useState({
     id: productToEdit?.id || '',
     code: productToEdit?.code || '',
@@ -11755,7 +14815,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <h2 className="text-lg sm:text-xl font-bold text-white">
             {productToEdit ? 'Editar Producto' : 'Crear Nuevo Producto'}
@@ -11841,7 +14901,8 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                🥤 Líquido / Bebida
+                <Icon name="cup" className="w-4 h-4" />
+                Líquido / Bebida
               </button>
               <button
                 type="button"
@@ -11852,7 +14913,8 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                📦 Sólido
+                <Icon name="package" className="w-4 h-4" />
+                Sólido
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -11898,7 +14960,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Imagen del Producto</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Imagen del Producto (Opcional)</label>
             <div className="flex items-center gap-2 mb-2">
               <button
                 type="button"
@@ -11918,7 +14980,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
               />
             </div>
             <input
-              type="url"
+              type="text"
               value={formData.image}
               onChange={(e) => setFormData({ ...formData, image: e.target.value })}
               placeholder="https://images.unsplash.com/..."
@@ -12042,11 +15104,56 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
   );
 }
 
+// Confirmación genérica con el lenguaje visual de la app (reemplaza el
+// window.confirm del navegador). Muestra título, mensaje y botones estilizados.
+function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', tone = 'danger', icon = 'alertTriangle', onConfirm, onClose }) {
+  useOverlay(true, onClose);
+  const danger = tone === 'danger';
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${danger ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+          <Icon name={icon} className="w-6 h-6" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-white">{title}</h3>
+          {message && <p className="text-xs text-slate-400 mt-1 whitespace-pre-line">{message}</p>}
+          {note && (
+            <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 mt-3 inline-block">
+              {note}
+            </p>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <button
+            onClick={onClose}
+            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition-all"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`py-2.5 rounded-xl text-white font-bold text-xs shadow-lg transition-all ${
+              danger
+                ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20'
+                : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20'
+            }`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeleteConfirmModal({ product, onClose, onConfirm }) {
+  useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
           <Icon name="alertTriangle" className="w-6 h-6" />
         </div>
@@ -12076,10 +15183,11 @@ function DeleteConfirmModal({ product, onClose, onConfirm }) {
 }
 
 function DeleteOrderModal({ order, onClose, onConfirm }) {
+  useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
           <Icon name="trash" className="w-6 h-6" />
         </div>
@@ -12282,15 +15390,97 @@ function PaymentStatusCard({ order, isBenefited, onOrderUpdated, addToast }) {
   );
 }
 
-function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast }) {
+// Factura QR 360: genera el QR de la factura del pedido (vía API pública de QR)
+// y lo presenta con un giro 3D al hacer tap, mostrando el resumen por detrás.
+function FacturaQr360({ order, rate }) {
+  const [flipped, setFlipped] = useState(false);
+  const lines = [
+    `Factura Kiosko 24/7`,
+    `Pedido #${order.id}`,
+    `Fecha: ${order.timestamp || '—'}`,
+    ...(Array.isArray(order.items) ? order.items.map((it) => `${it.quantity}x ${it.name}`) : []),
+    `Total: ${formatUsd(order.total)}`
+  ];
+  const qrData = encodeURIComponent(lines.join('\n'));
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${qrData}`;
+  const reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  return (
+    <div className="rounded-2xl bg-slate-800/40 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+          <Icon name="scan" className="w-4 h-4 text-teal-400" /> Factura QR 360
+        </span>
+        <span className="px-1.5 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[9px] font-bold uppercase tracking-wider">
+          {flipped ? 'Resumen' : 'Escaneable'}
+        </span>
+      </div>
+
+      <div className="perspective-800" onClick={() => !reducedMotion && setFlipped((f) => !f)}>
+        <div
+          className="relative w-full aspect-[3/4] max-h-72 mx-auto preserve-3d cursor-pointer transition-transform duration-500"
+          style={{ transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
+        >
+          {/* Frente: QR */}
+          <div className="absolute inset-0 backface-hidden rounded-2xl glass-strong bg-slate-900 border border-slate-700 flex flex-col items-center justify-center gap-3 p-4">
+            <img
+              src={qrUrl}
+              alt={`Código QR de la factura #${order.id}`}
+              className="w-44 h-44 rounded-xl bg-white p-2"
+              loading="lazy"
+            />
+            <p className="text-[11px] text-slate-400 text-center">
+              Escanea para ver tu factura del pedido #{order.id}.
+              {!reducedMotion && <span className="block text-teal-400 mt-1">Toca para girar y ver el resumen</span>}
+            </p>
+          </div>
+          {/* Reverso: resumen */}
+          <div
+            className="absolute inset-0 backface-hidden rounded-2xl bg-gradient-to-br from-teal-950/60 to-slate-900 border border-teal-500/30 flex flex-col justify-between p-4"
+            style={{ transform: 'rotateY(180deg)' }}
+          >
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-teal-400 font-bold">Empresas Alvarados</p>
+              <p className="text-[10px] text-slate-400">Kiosko 24/7 · Resumen de factura</p>
+            </div>
+            <div className="space-y-1.5 my-2 max-h-28 overflow-y-auto scrollbar-none">
+              {(order.items || []).map((it, i) => (
+                <div key={i} className="flex justify-between text-[11px]">
+                  <span className="text-slate-300 truncate pr-2">{it.quantity}x {it.name}</span>
+                  <span className="text-white font-bold shrink-0">{formatUsd(it.price * it.quantity)}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="border-t border-slate-700 pt-2 flex justify-between items-center">
+                <span className="text-[11px] text-slate-400">Total</span>
+                <span className="text-base font-black text-teal-300">
+                  {formatUsd(order.total)}
+                  {rate?.rate > 0 && (
+                    <span className="block text-[10px] text-teal-400/70 text-right">{formatBs(usdToBs(order.total, rate.rate))}</span>
+                  )}
+                </span>
+              </div>
+              <p className="text-[9px] text-slate-500 mt-2">Pedido #{order.id} · {order.timestamp}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
   const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
   return (
-    <div className="fixed inset-0 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-scale-up">
-        <div className="p-5 sm:p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 flex items-center justify-between gap-3">
+    <div className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in" style={{ top: headerHeight }}>
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring max-h-full flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 shrink-0 bg-slate-900 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white">
               Detalle del Pedido <span className="text-teal-400">#{order.id}</span>
@@ -12305,7 +15495,7 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
           </button>
         </div>
 
-        <div className="p-5 sm:p-6 space-y-4">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {needsPaymentValidation(order) && (
             <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
               <Icon name="clock" className="w-4 h-4 shrink-0" />
@@ -12352,6 +15542,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
           {/* Estado del pago digital (confirmado / en revisión / rechazado con acciones) */}
           <PaymentStatusCard order={order} isBenefited={isBenefited} onOrderUpdated={onOrderUpdated} addToast={addToast} />
 
+          {/* Línea de tiempo animada del pedido */}
+          <OrderStepsTimeline order={order} />
+
           {/* Mapa de entrega a domicilio */}
           <DeliveryMap order={order} />
 
@@ -12378,6 +15571,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
               </span>
             </div>
           </div>
+
+          {/* Factura QR 360: código QR con la factura completa y giro 3D */}
+          <FacturaQr360 order={order} rate={rate} />
 
           {order.notes && (
             <div className="rounded-xl bg-slate-800/60 p-3 text-xs">
@@ -12406,16 +15602,18 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
             </button>
           )}
         </div>
+        </div>
       </div>
     </div>
   );
 }
 
 function CancelOrderModal({ order, onClose, onConfirm }) {
+  useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
           <Icon name="alertTriangle" className="w-6 h-6" />
         </div>
@@ -12543,29 +15741,57 @@ const speechRecognitionAvailable = () =>
 
 // Modal de confirmación de la compra rápida por voz: muestra los artículos
 // reconocidos y permite confirmar (agrega al carrito) o reintentar.
-function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listening }) {
+function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listening, dialog = [] }) {
+  useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-modal-spring">
         <div className="flex items-center gap-3">
           <span className={`p-2.5 rounded-2xl shrink-0 ${listening ? 'bg-rose-500/20 text-rose-400 animate-pulse' : 'bg-teal-500/20 text-teal-400'}`}>
             <Icon name="mic" className="w-5 h-5" />
           </span>
           <div className="flex-1 min-w-0">
-            <h3 className="text-base font-bold text-white">Compra rápida por voz</h3>
+            <h3 className="text-base font-bold text-white">Compra por voz conversacional</h3>
             <p className="text-xs text-slate-400">
               {listening
                 ? 'Escuchando… Decí por ejemplo: "2 leche y 1 pan"'
                 : items.length > 0
-                  ? 'Reconocimos estos artículos. ¿Los agregamos?'
-                  : 'No escuchamos claro. Tocá "Escuchar de nuevo".'}
+                  ? '¿Agregamos todo al carrito?'
+                  : 'Decime qué querés o tocá "Escuchar".'}
             </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
             <Icon name="x" className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Conversación: burbujas kiosko ↔ usuario */}
+        {dialog.length > 0 && (
+          <div className="max-h-36 overflow-y-auto scrollbar-none space-y-1.5">
+            {dialog.map((d, i) => (
+              <div key={i} className={`flex ${d.u ? 'justify-end' : 'justify-start'}`}>
+                <span
+                  className={`max-w-[85%] px-3 py-1.5 rounded-2xl text-xs leading-relaxed ${
+                    d.u
+                      ? 'bg-teal-500/20 border border-teal-500/40 text-teal-100 rounded-br-sm'
+                      : 'bg-slate-800/80 border border-slate-700 text-slate-200 rounded-bl-sm'
+                  }`}
+                >
+                  {d.u || d.kio}
+                </span>
+              </div>
+            ))}
+            {listening && (
+              <div className="flex justify-start">
+                <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-2xl bg-slate-800/80 border border-slate-700 text-xs text-slate-400 rounded-bl-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                  escuchando…
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         {listening && (
           <div className="flex items-center justify-center gap-2 py-4">
@@ -12577,19 +15803,19 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
 
         {!listening && items.length === 0 ? (
           <p className="text-sm text-slate-400 bg-slate-800/60 border border-slate-700 rounded-2xl p-4">
-            No reconocimos productos claros. Prueba con frases como: <b>"2 leche y 1 pan"</b>.
+            Todavía no reconocimos productos. Probá con frases como: <b>"2 leche y 1 pan"</b>.
           </p>
         ) : (
           items.length > 0 && (
             <div className="space-y-2">
               {items.map((it) => (
                 <div key={it.product.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-800/60 border border-slate-700">
-                  <img src={it.product.image} alt={it.product.name} className="w-10 h-10 rounded-lg object-cover bg-slate-900 shrink-0" />
+                  <ProductImg product={it.product} alt={it.product.name} className="w-10 h-10 rounded-lg object-cover bg-slate-900 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className="block text-xs font-semibold text-slate-200 truncate">{it.product.name}</span>
                     <span className="text-[11px] text-teal-400 font-bold">{formatUsd(it.product.price)} c/u</span>
                   </div>
-                  <span className="shrink-0 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-sm font-black text-white">x{it.qty}</span>
+                  <span className="shrink-0 px-2 py-1 rounded-lg glass-strong bg-slate-900 border border-slate-700 text-sm font-black text-white">x{it.qty}</span>
                 </div>
               ))}
               <div className="flex justify-between text-sm font-black pt-1">
@@ -12610,7 +15836,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
             size="md"
             icon="refresh"
           >
-            Escuchar de nuevo
+            Escuchar
           </Btn>
           <Btn
             onClick={onConfirm}
@@ -12632,6 +15858,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
 // Dashboard personal "Mi Kiosko": resumen del cliente con gasto, pedidos,
 // productos favoritos, rachas y próximos pedidos activos.
 function MyKioskoModal({ customer, customerName, orders, products, rate, onClose, onRepeatLastOrder, headerHeight = 0 }) {
+  useOverlay(true, onClose);
   const customerOrders = useMemo(() => {
     if (!customer?.phone) return [];
     const key = normalizePhoneDigits(customer.phone);
@@ -12675,7 +15902,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
           <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -12747,7 +15974,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
               <div className="space-y-2 mt-1.5">
                 {stats.topProducts.map((t) => (
                   <div key={t.product.id} className="flex items-center gap-3 p-2 rounded-xl bg-slate-800/50 border border-slate-700/60">
-                    <img src={t.product.image} alt={t.product.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
+                    <ProductImg product={t.product} alt={t.product.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
                     <span className="flex-1 min-w-0 text-xs font-semibold text-slate-200 truncate">{t.product.name}</span>
                     <span className="text-[11px] font-black text-teal-400">{t.qty}x</span>
                   </div>
@@ -12781,6 +16008,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
 // Modal "Compartir Carrito": el dueño genera un enlace para que familia/amigos
 // sumen artículos y vea el carrito unificado en tiempo real.
 function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, products }) {
+  useOverlay(true, onClose);
   const link = share?.url || '';
   const [copied, setCopied] = useState(false);
 
@@ -12799,7 +16027,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-modal-spring max-h-[92vh] flex flex-col">
         <div className="flex items-center gap-3">
           <span className="p-2.5 rounded-2xl bg-indigo-500/20 text-indigo-400 shrink-0">
             <Icon name="users" className="w-5 h-5" />
@@ -12820,7 +16048,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
               readOnly
               value={link}
               onFocus={(e) => e.target.select()}
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-[11px] text-teal-300 font-mono focus:outline-none"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl glass-strong bg-slate-900 border border-slate-700 text-[11px] text-teal-300 font-mono focus:outline-none"
             />
             <button
               onClick={copy}
@@ -12851,7 +16079,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
           ) : (
             sharedItems.map((it) => (
               <div key={it.id} className="flex items-center gap-3 p-2 rounded-xl bg-slate-800/50 border border-slate-700/60">
-                <img src={it.image} alt={it.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
+                <ProductImg image={it.image} name={it.name} alt={it.name} className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0" />
                 <span className="flex-1 min-w-0 text-xs font-semibold text-slate-200 truncate">{it.name}</span>
                 <span className="text-[11px] font-black text-white">{it.qty}x</span>
               </div>
@@ -12954,7 +16182,7 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
   };
 
   const renderPayment = (p, clientPhone) => (
-    <div key={p.id} className="rounded-2xl bg-slate-900 border border-slate-700/70 p-4 space-y-3">
+    <div key={p.id} className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/70 p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -13086,7 +16314,7 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
     const totalPendiente = pendientes.reduce((sum, p) => sum + Number(p.amountUsd || 0), 0);
 
     return (
-      <div key={client.phone} className="rounded-2xl bg-slate-900 border border-slate-700/70 overflow-hidden">
+      <div key={client.phone} className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/70 overflow-hidden">
         <button
           onClick={() => setExpandedClient(isExpanded ? null : client.phone)}
           className="w-full p-4 flex items-center justify-between gap-3 text-left"
@@ -13189,4 +16417,344 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
     </div>
   );
 }
+
+// ============================================================================
+// Asistente IA "Don Aiker": chat que responde con datos reales del negocio
+// (deuda, pedidos, promos, tasa, productos) usando reglas locales sin API.
+// ============================================================================
+function AikerAssistant({
+  customer,
+  customerOrders,
+  products,
+  promos,
+  rate,
+  savedCustomer,
+  headerHeight = 0,
+  onClose,
+  onOpenDebt,
+  onOpenOrders,
+  onTrackOrder,
+  onAddToCart,
+  onRepeatLastOrder
+}) {
+  const [messages, setMessages] = useState([
+    {
+      from: 'ai',
+      text: '¡Hola! Soy Don Aiker, el asistente del kiosko. Toca una pregunta rápida o pide un producto para agregarlo al carrito. Puedo contarte tu deuda, tus pedidos, las promos y la tasa del día. 😊'
+    }
+  ]);
+  const [thinking, setThinking] = useState(false);
+  // Acción profunda asociada a la última respuesta del asistente (botón debajo
+  // del mensaje): ver deuda, seguir pedido, repetir pedido o agregar al carrito.
+  const [action, setAction] = useState(null);
+  const [draft, setDraft] = useState('');
+  const scrollRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useOverlay(true, onClose);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, thinking]);
+
+  const balance = Number(customer?.balance) || 0;
+  const name = customer?.customerName?.split(' ')[0] || savedCustomer?.customerName?.split(' ')[0] || 'cliente';
+
+  const myOrders = (customerOrders || []).filter((o) =>
+    customer ? normalizePhoneDigits(o.phone) === normalizePhoneDigits(customer.phone) : true
+  );
+  const activePromos = (promos || []).filter((p) => p.active);
+
+  // Productos populares del catálogo para el acceso rápido "Agregar".
+  const popular = useMemo(() => {
+    if (!Array.isArray(products) || products.length === 0) return [];
+    const freq = {};
+    (customerOrders || []).forEach((o) =>
+      (o.items || []).forEach((it) => {
+        freq[it.id] = (freq[it.id] || 0) + (Number(it.quantity) || 0);
+      })
+    );
+    return [...products]
+      .sort((a, b) => (freq[b.id] || 0) - (freq[a.id] || 0) || Number(b.stock || 0) - Number(a.stock || 0))
+      .slice(0, 3);
+  }, [products, customerOrders]);
+
+  const baseReplies = ['¿Cuánto debo?', '¿Dónde está mi pedido?', 'Promos activas', '¿Cuál es la tasa?'];
+  const quickReplies = myOrders.length ? [...baseReplies, 'Repetir mi último pedido'] : baseReplies;
+
+  // Responde una pregunta y adosale una acción profunda cuando corresponde.
+  const respond = (q) => {
+    const t = q.toLowerCase();
+    // Saludos
+    if (/hola|buenas|saludos|hey|qué tal|que tal|^hi|^hello/.test(t)) {
+      return {
+        text: `¡Hola${name !== 'cliente' ? `, ${name}` : ''}! Soy Don Aiker 🤖 ¿En qué te ayudo hoy? Toca abajo para ver tu deuda, tus pedidos, las promos activas, la tasa del día o agregar un producto.`
+      };
+    }
+    // Deuda / saldo / fiado
+    if (/deuda|debo|adeudo|saldo|fiado|cr[eé]dito|c[uú]anto pag|deber|pendiente/.test(t)) {
+      if (!customer) {
+        return { text: 'Aún no estás identificado. Identifícate con tu número para ver tu deuda y saldo a favor.' };
+      }
+      if (balance > 0) {
+        return {
+          text: `Tienes ${formatUsd(balance)} de deuda pendiente.${
+            rate?.rate > 0 ? ` Equivale a ${formatBs(usdToBs(balance, rate.rate))} a la tasa del día (Bs ${Number(rate.rate).toFixed(2)}).` : ''
+          }\nPuedes abonar desde tu cuenta.`,
+          action: { kind: 'debt', label: 'Ver mi deuda', icon: 'creditCard' }
+        };
+      }
+      if (balance < 0) {
+        return {
+          text: `Tienes ${formatUsd(Math.abs(balance))} a tu favor en tu cartera 🎉. Al pagar tu próximo pedido elige "Mi Cartera" para usarlo.`,
+          action: { kind: 'debt', label: 'Ver mi saldo', icon: 'wallet' }
+        };
+      }
+      return { text: '¡Estás al día! No tienes deudas pendientes ni saldo a favor.' };
+    }
+    // Pedidos / rastreo
+    if (/pedido|orden|rastr|d[oó]nde est[aá]|en camino|entrega|estado/.test(t)) {
+      if (myOrders.length === 0) {
+        return { text: 'Aún no tienes pedidos registrados con tu número. ¡Haz tu primer pedido en la tienda!' };
+      }
+      const pending = myOrders.find((o) => !['entregado', 'cancelado'].includes(o.status));
+      if (pending) {
+        return {
+          text: `Tu último pedido ${pending.id} está ${
+            pending.status === 'pendiente' ? 'pendiente de confirmar' : pending.status === 'preparando' ? 'en preparación' : pending.status === 'en_camino' ? 'en camino 🛵' : pending.status
+          }.\nSeguilo en vivo o revisalo en "Mis Pedidos".`,
+          action:
+            pending.type === 'delivery' && pending.status === 'en_camino'
+              ? { kind: 'track', order: pending, label: 'Seguir mi pedido', icon: 'navigation' }
+              : { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' }
+        };
+      }
+      const latest = myOrders[0];
+      return {
+        text: `Tu último pedido ${latest.id} fue entregado ✅.`,
+        action: { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' }
+      };
+    }
+    // Repetir último pedido
+    if (/repetir|repite|de nuevo/.test(t)) {
+      if (myOrders.length === 0) {
+        return { text: 'No encontré pedidos anteriores para repetir. ¡Haz tu primer pedido en la tienda!' };
+      }
+      return {
+        text: 'Voy a cargar los artículos de tu último pedido en el carrito 🛒.',
+        action: { kind: 'repeat', label: 'Repetir último pedido', icon: 'refresh' }
+      };
+    }
+    // Promos / ofertas
+    if (/promo|oferta|descuento|rebaja|especial|combos|barato/.test(t)) {
+      if (activePromos.length === 0) {
+        return { text: 'Hoy no hay promos activas, pero te recomiendo revisar el Radar de Novedades por los productos nuevos.' };
+      }
+      const lines = activePromos.map((p, i) => `${i + 1}. ${p.title}${p.subtitle ? ` — ${p.subtitle}` : ''}`).join('\n');
+      return { text: `¡Hay ${activePromos.length} promo${activePromos.length > 1 ? 's' : ''} activa${activePromos.length > 1 ? 's' : ''}! 🎉\n${lines}` };
+    }
+    // Tasa / dólar / bolívar
+    if (/tasa|d[oó]lar|dolar|bol[ií]var|bs|bcv|divisa|cambio/.test(t)) {
+      if (rate?.rate > 0) {
+        return { text: `La tasa del día es Bs ${Number(rate.rate).toFixed(2)} por dólar. Por ejemplo, $10 serían ${formatBs(usdToBs(10, rate.rate))}.` };
+      }
+      return { text: 'Aún no tenemos la tasa del día disponible. Intenta de nuevo en unos minutos.' };
+    }
+    // Producto específico (por nombre completo o primera palabra). Se evalúa
+    // ANTES del catálogo genérico para que "agregar milka" o "hay cocacola"
+    // aterricen en el producto con acción "Agregar al carrito".
+    const prodList = Array.isArray(products) ? products : [];
+    const product =
+      prodList.find((p) => p.name && t.includes(p.name.toLowerCase())) ||
+      prodList.find((p) => p.name && t.includes(p.name.toLowerCase().split(' ')[0]));
+    if (product) {
+      const avail = Math.max(0, Number(product.stock) - Number(product.reserved || 0));
+      return {
+        text: `"${product.name}" está disponible a ${formatUsd(product.price)}${
+          avail > 0 ? ` con ${avail} ${avail === 1 ? 'unidad' : 'unidades'} en stock` : ', agotado por ahora'
+        }.`,
+        action: avail > 0 ? { kind: 'product', product, label: 'Agregar al carrito', icon: 'plus' } : null
+      };
+    }
+    // Productos / catálogo
+    if (/qu[eé] venden|producto|c[aá]talogo|tienes|disponible|vendes|hay de|agregar/.test(t)) {
+      if (!Array.isArray(products) || products.length === 0) return { text: 'Ahora mismo el catálogo está cargando. Intenta en un momento.' };
+      const cats = [...new Set(products.map((p) => p.category || 'Otros'))];
+      return { text: `Tenemos ${products.length} productos disponibles en ${cats.length} categoría${cats.length > 1 ? 's' : ''}: ${cats.slice(0, 6).join(', ')}. Busca en la barra superior o navega por categorías.` };
+    }
+    // Horario / abierto
+    if (/horario|abierto|hora|cu[aá]ndo|abren|cierran/.test(t)) {
+      return { text: 'Estamos abiertos ahora mismo ⏰ con atención rápida. Puedes pedir para retirar en el kiosko o para entrega.' };
+    }
+    // Agradecimiento
+    if (/gracias|genial|perfecto|excelente|muchas gracias/.test(t)) {
+      return { text: `¡Con gusto${name !== 'cliente' ? `, ${name}` : ''}! Recuerda que puedes pedir con voz tocando el micrófono del buscador 🎤.` };
+    }
+    // Fallback
+    return { text: 'Todavía estoy aprendiendo. Tocá una pregunta rápida abajo o probá con: tu deuda, tus pedidos, las promos, la tasa del día o un producto del catálogo.' };
+  };
+
+  const send = (text) => {
+    const q = String(text ?? '').trim();
+    if (!q || thinking) return;
+    setMessages((m) => [...m, { from: 'user', text: q }]);
+    setAction(null);
+    setThinking(true);
+    setTimeout(() => {
+      const res = respond(q);
+      setMessages((m) => [...m, { from: 'ai', text: res.text }]);
+      setAction(res.action || null);
+      setThinking(false);
+    }, 650);
+  };
+
+  const runAction = (a) => {
+    if (!a) return;
+    if (a.kind === 'debt') onOpenDebt?.();
+    else if (a.kind === 'orders') onOpenOrders?.();
+    else if (a.kind === 'track') onTrackOrder?.(a.order);
+    else if (a.kind === 'repeat') onRepeatLastOrder?.();
+    else if (a.kind === 'product') onAddToCart?.(a.product);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-[75] overflow-hidden animate-fade-in" style={{ top: headerHeight }}>
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+          <div className="p-4 border-b border-slate-800 flex items-center gap-3 shrink-0 bg-gradient-to-r from-indigo-950/60 to-slate-900">
+            <span className="relative p-2.5 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-500/30 shrink-0 animate-glow-pulse">
+              <Icon name="chat" className="w-5 h-5" />
+              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-900" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                Don Aiker
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold uppercase tracking-wider border border-emerald-500/30">
+                  asistente
+                </span>
+              </h3>
+              <p className="text-[11px] text-slate-400 truncate">Toca una pregunta o pide un producto</p>
+            </div>
+            <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl" aria-label="Cerrar asistente">
+              <Icon name="x" className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div ref={scrollRef} className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0 bg-slate-950/40">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.from === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+                {m.from === 'ai' && (
+                  <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
+                    <Icon name="chat" className="w-3.5 h-3.5" />
+                  </span>
+                )}
+                <div
+                  className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed whitespace-pre-line ${
+                    m.from === 'user'
+                      ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-semibold rounded-br-md'
+                      : 'bg-slate-800 border border-slate-700 text-slate-200 rounded-bl-md'
+                  }`}
+                >
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {action && (
+              <div className="flex justify-start pl-9 animate-fade-in">
+                <button
+                  onClick={() => runAction(action)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-slate-950 text-xs font-bold shadow-lg shadow-indigo-500/25 transition-all active:scale-95 hover:from-indigo-400 hover:to-cyan-400"
+                >
+                  <Icon name={action.icon || 'check'} className="w-3.5 h-3.5" />
+                  {action.label}
+                </button>
+              </div>
+            )}
+            {thinking && (
+              <div className="flex justify-start animate-fade-in">
+                <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
+                  <Icon name="chat" className="w-3.5 h-3.5" />
+                </span>
+                <div className="px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-sm rounded-bl-md flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '120ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '240ms' }} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 border-t border-slate-800 shrink-0 bg-slate-900">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!draft.trim() || thinking) return;
+                send(draft);
+                setDraft('');
+              }}
+              className="mb-3 flex items-center gap-2"
+            >
+              <input
+                ref={inputRef}
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Escribe tu pregunta o pide un producto…"
+                disabled={thinking}
+                enterKeyHint="send"
+                className="flex-1 min-w-0 px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/70 focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!draft.trim() || thinking}
+                aria-label="Enviar"
+                className="shrink-0 p-2.5 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-500/30 transition-all active:scale-95 hover:from-indigo-500 hover:to-cyan-400 disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <Icon name="arrowRight" className="w-5 h-5" />
+              </button>
+            </form>
+            {popular.length > 0 && (
+              <div className="mb-2.5">
+                <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 px-1">
+                  Agregar rápido
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {popular.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => send(`agregar ${p.name}`)}
+                      disabled={thinking}
+                      className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-[11px] font-bold text-teal-300 hover:bg-teal-500/25 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      <Icon name="plus" className="w-3 h-3" />
+                      <span className="max-w-24 truncate">{p.name.split(' ').slice(0, 2).join(' ')}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 px-1">
+              ¿Qué quieres saber?
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {quickReplies.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => send(r)}
+                  disabled={thinking}
+                  className="shrink-0 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] text-slate-200 hover:border-indigo-500/60 hover:text-indigo-300 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 

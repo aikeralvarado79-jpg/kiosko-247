@@ -5425,6 +5425,34 @@ function ProductImg({ product, image, name, brand, alt, className = '', loading 
 // Estante interactivo: un anaquel (categoría) con los productos "de pie" sobre
 // el borde, en fila horizontal scrolleable con leve 3D al pasar el cursor.
 // Tocar el producto abre el detalle; el botón lo suma al carrito al instante.
+// Scroll horizontal de anaqueles/góndolas: en PC la rueda del mouse mueve la
+// fila horizontalmente (solo si hay overflow, conservando el scroll vertical
+// de la página cuando no) y en móvil se desliza con el dedo (snap).
+function useShelfWheelScroll(ref) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      const canScrollX = el.scrollWidth > el.clientWidth + 1;
+      if (!canScrollX || (e.deltaY === 0 && e.deltaX === 0)) return;
+      el.scrollLeft += e.deltaY + e.deltaX;
+      e.preventDefault();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [ref]);
+}
+
+function ShelfScroller({ className, children }) {
+  const ref = useRef(null);
+  useShelfWheelScroll(ref);
+  return (
+    <div ref={ref} className={className}>
+      {children}
+    </div>
+  );
+}
+
 function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductModal, onSelectCategory }) {
   const id = categoryIdentity(category);
   const [justAddedId, setJustAddedId] = useState(null);
@@ -5467,7 +5495,7 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
 
       {/* Tablero del estante con los productos en fila */}
       <div className="shelf-panel mt-2 px-3 sm:px-4 pb-3 pt-1">
-        <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-3 px-3 pt-1 pb-2">
+        <ShelfScroller className="flex gap-3 overflow-x-auto shelf-scroll-x snap-x snap-mandatory -mx-3 px-3 pt-1 pb-2">
           {items.map((p, i) => {
             const avail = Math.max(0, Number(p.stock) - Number(p.reserved || 0));
             const out = avail <= 0;
@@ -5517,7 +5545,7 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
               </div>
             );
           })}
-        </div>
+        </ShelfScroller>
         <div className="shelf-lip" />
       </div>
     </article>
@@ -10484,7 +10512,7 @@ function AdminView({
                     </span>
                   </div>
                   <div className="shelf-panel px-3 sm:px-4 pb-3 pt-2 bg-slate-900/40 border border-slate-700/50 rounded-2xl">
-                    <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-1 px-1 pt-1 pb-2">
+                    <ShelfScroller className="flex gap-3 overflow-x-auto shelf-scroll-x snap-x snap-mandatory -mx-1 px-1 pt-1 pb-2">
                       {group.items.map((p, i) => {
                         const isLow = p.stock <= 5;
                         const isOut = p.stock === 0;
@@ -10542,7 +10570,7 @@ function AdminView({
                           </div>
                         );
                       })}
-                    </div>
+                    </ShelfScroller>
                     <div className="shelf-lip" />
                   </div>
                 </div>

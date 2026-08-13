@@ -980,7 +980,7 @@ function RateBanner({ rate }) {
 
   return (
     <div className="border-b border-slate-800 bg-slate-900/90 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3">
-      <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-3">
+      <div className="max-w-7xl xl:max-w-screen-2xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-3">
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-center">
           <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl sm:rounded-2xl bg-teal-500/10 border border-teal-500/30 text-[11px] sm:text-xs font-bold text-teal-300">
             <Icon name="dollarSign" className="w-3.5 h-3.5" />
@@ -2829,7 +2829,7 @@ export default function App() {
 
       {/* Modern Glassmorphic Top Navbar */}
       <header ref={headerRef} className="sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+        <div className="max-w-7xl xl:max-w-screen-2xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <BrandLogo className="w-10 h-10 sm:w-11 sm:h-11" />
@@ -2931,7 +2931,7 @@ export default function App() {
       {activeView === 'customer' && <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} />}
 
       {/* Main Container */}
-      <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
+      <main className={`flex-1 max-w-7xl xl:max-w-screen-2xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
         {isLoading ? (
           <LoadingScreen />
         ) : loadError ? (
@@ -3959,7 +3959,7 @@ function LoadingScreen() {
       </div>
 
       {/* Grid de tarjetas skeleton */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-6">
         {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="rounded-2xl sm:rounded-3xl bg-slate-800/40 border border-slate-700/40 overflow-hidden">
             <div className="skeleton-block aspect-square w-full rounded-none" />
@@ -5365,7 +5365,7 @@ function CustomerView({
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-6">
           {products.map((product, idx) => (
             <RevealOnScroll key={product.id} delay={Math.min(idx, 8) * 60}>
               <ProductCard
@@ -10733,7 +10733,7 @@ function AdminView({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6">
             {filteredOrders.length === 0 ? (
               <div className="col-span-full py-16 text-center text-slate-500 space-y-2">
                 <Icon name="clock" className="w-12 h-12 text-slate-700 mx-auto" />

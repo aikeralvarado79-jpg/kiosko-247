@@ -1117,6 +1117,55 @@ const pgStore = {
     );
   },
 
+  // Empleados añadidos por el super admin y sesiones del panel se guardan como
+  // JSON en la tabla settings (equivalente a fileStore), para que /api/state y
+  // el requireAdmin funcionen también con el backend Postgres de producción.
+  async listManagedAdmins() {
+    const v = await this.getSetting('managedAdmins');
+    return Array.isArray(v) ? v : [];
+  },
+
+  async setManagedAdmins(list) {
+    await this.setSetting('managedAdmins', Array.isArray(list) ? list : []);
+  },
+
+  async listAdminSessions() {
+    const v = await this.getSetting('adminSessions');
+    const sessions = v && typeof v === 'object' ? v : {};
+    return Object.entries(sessions).map(([hash, s]) => ({ tokenHash: hash, ...s }));
+  },
+
+  async getAdminSession(tokenHash) {
+    const v = await this.getSetting('adminSessions');
+    const sessions = v && typeof v === 'object' ? v : {};
+    return sessions[tokenHash] || null;
+  },
+
+  async saveAdminSession(tokenHash, session) {
+    const v = await this.getSetting('adminSessions');
+    const sessions = v && typeof v === 'object' ? v : {};
+    await this.setSetting('adminSessions', { ...sessions, [tokenHash]: session });
+  },
+
+  async touchAdminSession(tokenHash) {
+    const v = await this.getSetting('adminSessions');
+    const sessions = v && typeof v === 'object' ? v : {};
+    const existing = sessions[tokenHash];
+    if (!existing) return null;
+    const updated = { ...existing, lastSeen: Date.now() };
+    await this.setSetting('adminSessions', { ...sessions, [tokenHash]: updated });
+    return updated;
+  },
+
+  async removeAdminSession(tokenHash) {
+    const v = await this.getSetting('adminSessions');
+    const sessions = v && typeof v === 'object' ? v : {};
+    if (!sessions[tokenHash]) return;
+    const rest = { ...sessions };
+    delete rest[tokenHash];
+    await this.setSetting('adminSessions', rest);
+  },
+
   async listCollections() {
     const { rows } = await this.pool.query(`SELECT value FROM ${q('settings')} WHERE key = $1`, ['collections']);
     if (!rows[0]) return [];

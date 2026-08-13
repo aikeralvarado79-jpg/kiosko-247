@@ -2032,14 +2032,14 @@ export default function App() {
     }
   };
 
-  // Desde el overlay de éxito: cierra la celebración y abre el seguimiento del
-  // pedido recién creado (rastreo en vivo para delivery, detalle para retiro).
+  // Desde el overlay de éxito: cierra la celebración y abre el detalle del
+  // pedido recién creado (mismo modal que "Mis Pedidos" → ver pedido).
   const handleSuccessTrack = () => {
     const order = successOrder;
     setSuccessOrder(null);
     if (!order) return;
     setCurrentOrderTracking(order.id || order);
-    if (order.type === 'delivery') setLiveTrackingOrder(order);
+    setOrderDetailOrder(order);
   };
 
   // Compartir el pedido confirmado por WhatsApp (mensaje formateado con artículos).

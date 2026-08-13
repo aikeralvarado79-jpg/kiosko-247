@@ -9,8 +9,10 @@ services:
       - key: NODE_VERSION
         value: 20
       - key: ADMIN_PASSWORD
+        value: 123456
         sync: false
-        # Contraseña del panel admin. Ej: kiosko247Aa
+        # Contraseña del panel admin (aplicada al crear el servicio; con sync:
+        # false no sobreescribe la que ya esté definida en el dashboard).
       - key: ADMIN_PHONES
         sync: false
         # Teléfonos admin separados por coma (para recuperar contraseña con biometría).

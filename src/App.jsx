@@ -4202,6 +4202,13 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     }
     const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
+    // Dispositivos sin biometría (ni Face ID ni huella): la recuperación se hace
+    // sin validación. No hay nada que verificar, pasamos directo a la nueva clave.
+    if (!webauthnSupported) {
+      setBiometricResponse(null);
+      setRecoverStep('newpass');
+      return;
+    }
     // Si el prefetch no terminó, pedimos las options ahora en vez de fallar.
     if (recoveryFetchKeyRef.current !== phoneKey || !recoverOptions) {
       try {
@@ -4264,7 +4271,11 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               <Icon name="key" className="w-7 h-7" />
             </span>
             <h2 className="text-xl font-black text-white">Recuperar Contraseña</h2>
-            <p className="text-xs text-slate-400">Verifica con biometría y crea una nueva contraseña.</p>
+            <p className="text-xs text-slate-400">
+              {webauthnSupported
+                ? 'Verifica con biometría y crea una nueva contraseña.'
+                : 'Tu dispositivo no tiene biometría. Continúa solo con tu teléfono.'}
+            </p>
           </div>
 
           {recoverStep === 'phone' && (
@@ -4295,7 +4306,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                 onClick={startRecovery}
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-bold text-sm hover:from-amber-400 hover:to-rose-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
               >
-                Verificar con biometría
+                {webauthnSupported ? 'Verificar con biometría' : 'Continuar sin biometría'}
               </button>
             </div>
           )}

@@ -98,6 +98,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     creditCard: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM2 10h20M6 15h4" />,
     chevronRight: <path d="m9 18 6-6-6-6" />,
     chevronLeft: <path d="m15 18-6-6 6-6" />,
+    chevronUp: <path d="m18 15-6-6-6 6" />,
+    chevronDown: <path d="m6 9 6 6 6-6" />,
     maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
@@ -113,7 +115,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     sun: <path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />,
     moon: <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />,
     whatsapp: <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.297-.497.1-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />,
-     arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
+    arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
+    externalLink: <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3" />,
     image: <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
      xCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6" />,
      checkCircle: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9 12l2 2 4-4" />,
@@ -2204,6 +2207,7 @@ export default function App() {
 
   // ---- Compra rápida por voz ----
   const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceDialog, setVoiceDialog] = useState([]); // turnos conversacionales { kio, u }
   const voiceRecRef = useRef(null);
 
   const stopVoiceRec = () => {
@@ -2214,37 +2218,88 @@ export default function App() {
     setVoiceListening(false);
   };
 
-  const openVoiceOrder = () => {
-    if (!speechRecognitionAvailable()) {
-      addToast('Tu navegador no soporta reconocimiento de voz', 'error');
-      return;
-    }
-    setVoiceItems([]);
-    setIsVoiceOpen(true);
-    setVoiceListening(true);
-
+  // Inicia una escucha de voz; en el resultado decide si sigue conversando,
+  // acumula los artículos reconocidos, o pasa a confirmación cuando el usuario
+  // indica que ya terminó ("listo", "eso es todo", "completar pedido", etc).
+  const startVoiceListen = () => {
+    if (!speechRecognitionAvailable()) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const rec = new SR();
     voiceRecRef.current = rec;
     rec.lang = 'es-ES';
     rec.interimResults = false;
     rec.maxAlternatives = 1;
+    setVoiceListening(true);
 
     rec.onresult = (event) => {
       const transcript = event.results[0]?.[0]?.transcript || '';
       const parsed = parseVoiceOrder(transcript, products);
-      setVoiceItems(parsed);
-      setVoiceListening(false);
-      if (parsed.length === 0) {
-        speakText('No reconocí productos. Inténtalo de nuevo.');
+      const t = transcript.toLowerCase().trim();
+
+      // Frases de cierre de la conversación.
+      const done =
+        /\b(listo|terminar|terminé|termine|completar|completá|finalizar|confirmar|pagar|agregar al carrito|eso es todo|nada más|nada mas|no más|no mas|ya está|ya esta|listo ya)\b/.test(t) ||
+        (parsed.length === 0 && /\b(no|nada|eso es todo|solo eso|nada más|nada mas)\b/.test(t));
+
+      if (done) {
+        stopVoiceRec();
+        setVoiceDialog((d) => [...d, { u: transcript }]);
+        if (voiceItems.length > 0) {
+          speakText('Listo, pasamos tu pedido. Confirma y te lo agregamos al carrito.');
+        } else {
+          speakText('No reconocí productos. Tocá el micrófono o el botón para volver a intentar.');
+          setVoiceDialog((d) => [{ kio: '¿Qué productos quieres? Por ejemplo: "2 leche y 1 pan".' }, ...d]);
+        }
+        return;
       }
+
+      if (parsed.length === 0) {
+        setVoiceDialog((d) => [...d, { u: transcript }, { kio: 'No reconocí productos claros. Inténtalo de nuevo, por ejemplo: "2 leche y 1 pan".' }]);
+        speakText('No reconocí productos. Inténtalo de nuevo.');
+        setTimeout(() => {
+          if (voiceRecRef.current === rec) startVoiceListen();
+        }, 600);
+        return;
+      }
+
+      // Acumula los artículos (sumando cantidades del mismo producto).
+      setVoiceItems((prev) => {
+        const next = [...prev];
+        parsed.forEach((it) => {
+          const found = next.find((x) => x.product.id === it.product.id);
+          if (found) found.qty += it.qty;
+          else next.push(it);
+        });
+        return next;
+      });
+      setVoiceDialog((d) => [...d, { u: transcript }, { kio: `Listo, tengo ${parsed.length} artículo${parsed.length !== 1 ? 's' : ''}. ¿Algo más?` }]);
+      speakText(`Listo. ¿Algo más?`);
+      setTimeout(() => {
+        if (voiceRecRef.current === rec) startVoiceListen();
+      }, 600);
     };
     rec.onerror = () => {
+      voiceRecRef.current = null;
       setVoiceListening(false);
       addToast('No se pudo capturar la voz. Acepta el permiso del micrófono.', 'warning');
     };
-    rec.onend = () => setVoiceListening(false);
+    rec.onend = () => {
+      if (voiceRecRef.current === rec) voiceRecRef.current = null;
+      setVoiceListening(false);
+    };
     rec.start();
+  };
+
+  const openVoiceOrder = () => {
+    if (!speechRecognitionAvailable()) {
+      addToast('Tu navegador no soporta reconocimiento de voz', 'error');
+      return;
+    }
+    stopVoiceRec();
+    setVoiceItems([]);
+    setVoiceDialog([{ kio: 'Hola. Decime qué querés: por ejemplo "2 leche y 1 pan".' }]);
+    setIsVoiceOpen(true);
+    startVoiceListen();
   };
 
   const handleVoiceConfirm = async () => {
@@ -2262,6 +2317,7 @@ export default function App() {
       safe.forEach((it) => addToCart(it.product, it.qty));
       setIsVoiceOpen(false);
       setVoiceItems([]);
+      setVoiceDialog([]);
       speakText(`Listo, agregado ${safe.length} artículos a tu carrito`);
       haptic([20, 40, 20]);
       setIsCartOpen(true);
@@ -2937,6 +2993,7 @@ export default function App() {
             items={voiceItems}
             loading={voiceLoading}
             listening={voiceListening}
+            dialog={voiceDialog}
             onConfirm={handleVoiceConfirm}
             onClose={() => setIsVoiceOpen(false)}
             onRetry={openVoiceOrder}
@@ -4314,6 +4371,222 @@ class ErrorBoundary extends Component {
   }
 }
 
+// Historias de productos estilo Instagram: fila de avatares circulares con la
+// imagen de cada producto destacado; al tocar se abre un visor a pantalla
+// completa con auto-avance y barras de progreso. El tap izquierdo retrocede y
+// el derecho avanza; desde el visor se puede agregar al carrito o ver detalle.
+function ProductStories({ products, rate, onAddToCart, onOpenProductModal }) {
+  const [open, setOpen] = useState(false);
+  const [idx, setIdx] = useState(0);
+  const [progress, setProgress] = useState(0);
+
+  // Auto-avance de la historia activa (5 s por producto).
+  useEffect(() => {
+    if (!open) return undefined;
+    setProgress(0);
+    const id = setInterval(() => {
+      setProgress((p) => {
+        if (p >= 100) return p;
+        return Math.min(100, p + 2);
+      });
+    }, 100);
+    return () => clearInterval(id);
+  }, [open, idx]);
+
+  useEffect(() => {
+    if (open && progress >= 100) {
+      if (idx < products.length - 1) setIdx((i) => i + 1);
+      else setOpen(false);
+    }
+  }, [progress, open, idx, products.length]);
+
+  if (!Array.isArray(products) || products.length === 0) return null;
+  const current = products[idx];
+  const active = open ? idx : -1;
+
+  const storyIcon = (p) =>
+    p.image ? (
+      <ProductImg
+        product={p}
+        alt={p.name}
+        loading="lazy"
+        className="w-full h-full object-cover"
+      />
+    ) : (
+      <span className="text-base sm:text-xl font-black text-teal-400">{p.name.charAt(0).toUpperCase()}</span>
+    );
+
+  return (
+    <>
+      {/* Fila de historias */}
+      <section className="animate-fade-in">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="p-2 rounded-xl bg-fuchsia-500/15 border border-fuchsia-500/30 text-fuchsia-400">
+              <Icon name="sparkles" className="w-4 h-4 sm:w-5 sm:h-5" />
+            </span>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white">Historias</h3>
+              <p className="text-[11px] sm:text-xs text-slate-400">Descubre lo destacado de la tienda</p>
+            </div>
+          </div>
+          <span className="px-2 py-1 rounded-full bg-fuchsia-500/10 text-fuchsia-400 text-[10px] font-bold uppercase tracking-wider border border-fuchsia-500/20">
+            tap para ver
+          </span>
+        </div>
+
+        <div className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-none -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+          {products.map((p, i) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                setIdx(i);
+                setOpen(true);
+              }}
+              className="shrink-0 flex flex-col items-center gap-1.5 w-16 sm:w-20 group"
+              aria-label={`Ver historia de ${p.name}`}
+            >
+              <span
+                className={`w-14 h-14 sm:w-[4.5rem] sm:h-[4.5rem] rounded-full p-[3px] transition-transform group-hover:scale-105 active:scale-95 ${
+                  i === active
+                    ? 'bg-gradient-to-tr from-teal-400 via-cyan-400 to-fuchsia-500'
+                    : 'bg-gradient-to-tr from-teal-500 via-cyan-500 to-fuchsia-500'
+                }`}
+              >
+                <span className="block w-full h-full rounded-full border-2 border-slate-950 overflow-hidden bg-slate-800 flex items-center justify-center">
+                  {storyIcon(p)}
+                </span>
+              </span>
+              <span className="text-[9px] sm:text-[10px] font-semibold text-slate-300 truncate max-w-full">
+                {p.name}
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Visor a pantalla completa estilo Instagram */}
+      {open && current && (
+        <div className="fixed inset-0 z-[85] bg-slate-950/98 animate-fade-in" onClick={() => setOpen(false)}>
+          {/* Barras de progreso */}
+          <div className="absolute top-0 left-0 right-0 z-20 flex gap-1 p-2 sm:p-3">
+            {products.map((p, i) => (
+              <div key={p.id} className="h-1 flex-1 rounded-full bg-white/20 overflow-hidden">
+                <div
+                  className="h-full bg-white rounded-full transition-all duration-100"
+                  style={{ width: i < idx ? '100%' : i === idx ? `${progress}%` : '0%' }}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Header */}
+          <div className="absolute top-6 left-0 right-0 z-20 flex items-center justify-between px-3 sm:px-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="shrink-0 w-9 h-9 rounded-full bg-fuchsia-500/20 border border-fuchsia-500/40 flex items-center justify-center text-fuchsia-300">
+                <Icon name="sparkles" className="w-4 h-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white truncate">{current.name}</p>
+                <p className="text-[10px] text-slate-400 truncate">
+                  {formatSize(current) || current.category || 'Kiosko 247'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setOpen(false)}
+              className="shrink-0 p-2 rounded-xl bg-slate-900/80 text-slate-300 hover:text-white transition-colors"
+              aria-label="Cerrar historias"
+            >
+              <Icon name="x" className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Contenido de la historia */}
+          <div
+            className="h-full w-full flex items-center justify-center px-4 pb-16 cursor-pointer"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              if (e.clientX < rect.left + rect.width / 2) {
+                if (idx > 0) setIdx((i) => i - 1);
+              } else if (idx < products.length - 1) setIdx((i) => i + 1);
+              else setOpen(false);
+            }}
+          >
+            <div className="max-w-md w-full rounded-3xl overflow-hidden shadow-2xl border border-slate-700 bg-slate-900">
+              <div className="aspect-square bg-slate-800 flex items-center justify-center">
+                {current.image ? (
+                  <ProductImg
+                    product={current}
+                    alt={current.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-6xl font-black text-teal-400">{current.name.charAt(0).toUpperCase()}</span>
+                )}
+              </div>
+              <div className="p-4 sm:p-5 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="text-base font-black text-white truncate">{current.name}</h4>
+                    <p className="text-[11px] text-slate-400 line-clamp-2 mt-0.5">
+                      {current.description || current.brand || current.category}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-base sm:text-lg font-black text-teal-400">{formatUsd(current.price)}</p>
+                    {rate?.rate > 0 && (
+                      <p className="text-[10px] text-slate-400 font-semibold">
+                        {formatBs(usdToBs(current.price, rate.rate))}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenProductModal) {
+                        setOpen(false);
+                        onOpenProductModal(current);
+                      }
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold hover:bg-slate-700 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Icon name="eye" className="w-4 h-4" />
+                    Ver detalle
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onAddToCart) {
+                        onAddToCart(current, 1, e.currentTarget.getBoundingClientRect());
+                        if (idx < products.length - 1) setIdx((i) => i + 1);
+                        else setOpen(false);
+                      }
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-teal-500 text-slate-950 text-xs font-black hover:bg-teal-400 transition-all flex items-center justify-center gap-1.5 active:scale-95"
+                  >
+                    <Icon name="plus" className="w-4 h-4" />
+                    Agregar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Pista para avanzar/retroceder */}
+          <div className="absolute bottom-4 left-0 right-0 z-20 flex justify-center">
+            <span className="px-3 py-1.5 rounded-full bg-slate-900/80 border border-slate-700 text-[10px] text-slate-400 font-semibold">
+              Tocá la izquierda para atrás · derecha para avanzar
+            </span>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function CustomerView({
   products,
   allProducts,
@@ -5089,6 +5362,18 @@ function CustomerView({
             ))}
           </div>
         </section>
+        </RevealOnScroll>
+      )}
+
+      {/* Historias de productos estilo Instagram (top sellers / destacados) */}
+      {topSellers.length > 0 && (
+        <RevealOnScroll>
+          <ProductStories
+            products={topSellers}
+            rate={rate}
+            onAddToCart={onAddToCart}
+            onOpenProductModal={onOpenProductModal}
+          />
         </RevealOnScroll>
       )}
 
@@ -6892,7 +7177,7 @@ function BottomTabBar({
     { key: 'benefited', label: 'Beneficiados', icon: 'users', onClick: () => onAdminTab('benefited'), badge: null },
     { key: 'blacklist', label: 'Lista Negra', icon: 'alertTriangle', onClick: () => onAdminTab('blacklist'), badge: null },
     { key: 'abonos', label: 'Abonos', icon: 'wallet', onClick: () => onAdminTab('abonos'), badge: pendingPayments > 0 ? pendingPayments : null },
-    { key: 'analytics', label: 'Estadísticas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null }
+    { key: 'analytics', label: 'Finanzas', icon: 'trendingUp', onClick: () => onAdminTab('analytics'), badge: null }
   ];
 
   const tabs = activeView === 'admin' && isAdminAuthed ? adminTabs : customerTabs;
@@ -6987,6 +7272,35 @@ const makePinIcon = (color, label) =>
     iconAnchor: [13, 42]
   });
 
+// Marcador "repartidor" estilo Uber: núcleo circular emerald que viaja con el
+// repartidor, con un halo expansivo que pulsa (look de "entrega en vivo").
+const makeCourierIcon = () =>
+  L.divIcon({
+    className: '',
+    html: `
+      <div class="kiosko-courier-dot" style="filter:drop-shadow(0 3px 6px rgba(0,0,0,.45))">
+        <div class="kiosko-courier-core">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        </div>
+      </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+  });
+
+// Marcador "destino" estilo Uber Eats: círculo con paquete/bolsa en destino.
+const makeDestIcon = () =>
+  L.divIcon({
+    className: '',
+    html: `
+      <div style="display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 3px 6px rgba(0,0,0,.45))">
+        <div style="width:30px;height:30px;border-radius:9999px;background:#0f172a;border:3px solid #f43f5e;color:#fb7185;display:flex;align-items:center;justify-content:center">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
+        </div>
+      </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+  });
+
 // Mapa interactivo (Leaflet + OpenStreetMap, sin API key) para la entrega a
 // domicilio. Muestra el comercio (origen), el destino del cliente, la posición
 // en vivo del repartidor y el camino sugerido repartidor → destino (OSRM).
@@ -7079,15 +7393,13 @@ function DeliveryMap({ order, storeLocation }) {
     layerGroup.clearLayers();
     let courierMarker = courierMarkerRef.current;
     pts.forEach((m) => {
-      const icon =
-        m.kind === 'courier'
-          ? makePinIcon('#10b981', 'REPARTIDOR')
-          : m.kind === 'store'
-          ? makePinIcon('#22d3ee', 'COMERCIO')
-          : makePinIcon('#f43f5e', 'DESTINO');
+      let icon;
+      if (m.kind === 'courier') icon = makeCourierIcon();
+      else if (m.kind === 'store') icon = makePinIcon('#22d3ee', 'COMERCIO');
+      else icon = makeDestIcon();
       if (m.kind === 'courier') {
         if (!courierMarker) {
-          courierMarker = L.marker([m.lat, m.lng], { icon }).addTo(layerGroup);
+          courierMarker = L.marker([m.lat, m.lng], { icon, zIndexOffset: 1000 }).addTo(layerGroup);
           courierMarkerRef.current = courierMarker;
         } else {
           courierMarker.setLatLng([m.lat, m.lng]);
@@ -7110,7 +7422,7 @@ function DeliveryMap({ order, storeLocation }) {
           [Number(order.courier_lat), Number(order.courier_lng)],
           [Number(order.lat), Number(order.lng)]
         ],
-        { color: '#10b981', weight: 3, dashArray: '6 6', opacity: 0.7 }
+        { color: '#a7f3d0', weight: 5, opacity: 0.5, className: 'kiosko-route-animated' }
       ).addTo(layerGroup);
       const url = `https://router.project-osrm.org/route/v1/driving/${Number(order.courier_lng)},${Number(order.courier_lat)};${Number(order.lng)},${Number(order.lat)}?overview=full&geometries=geojson`;
       fetch(url)
@@ -7121,7 +7433,7 @@ function DeliveryMap({ order, storeLocation }) {
           if (routeRef.current) layerGroup.removeLayer(routeRef.current);
           const poly = L.polyline(
             coords.map((c) => [c[1], c[0]]),
-            { color: '#10b981', weight: 5, opacity: 0.9 }
+            { color: '#10b981', weight: 5, opacity: 0.9, className: 'kiosko-route-animated' }
           ).addTo(layerGroup);
           routeRef.current = poly;
         })
@@ -7151,11 +7463,56 @@ function DeliveryMap({ order, storeLocation }) {
 
   if (!showMap) return null;
 
+  const statusLabel = order.status === 'en_camino' ? 'En camino a tu destino' : STATUS_LABELS[order.status] || 'En preparación';
+
   return (
-    <div className="space-y-2">
-      <div className="relative z-0 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
-        <div ref={containerRef} className="w-full h-44 sm:h-52" />
+    <div className="space-y-2.5">
+      {/* Cabecera de estado estilo Uber */}
+      <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-900/80 border border-slate-700/80">
+        <span className="relative flex w-3 h-3 shrink-0">
+          <span className={`absolute inline-flex h-full w-full rounded-full ${courier ? 'bg-emerald-400 opacity-75 animate-ping' : 'bg-teal-400 opacity-75 animate-ping'}`} />
+          <span className={`relative inline-flex rounded-full w-3 h-3 ${courier ? 'bg-emerald-400' : 'bg-teal-400'}`} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-white truncate">{statusLabel}</p>
+          <p className="text-[11px] text-slate-400 truncate">
+            {courier
+              ? 'Repartidor en vivo · la posición se actualiza cada 5 s'
+              : dest
+              ? 'Preparando tu pedido para la entrega'
+              : 'Tu pedido de reparto se está preparando'}
+          </p>
+        </div>
+        {courier && courierUrl && (
+          <a
+            href={courierUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
+            title="Ver repartidor en Google Maps"
+          >
+            <Icon name="externalLink" className="w-3.5 h-3.5" />
+          </a>
+        )}
       </div>
+
+      <div className="relative z-0 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900">
+        <div ref={containerRef} className="w-full h-48 sm:h-60" />
+        {/* Badge flotante: repartidor en vivo */}
+        {courier && (
+          <div className="absolute top-2.5 left-2.5 z-[1000] flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950/85 border border-emerald-500/40 backdrop-blur-md text-emerald-300 text-[10px] font-bold pointer-events-none">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            EN VIVO
+          </div>
+        )}
+      </div>
+
+      {/* ETA + distancia (estilo Uber: "llega en ~N min") */}
+      {courier && dest && (
+        <EtaEstimate cLat={Number(order.courier_lat)} cLng={Number(order.courier_lng)} dLat={Number(order.lat)} dLng={Number(order.lng)} />
+      )}
+
+      {/* Footer: enlaces rápidos a Google Maps */}
       <div className="flex flex-wrap gap-2">
         {store && storeUrl && (
           <a
@@ -7176,7 +7533,7 @@ function DeliveryMap({ order, storeLocation }) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
           >
             <Icon name="mapPin" className="w-3.5 h-3.5" />
-            Ubicación del repartidor
+            Repartidor
           </a>
         )}
         {dest && destUrl && (
@@ -7187,7 +7544,7 @@ function DeliveryMap({ order, storeLocation }) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-[11px] font-bold hover:bg-teal-500/25 transition-all"
           >
             <Icon name="mapPin" className="w-3.5 h-3.5" />
-            Destino de la entrega
+            Destino
           </a>
         )}
       </div>
@@ -9135,24 +9492,6 @@ function AdminView({
     setPromoDraft(null);
   };
 
-  const topByDemand = useMemo(() => {
-    const counts = {};
-    orders.forEach((o) =>
-      o.items.forEach((it) => {
-        counts[it.id] = (counts[it.id] || 0) + it.quantity;
-      })
-    );
-    return Object.entries(counts)
-      .map(([id, quantity]) => ({ id, quantity }))
-      .sort((a, b) => b.quantity - a.quantity)
-      .map(({ id, quantity }) => {
-        const p = products.find((prod) => prod.id === id);
-        return p ? { ...p, quantity } : null;
-      })
-      .filter(Boolean)
-      .slice(0, 4);
-  }, [orders, products]);
-
   // Tendencia de ventas por día (últimos 7 días): cantidad de pedidos y ventas en $.
   const salesByDay = useMemo(() => {
     const days = [];
@@ -9200,6 +9539,100 @@ function AdminView({
     return `⚠️ *ALERTA DE STOCK BAJO* en Kiosko 247\n\nProductos con pocas unidades:\n${lines.join('\n')}\n\nRevisa el inventario y repón lo antes posible.`;
   }, [lowStockProducts]);
 
+  // Pedido de reabastecimiento al proveedor: productos con stock bajo y cantidad
+  // sugerida para reponer (mín. 10 unidades), listo para enviar por WhatsApp.
+  const reorderMessage = useMemo(() => {
+    if (lowStockProducts.length === 0) return '';
+    const lines = lowStockProducts.slice(0, 15).map((p) => `• ${p.name}: ${Math.max(10, Math.ceil(p.stock * 2))} un.`);
+    return `📦 *PEDIDO DE REABASTECIMIENTO — Kiosko 247*\n\nNecesito reponer:\n${lines.join('\n')}\n\nPor favor confírmame disponibilidad y precio.`;
+  }, [lowStockProducts]);
+
+  // ===== Dashboard financiero en vivo =====
+  // KPIs del día (hoy y ayer) a partir de pedidos pagados/entregados.
+  const finDash = useMemo(() => {
+    const today = toYMD(new Date());
+    const yesterday = toYMD(new Date(Date.now() - 86400000));
+    const byDay = { [today]: { orders: 0, revenue: 0, cash: 0, digital: 0, credit: 0, tickets: 0 }, [yesterday]: { orders: 0, revenue: 0, cash: 0, digital: 0, credit: 0, tickets: 0 } };
+    const todayItems = {};
+    orders.forEach((o) => {
+      const day = toYMD(parseOrderDate(o));
+      if (!byDay[day]) return;
+      const isSale = o.status === 'entregado';
+      if (o.status !== 'cancelado') byDay[day].tickets += 1;
+      if (!isSale) return;
+      const total = Number(o.total) || 0;
+      byDay[day].orders += 1;
+      byDay[day].revenue += total;
+      if (o.credit) byDay[day].credit += total;
+      else if (o.paymentMethod === 'efectivo') byDay[day].cash += total;
+      else byDay[day].digital += total;
+      if (day === today) {
+        o.items.forEach((it) => {
+          todayItems[it.id] = (todayItems[it.id] || 0) + it.quantity;
+        });
+      }
+    });
+    const t = byDay[today];
+    const y = byDay[yesterday];
+    const topToday = Object.entries(todayItems)
+      .map(([id, quantity]) => {
+        const p = products.find((prod) => prod.id === id);
+        return p ? { ...p, quantity } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 5);
+    return {
+      today: t,
+      yesterday: y,
+      ticketAvg: t.orders > 0 ? t.revenue / t.orders : 0,
+      revenueDelta: y.revenue > 0 ? ((t.revenue - y.revenue) / y.revenue) * 100 : (t.revenue > 0 ? 100 : 0),
+      ticketsDelta: y.tickets > 0 ? ((t.tickets - y.tickets) / y.tickets) * 100 : (t.tickets > 0 ? 100 : 0),
+      topToday
+    };
+  }, [orders, products]);
+
+  // Total fiado pendiente (deuda activa de todos los clientes).
+  const totalFiado = useMemo(
+    () => (allCustomers || []).reduce((acc, c) => acc + Math.max(0, Number(c.balance) || 0), 0),
+    [allCustomers]
+  );
+
+  // Pedidos pagados digitales pendientes de validar (caja).
+  const cashDigitalTotal = useMemo(() => {
+    let cash = 0;
+    let digital = 0;
+    completedOrders.forEach((o) => {
+      if (o.credit) return;
+      if (o.paymentMethod === 'efectivo') cash += Number(o.total) || 0;
+      else digital += Number(o.total) || 0;
+    });
+    return { cash, digital };
+  }, [completedOrders]);
+
+  // ===== Kiosko Operator: resumen de jornada (cierre del día) =====
+  const jornadaSummary = useMemo(() => {
+    const t = finDash.today;
+    const top = finDash.topToday.slice(0, 3).map((p) => `• ${p.name}: ${p.quantity} un.`).join('\n') || '• Sin ventas aún';
+    const lines = [
+      `📊 *RESUMEN DE JORNADA — Kiosko 247*`,
+      `🗓️ Hoy, ${new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}`,
+      ``,
+      `💰 Ventas: ${formatUsd(t.revenue)} (${t.orders} entregados)`,
+      `🎫 Tickets: ${t.tickets} pedidos`,
+      `🧾 Ticket promedio: ${finDash.ticketAvg > 0 ? formatUsd(finDash.ticketAvg) : '—'}`,
+      `💵 Efectivo: ${formatUsd(t.cash)}`,
+      `📲 Digital: ${formatUsd(t.digital)}`,
+      `📒 Fiado: ${formatUsd(t.credit)}`,
+      `🧮 Deuda total pendiente: ${formatUsd(totalFiado)}`,
+      ``,
+      `🏆 Top productos:`,
+      top,
+      ``,
+      `Comparado con ayer: ventas ${finDash.revenueDelta >= 0 ? `▲ +${finDash.revenueDelta.toFixed(0)}%` : `▼ ${finDash.revenueDelta.toFixed(0)}%`}`
+    ];
+    return lines.join('\n');
+  }, [finDash, totalFiado]);
 
   const renderOrderCard = (order, { inFicha = false } = {}) => {
     const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
@@ -9661,7 +10094,7 @@ function AdminView({
           { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
           { key: 'abonos', label: `Abonos (${pendingPayments})`, full: `Abonos por Aprobar (${pendingPayments})`, icon: 'wallet' },
           { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
-          { key: 'analytics', label: 'Estadísticas', full: 'Estadísticas del Negocio', icon: 'trendingUp' }
+          { key: 'analytics', label: 'Finanzas', full: 'Finanzas & Métricas', icon: 'trendingUp' }
         ].map((tab) => (
           <button
             key={tab.key}
@@ -9692,6 +10125,54 @@ function AdminView({
       {/* Tab 1: Inventory Management */}
       {adminTab === 'inventory' && (
         <div className="space-y-4">
+          {/* Reorden de compras al proveedor: lista de productos con stock bajo
+              y cantidades sugeridas para reponer, lista para enviar por WhatsApp */}
+          {lowStockProducts.length > 0 && (
+            <div className="rounded-2xl border border-amber-500/40 bg-gradient-to-br from-amber-500/15 via-slate-900/80 to-slate-900/80 overflow-hidden">
+              <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 shrink-0 self-start sm:self-center">
+                  <Icon name="refresh" className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                    Reorden al proveedor
+                    <span className="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/25 text-amber-300">
+                      {lowStockProducts.length} por reponer
+                    </span>
+                  </h4>
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {lowStockProducts.slice(0, 6).map((p) => (
+                      <span
+                        key={p.id}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700/70 text-[10px] font-semibold text-slate-300"
+                      >
+                        {p.name}
+                        <span className="text-amber-400 font-black">x{Math.max(10, Math.ceil(p.stock * 2))}</span>
+                      </span>
+                    ))}
+                    {lowStockProducts.length > 6 && (
+                      <span className="inline-flex items-center px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700/70 text-[10px] font-semibold text-slate-400">
+                        +{lowStockProducts.length - 6} más
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2">
+                    Cantidad sugerida para reponer (mín. 10 un.) según el stock actual.
+                  </p>
+                </div>
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(reorderMessage)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-all text-xs font-bold w-full sm:w-auto"
+                >
+                  <Icon name="whatsapp" className="w-4 h-4" />
+                  Enviar pedido
+                </a>
+              </div>
+            </div>
+          )}
+
           {/* Filtros: búsqueda en tiempo real + categoría + agrupación por marca */}
           <div className="space-y-3">
             <div className="flex flex-col sm:flex-row gap-2.5">
@@ -10891,14 +11372,19 @@ function AdminView({
         </div>
       )}
 
-      {/* Tab 6: Analytics */}
+      {/* Tab 6: Analytics / Finanzas */}
       {adminTab === 'analytics' && (
         <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl space-y-5 sm:space-y-6 backdrop-blur-md">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-              <Icon name="trendingUp" className="w-5 h-5 text-teal-400" />
-              Resumen de Métricas del Negocio
-            </h3>
+            <div>
+              <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                <Icon name="trendingUp" className="w-5 h-5 text-teal-400" />
+                Finanzas en Vivo
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                KPIs del día actualizados con cada pedido · {formatTimestamp()}
+              </p>
+            </div>
             {lowStockMessage && (
               <a
                 href={`https://wa.me/?text=${encodeURIComponent(lowStockMessage)}`}
@@ -10907,59 +11393,180 @@ function AdminView({
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all text-xs font-bold w-fit"
               >
                 <Icon name="whatsapp" className="w-4 h-4" />
-                Enviar alerta de stock bajo por WhatsApp
+                Alerta de stock bajo
               </a>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <h4 className="font-bold text-slate-200 text-sm">Productos con Mayor Demanda</h4>
-              {topByDemand.length === 0 ? (
-                <p className="text-xs text-slate-400">Aún no hay ventas registradas para calcular la demanda.</p>
-              ) : (
-                <ul className="space-y-3">
-                  {topByDemand.map((p, idx) => (
-                    <li key={p.id} className="flex items-center justify-between text-xs">
-                      <span className="text-slate-300 font-medium">#{idx + 1} {p.name}</span>
-                      <span className="text-teal-400 font-bold">{p.quantity} un. vendidas</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+          {/* KPIs hero del día */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-teal-500/20 to-emerald-500/10 border border-teal-500/40 shadow-lg shadow-teal-500/10">
+              <span className="text-[10px] sm:text-xs text-teal-300 font-semibold block">Ventas Hoy</span>
+              <span className="text-2xl sm:text-3xl font-black text-white block mt-1">
+                {formatUsd(finDash.today.revenue)}
+              </span>
+              <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-1">
+                {finDash.revenueDelta >= 0 ? (
+                  <span className="text-emerald-400 flex items-center gap-0.5 font-bold"><Icon name="chevronUp" className="w-3 h-3" />{Math.abs(finDash.revenueDelta).toFixed(0)}%</span>
+                ) : (
+                  <span className="text-rose-400 flex items-center gap-0.5 font-bold"><Icon name="chevronDown" className="w-3 h-3" />{Math.abs(finDash.revenueDelta).toFixed(0)}%</span>
+                )}
+                vs ayer ({formatUsd(finDash.yesterday.revenue)})
+              </span>
             </div>
 
-            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <h4 className="font-bold text-slate-200 text-sm">Estado de Stock Crítico</h4>
-              <ul className="space-y-3">
-                {lowStockProducts.length === 0 ? (
-                  <p className="text-xs text-emerald-400">¡Excelente! Todo el catálogo cuenta con stock suficiente.</p>
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-700/80">
+              <span className="text-[10px] sm:text-xs text-slate-400 font-semibold block">Tickets Hoy</span>
+              <span className="text-2xl sm:text-3xl font-black text-white block mt-1">{finDash.today.tickets}</span>
+              <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-1">
+                {finDash.ticketsDelta >= 0 ? (
+                  <span className="text-emerald-400 flex items-center gap-0.5 font-bold"><Icon name="chevronUp" className="w-3 h-3" />{Math.abs(finDash.ticketsDelta).toFixed(0)}%</span>
                 ) : (
-                  lowStockProducts.map((p) => (
-                    <li key={p.id} className="flex items-center justify-between text-xs">
-                      <span className="text-slate-300 font-medium">{p.name}</span>
-                      <span className="text-amber-400 font-bold">{p.stock} un. restantes</span>
-                    </li>
-                  ))
+                  <span className="text-rose-400 flex items-center gap-0.5 font-bold"><Icon name="chevronDown" className="w-3 h-3" />{Math.abs(finDash.ticketsDelta).toFixed(0)}%</span>
                 )}
-              </ul>
+                vs ayer ({finDash.yesterday.tickets})
+              </span>
+            </div>
+
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-700/80">
+              <span className="text-[10px] sm:text-xs text-slate-400 font-semibold block">Ticket Promedio</span>
+              <span className="text-2xl sm:text-3xl font-black text-white block mt-1">
+                {finDash.ticketAvg > 0 ? formatUsd(finDash.ticketAvg) : '—'}
+              </span>
+              <span className="text-[10px] text-slate-400 mt-1 block">{finDash.today.orders} pedidos entregados</span>
+            </div>
+
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-700/80">
+              <span className="text-[10px] sm:text-xs text-slate-400 font-semibold block">Fiado Pendiente</span>
+              <span className="text-2xl sm:text-3xl font-black text-amber-400 block mt-1">{formatUsd(totalFiado)}</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">Deuda activa de clientes</span>
+            </div>
+          </div>
+
+          {/* Kiosko Operator: resumen de jornada */}
+          <div className="rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-indigo-500/15 via-slate-900/80 to-slate-900/80 overflow-hidden">
+            <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="p-3 rounded-2xl bg-indigo-500/20 text-indigo-300 shrink-0 self-start sm:self-center">
+                <Icon name="zap" className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="font-bold text-white text-base flex items-center gap-2">
+                  Kiosko Operator
+                  <span className="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-indigo-500/25 text-indigo-300">Resumen de jornada</span>
+                </h4>
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-xs">
+                  <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-2.5">
+                    <span className="text-slate-400 block text-[9px] font-semibold uppercase tracking-wider">Ventas hoy</span>
+                    <span className="text-white font-black">{formatUsd(finDash.today.revenue)}</span>
+                  </div>
+                  <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-2.5">
+                    <span className="text-slate-400 block text-[9px] font-semibold uppercase tracking-wider">Tickets</span>
+                    <span className="text-white font-black">{finDash.today.tickets}</span>
+                  </div>
+                  <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-2.5">
+                    <span className="text-slate-400 block text-[9px] font-semibold uppercase tracking-wider">Entregados</span>
+                    <span className="text-white font-black">{finDash.today.orders}</span>
+                  </div>
+                  <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-2.5">
+                    <span className="text-slate-400 block text-[9px] font-semibold uppercase tracking-wider">vs ayer</span>
+                    <span className={`font-black ${finDash.revenueDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {finDash.revenueDelta >= 0 ? '▲' : '▼'} {Math.abs(finDash.revenueDelta).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(jornadaSummary)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-all text-xs font-bold w-full sm:w-auto"
+              >
+                <Icon name="whatsapp" className="w-4 h-4" />
+                Compartir jornada
+              </a>
+            </div>
+          </div>
+
+          {/* Efectivo vs digital */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="dollarSign" className="w-4 h-4 text-emerald-400" />
+                Efectivo vs Digital (hoy)
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-400">Efectivo</span>
+                    <span className="text-emerald-400 font-bold">{formatUsd(finDash.today.cash)}</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-slate-700/60 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-700"
+                      style={{ width: `${finDash.today.revenue > 0 ? (finDash.today.cash / finDash.today.revenue) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-400">Digital (pago móvil / transferencia / cartera)</span>
+                    <span className="text-sky-400 font-bold">{formatUsd(finDash.today.digital)}</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-slate-700/60 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-sky-500 to-indigo-400 transition-all duration-700"
+                      style={{ width: `${finDash.today.revenue > 0 ? (finDash.today.digital / finDash.today.revenue) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+                {finDash.today.credit > 0 && (
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-400">Fiado del día</span>
+                      <span className="text-amber-400 font-bold">{formatUsd(finDash.today.credit)}</span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-slate-700/60 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-700"
+                        style={{ width: `${finDash.today.revenue > 0 ? (finDash.today.credit / finDash.today.revenue) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-500">
+                  Histórico total: <span className="text-emerald-400 font-bold">{formatUsd(cashDigitalTotal.cash)}</span> efectivo ·{' '}
+                  <span className="text-sky-400 font-bold">{formatUsd(cashDigitalTotal.digital)}</span> digital
+                </p>
+              </div>
             </div>
 
             {/* Tendencia de ventas por día */}
             <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <h4 className="font-bold text-slate-200 text-sm">Ventas por Día (últimos 7 días)</h4>
-              <div className="flex items-end gap-2 h-32">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="barChart" className="w-4 h-4 text-teal-400" />
+                Ventas por Día (últimos 7 días)
+              </h4>
+              <div className="flex items-end gap-2 h-36">
                 {salesByDay.map((d) => {
-                  const max = Math.max(...salesByDay.map((x) => x.orders), 1);
-                  const h = Math.round((d.orders / max) * 100);
+                  const max = Math.max(...salesByDay.map((x) => x.revenue), 1);
+                  const h = Math.round((d.revenue / max) * 100);
+                  const isToday = d.key === toYMD(new Date());
                   return (
                     <div key={d.key} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                      <span className="text-[10px] font-bold text-slate-300">{d.orders}</span>
-                      <div
-                        className={`w-full rounded-t-lg ${d.orders > 0 ? 'bg-gradient-to-t from-teal-600 to-emerald-400' : 'bg-slate-700/50'}`}
-                        style={{ height: `${Math.max(d.orders > 0 ? h : 4, 4)}%` }}
-                      />
-                      <span className="text-[9px] text-slate-500 capitalize truncate">{d.label}</span>
+                      <span className="text-[9px] font-bold text-slate-300 truncate max-w-full">{d.revenue > 0 ? formatUsd(d.revenue) : ''}</span>
+                      <div className="w-full flex items-end justify-center h-16">
+                        <div
+                          className={`w-full rounded-t-lg transition-all duration-700 ${
+                            d.revenue > 0
+                              ? isToday
+                                ? 'bg-gradient-to-t from-teal-500 to-emerald-300 shadow-lg shadow-teal-500/30'
+                                : 'bg-gradient-to-t from-teal-700 to-teal-500'
+                              : 'bg-slate-700/50'
+                          }`}
+                          style={{ height: `${Math.max(d.revenue > 0 ? h : 4, 4)}%` }}
+                        />
+                      </div>
+                      <span className="text-[9px] text-slate-500 capitalize truncate">{isToday ? 'Hoy' : d.label}</span>
                     </div>
                   );
                 })}
@@ -10971,10 +11578,53 @@ function AdminView({
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="package" className="w-4 h-4 text-teal-400" />
+                Top Productos de Hoy
+              </h4>
+              {finDash.topToday.length === 0 ? (
+                <p className="text-xs text-slate-400">Aún no hay ventas registradas hoy.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {finDash.topToday.map((p, idx) => (
+                    <li key={p.id} className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-slate-300 font-medium truncate">#{idx + 1} {p.name}</span>
+                      <span className="text-teal-400 font-bold shrink-0">{p.quantity} un.</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="alertTriangle" className="w-4 h-4 text-amber-400" />
+                Estado de Stock Crítico
+              </h4>
+              <ul className="space-y-3">
+                {lowStockProducts.length === 0 ? (
+                  <p className="text-xs text-emerald-400">¡Excelente! Todo el catálogo cuenta con stock suficiente.</p>
+                ) : (
+                  lowStockProducts.slice(0, 6).map((p) => (
+                    <li key={p.id} className="flex items-center justify-between text-xs">
+                      <span className="text-slate-300 font-medium">{p.name}</span>
+                      <span className="text-amber-400 font-bold">{p.stock} un. restantes</span>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
 
             {/* Segmentación de clientes */}
             <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <h4 className="font-bold text-slate-200 text-sm">Clientes con Mayor Actividad</h4>
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                <Icon name="users" className="w-4 h-4 text-indigo-400" />
+                Clientes con Mayor Actividad
+              </h4>
               {topCustomers.length === 0 ? (
                 <p className="text-xs text-slate-400">Aún no hay pedidos registrados.</p>
               ) : (
@@ -14318,7 +14968,7 @@ const speechRecognitionAvailable = () =>
 
 // Modal de confirmación de la compra rápida por voz: muestra los artículos
 // reconocidos y permite confirmar (agrega al carrito) o reintentar.
-function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listening }) {
+function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listening, dialog = [] }) {
   useOverlay(true, onClose);
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
@@ -14329,19 +14979,46 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
             <Icon name="mic" className="w-5 h-5" />
           </span>
           <div className="flex-1 min-w-0">
-            <h3 className="text-base font-bold text-white">Compra rápida por voz</h3>
+            <h3 className="text-base font-bold text-white">Compra por voz conversacional</h3>
             <p className="text-xs text-slate-400">
               {listening
                 ? 'Escuchando… Decí por ejemplo: "2 leche y 1 pan"'
                 : items.length > 0
-                  ? 'Reconocimos estos artículos. ¿Los agregamos?'
-                  : 'No escuchamos claro. Tocá "Escuchar de nuevo".'}
+                  ? '¿Agregamos todo al carrito?'
+                  : 'Decime qué querés o tocá "Escuchar".'}
             </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
             <Icon name="x" className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Conversación: burbujas kiosko ↔ usuario */}
+        {dialog.length > 0 && (
+          <div className="max-h-36 overflow-y-auto scrollbar-none space-y-1.5">
+            {dialog.map((d, i) => (
+              <div key={i} className={`flex ${d.u ? 'justify-end' : 'justify-start'}`}>
+                <span
+                  className={`max-w-[85%] px-3 py-1.5 rounded-2xl text-xs leading-relaxed ${
+                    d.u
+                      ? 'bg-teal-500/20 border border-teal-500/40 text-teal-100 rounded-br-sm'
+                      : 'bg-slate-800/80 border border-slate-700 text-slate-200 rounded-bl-sm'
+                  }`}
+                >
+                  {d.u || d.kio}
+                </span>
+              </div>
+            ))}
+            {listening && (
+              <div className="flex justify-start">
+                <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-2xl bg-slate-800/80 border border-slate-700 text-xs text-slate-400 rounded-bl-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                  escuchando…
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         {listening && (
           <div className="flex items-center justify-center gap-2 py-4">
@@ -14353,7 +15030,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
 
         {!listening && items.length === 0 ? (
           <p className="text-sm text-slate-400 bg-slate-800/60 border border-slate-700 rounded-2xl p-4">
-            No reconocimos productos claros. Prueba con frases como: <b>"2 leche y 1 pan"</b>.
+            Todavía no reconocimos productos. Probá con frases como: <b>"2 leche y 1 pan"</b>.
           </p>
         ) : (
           items.length > 0 && (
@@ -14386,7 +15063,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
             size="md"
             icon="refresh"
           >
-            Escuchar de nuevo
+            Escuchar
           </Btn>
           <Btn
             onClick={onConfirm}

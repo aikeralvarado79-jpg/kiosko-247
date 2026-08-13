@@ -100,7 +100,7 @@ self.addEventListener('push', (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch {
-    data = { title: 'Kiosko 247', body: event.data ? event.data.text() : '' };
+    data = { title: 'Empresas Alvarados', body: event.data ? event.data.text() : '' };
   }
   const options = {
     body: data.body || '',
@@ -109,7 +109,7 @@ self.addEventListener('push', (event) => {
     vibrate: [120, 60, 120],
     data: { url: data.url || '/' }
   };
-  event.waitUntil(self.registration.showNotification(data.title || 'Kiosko 247', options));
+  event.waitUntil(self.registration.showNotification(data.title || 'Empresas Alvarados', options));
 });
 
 self.addEventListener('notificationclick', (event) => {

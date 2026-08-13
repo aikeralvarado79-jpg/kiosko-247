@@ -311,7 +311,7 @@ const Btn = ({
     'focus-visible:ring-teal-400 focus-visible:ring-offset-slate-900 ' +
     'active:scale-[0.96] active:transition-transform active:duration-75 ' +
     'disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ' +
-    'aria-disabled:opacity-50 aria-disabled:cursor-not-allowed';
+    'aria-disabled:opacity-50 aria-disabled:cursor-not-allowed btn-sink';
 
   const sizes = {
     sm: 'px-3 py-1.5 rounded-xl text-xs gap-1.5',
@@ -601,7 +601,7 @@ function MiniCalendar({ value, onChange, onClose }) {
   const isSelected = (date) => value && date && toYMD(date) === value;
   const isToday = (date) => date && toYMD(date) === toYMD(today);
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-64 animate-fade-in">
+    <div className="glass-strong bg-slate-900 border border-slate-700 rounded-2xl p-4 w-64 animate-fade-in">
       <div className="flex items-center justify-between mb-3">
         <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth()-1, 1))} className="p-1 text-slate-400 hover:text-white"><Icon name="minus" className="w-4 h-4" /></button>
         <span className="font-semibold text-white text-sm">{monthNames[month.getMonth()]} {month.getFullYear()}</span>
@@ -865,51 +865,81 @@ function OrderStepsTimeline({ order, className = '' }) {
   const isDelivery = order.type === 'delivery';
   const steps = isDelivery
     ? [
-        { key: 'pendiente', label: 'Pendiente', dot: 'bg-amber-400', text: 'text-amber-300' },
-        { key: 'en_preparacion', label: 'En prep.', dot: 'bg-cyan-400', text: 'text-cyan-300' },
-        { key: 'listo', label: 'Listo', dot: 'bg-emerald-400', text: 'text-emerald-300' },
-        { key: 'en_camino', label: 'En camino', dot: 'bg-sky-400', text: 'text-sky-300' },
-        { key: 'entregado', label: 'Entregado', dot: 'bg-violet-400', text: 'text-violet-300' }
+        { key: 'pendiente', label: 'Pendiente', color: '#fbbf24' },
+        { key: 'en_preparacion', label: 'En prep.', color: '#22d3ee' },
+        { key: 'listo', label: 'Listo', color: '#34d399' },
+        { key: 'en_camino', label: 'En camino', color: '#38bdf8' },
+        { key: 'entregado', label: 'Entregado', color: '#a78bfa' }
       ]
     : [
-        { key: 'pendiente', label: 'Pendiente', dot: 'bg-amber-400', text: 'text-amber-300' },
-        { key: 'en_preparacion', label: 'En prep.', dot: 'bg-cyan-400', text: 'text-cyan-300' },
-        { key: 'listo', label: 'Listo', dot: 'bg-emerald-400', text: 'text-emerald-300' },
-        { key: 'entregado', label: 'Retirado', dot: 'bg-indigo-400', text: 'text-indigo-300' }
+        { key: 'pendiente', label: 'Pendiente', color: '#fbbf24' },
+        { key: 'en_preparacion', label: 'En prep.', color: '#22d3ee' },
+        { key: 'listo', label: 'Listo', color: '#34d399' },
+        { key: 'entregado', label: 'Retirado', color: '#818cf8' }
       ];
   const curIdx = steps.findIndex((s) => s.key === order.status);
+  const n = steps.length;
+  const W = 100; // viewBox width units
+  const H = 26; // viewBox height units
+  const cy = H / 2;
+  const padX = 10; // dot radius + margin
+  const dotR = 4.5;
+  const space = (W - dotR * 2 - padX * 2) / (n - 1); // spacing between dot centers
+
+  // Posición x de cada paso y del punto activo (viaja proporcionalmente).
+  const xAt = (i) => padX + dotR + space * i;
+  const progressX = curIdx < 0 ? 0 : Math.min(xAt(curIdx), W - padX);
+
   return (
-    <div className={`flex items-stretch ${className}`}>
-      {steps.map((s, i) => {
-        const done = i < curIdx;
-        const active = i === curIdx;
-        return (
-          <Fragment key={s.key}>
-            <div className="flex flex-col items-center" style={{ width: `${100 / steps.length}%` }}>
-              <div className="relative w-full flex items-center justify-center">
-                {i > 0 && (
-                  <div className={`absolute right-1/2 top-1/2 -translate-y-1/2 h-0.5 w-full ${i <= curIdx ? 'bg-slate-500' : 'bg-slate-800'}`} />
-                )}
-                {i < steps.length - 1 && (
-                  <div className={`absolute left-1/2 top-1/2 -translate-y-1/2 h-0.5 w-full ${i < curIdx ? 'bg-slate-500' : 'bg-slate-800'}`} />
-                )}
-                <div
-                  className={`relative z-10 w-3 h-3 rounded-full border-2 transition-all ${
-                    active
-                      ? `${s.dot} border-white scale-125 shadow-lg`
-                      : done
-                        ? `${s.dot} border-transparent`
-                        : 'border-slate-600 bg-slate-800'
-                  }`}
-                />
-              </div>
-              <span className={`mt-1 text-[8px] font-bold whitespace-nowrap ${active ? s.text : done ? 'text-slate-400' : 'text-slate-600'}`}>
+    <div className={`w-full ${className}`} role="img" aria-label={`Avance del pedido: ${STATUS_LABELS[order.status] || order.status}`}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto block" preserveAspectRatio="none" aria-hidden="true">
+        {/* Trenzado de fondo */}
+        <line x1={xAt(0)} y1={cy} x2={xAt(n - 1)} y2={cy} stroke="currentColor" strokeOpacity="0.12" strokeWidth="2.5" strokeLinecap="round" className="order-timeline-track" />
+        {/* Progreso animado con stroke-dashoffset */}
+        <line
+          x1={xAt(0)}
+          y1={cy}
+          x2={xAt(n - 1)}
+          y2={cy}
+          stroke="url(#tsg)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          className="order-timeline-progress"
+          strokeDasharray={100}
+          strokeDashoffset={100 - progressX * (100 / (xAt(n - 1) - xAt(0)))}
+        />
+        <defs>
+          <linearGradient id="tsg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#2dd4bf" />
+            <stop offset="100%" stopColor="#34d399" />
+          </linearGradient>
+        </defs>
+      </svg>
+      {/* Puntos + etiquetas superpuestos */}
+      <div className="flex items-start" style={{ marginTop: -H * 0.45 }}>
+        {steps.map((s, i) => {
+          const done = i < curIdx;
+          const active = i === curIdx;
+          const isNext = i === curIdx + 1;
+          return (
+            <div key={s.key} style={{ width: `${100 / n}%` }} className="flex flex-col items-center">
+              <span
+                className={`rounded-full transition-all ${
+                  active
+                    ? `order-timeline-dot--active w-3.5 h-3.5 border-2 border-white shadow-lg`
+                    : done
+                      ? 'order-timeline-dot--done w-3 h-3'
+                      : `w-3 h-3 border-2 ${isNext ? 'bg-slate-700' : 'bg-slate-800 border-slate-600'}`
+                }`}
+                style={{ backgroundColor: done || active ? s.color : undefined }}
+              />
+              <span className={`mt-1 text-[8px] font-bold whitespace-nowrap leading-none ${active ? 'text-teal-300' : done ? 'text-slate-400' : 'text-slate-600'}`}>
                 {s.label}
               </span>
             </div>
-          </Fragment>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -985,15 +1015,17 @@ export default function App() {
   // App views: 'customer' | 'admin'
   const [activeView, setActiveView] = useState('customer');
 
-  // Theme: 'dark' | 'light'
+  // Theme: 'dark' | 'light' | 'neon' — se aplica como data-theme en <html>.
   const [theme, setTheme] = useState(() => localStorage.getItem('kiosko_theme') || 'dark');
 
   useEffect(() => {
-    document.documentElement.classList.toggle('light', theme === 'light');
+    document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('kiosko_theme', theme);
   }, [theme]);
 
-  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+  const THEME_ORDER = ['dark', 'light', 'neon'];
+  const toggleTheme = () =>
+    setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length]);
 
   // Aviso de versión nueva (dispara main.jsx cuando el SW nuevo toma control,
   // sin recargar) y estado de conexión para el badge "Modo sin conexión".
@@ -2628,7 +2660,7 @@ export default function App() {
       )}
 
       {/* Modern Glassmorphic Top Navbar */}
-      <header ref={headerRef} className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
+      <header ref={headerRef} className="sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -2677,14 +2709,14 @@ export default function App() {
             )}
           </div>
 
-          {/* Theme toggle */}
+          {/* Theme toggle: dark → light → neon */}
           <button
             onClick={toggleTheme}
-            className="p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 shrink-0"
-            aria-label="Cambiar tema claro/oscuro"
-            title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+            className="p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 shrink-0 btn-sink"
+            aria-label="Cambiar tema"
+            title={theme === 'dark' ? 'Cambiar a modo claro' : theme === 'light' ? 'Cambiar a modo neón' : 'Cambiar a modo oscuro'}
           >
-            <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="w-5 h-5" />
+            <Icon name={theme === 'dark' ? 'sun' : theme === 'light' ? 'moon' : 'zap'} className="w-5 h-5" />
           </button>
 
           {/* Customer identity chip */}
@@ -2709,14 +2741,14 @@ export default function App() {
             <button
               data-cart-target
               onClick={() => setIsCartOpen(true)}
-              className="relative p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 group shrink-0"
+              className="relative p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 group shrink-0 btn-sink"
               aria-label="Abrir carrito"
             >
-              <Icon name="shoppingBag" className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110" />
+              <Icon key={`bag-${cartCount}`} name="shoppingBag" className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110 animate-cart-bounce" />
               {cartCount > 0 && (
                 <span
-                  key={cartCount}
-                  className="absolute -top-1.5 -right-1.5 bg-teal-400 text-slate-950 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg animate-badge-pop ring-2 ring-slate-900"
+                  key={`badge-${cartCount}`}
+                  className="absolute -top-1.5 -right-1.5 bg-teal-400 text-slate-950 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg animate-badge-spring ring-2 ring-slate-900"
                 >
                   {cartCount}
                 </span>
@@ -4075,7 +4107,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                     onChange={(e) => setRecoverPhone({ ...recoverPhone, number: e.target.value.replace(/\D/g, '').slice(0, 7) })}
                     placeholder="1234567"
                     maxLength={7}
-                    className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                    className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -4104,7 +4136,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                   value={newPassword.a}
                   onChange={(e) => setNewPassword({ ...newPassword, a: e.target.value })}
                   placeholder="Mínimo 6 caracteres"
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
                 />
               </div>
               <div>
@@ -4114,7 +4146,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                   value={newPassword.b}
                   onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
                   placeholder="Repite la contraseña"
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
                 />
               </div>
               {recoverError && <p className="text-xs text-rose-400 mt-2">{recoverError}</p>}
@@ -4168,7 +4200,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                 onChange={(e) => setLoginPhone({ ...loginPhone, number: e.target.value.replace(/\D/g, '').slice(0, 7) })}
                 placeholder="1234567"
                 maxLength={7}
-                className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
+                className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
               />
             </div>
             {error && <p className="text-xs text-rose-400 mt-2">{error}</p>}
@@ -4182,7 +4214,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
+              className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
             />
           </div>
 
@@ -4770,12 +4802,12 @@ function CustomerView({
                       isPassed
                         ? 'bg-teal-400 shadow-lg shadow-teal-500/50'
                         : 'bg-slate-700/60'
-                    }`}
+                    } ${isCurrent ? 'animate-pulse' : ''}`}
                   />
                   <span
-                    className={`text-[9px] sm:text-xs font-semibold text-center leading-tight ${
+                    className={`text-[9px] sm:text-xs font-semibold text-center leading-tight transition-all ${
                       isCurrent
-                        ? 'text-teal-300 font-bold scale-105'
+                        ? 'text-teal-300 font-bold scale-110 order-timeline-dot--active'
                         : isPassed
                         ? 'text-slate-300'
                         : 'text-slate-500'
@@ -4863,7 +4895,7 @@ function CustomerView({
 
           {/* Autocomplete suggestions */}
           {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-2 z-20 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-scale-up">
+            <div className="absolute left-0 right-0 top-full mt-2 z-20 glass-strong bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-modal-spring">
               {suggestions.map((p) => (
                 <button
                   key={p.id}
@@ -5354,7 +5386,7 @@ function CalcFab({ open, onToggle, rate }) {
       {/* Panel flotante no modal: no cubre toda la pantalla y deja navegar de fondo */}
       {open && (
         <div
-          className="fixed right-3 sm:right-5 bottom-[4.75rem] sm:bottom-24 z-[46] w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-scale-up"
+          className="fixed right-3 sm:right-5 bottom-[4.75rem] sm:bottom-24 z-[46] w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-modal-spring"
         >
           <div className="flex items-center justify-between px-3.5 pt-3 pb-1">
             <span className="text-xs font-black text-white flex items-center gap-1.5 min-w-0">
@@ -5479,8 +5511,9 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
           aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
         >
           <Icon
+            key={isFavorite ? 'fav-on' : 'fav-off'}
             name={isFavorite ? 'heartFilled' : 'heart'}
-            className={`w-4 h-4 sm:w-5 sm:h-5 transition-all ${isFavorite ? 'text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.7)]' : 'text-slate-300'}`}
+            className={`w-4 h-4 sm:w-5 sm:h-5 transition-all icon-fill-hover ${isFavorite ? 'text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.7)] animate-icon-pop' : 'text-slate-300'}`}
           />
         </button>
 
@@ -5615,7 +5648,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
       {/* Backdrop Click */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-2xl max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
+      <div className="relative w-full sm:max-w-2xl max-h-[92vh] glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
       {/* Handle visual para indicar arrastre en móvil */}
       <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
@@ -6045,7 +6078,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] overflow-y-auto">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="relative p-5 sm:p-7 border-b border-slate-800 text-center">
           {(savedCustomer?.customerName || panel === 'confirm') && (
@@ -6362,7 +6395,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
         {/* Drawer Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
@@ -6556,7 +6589,7 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-md bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
         {/* Drawer Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
@@ -6742,12 +6775,12 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
       data-cart-target
       onClick={onOpen}
       style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
-      className="fixed bottom-[4.6rem] sm:bottom-4 left-0 right-0 sm:left-1/2 sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg z-40 px-4 sm:px-5 pt-3.5 sm:pt-4 bg-slate-950/90 sm:rounded-3xl border-t sm:border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-screen-up hover:border-teal-400/60 transition-all group"
+      className="fixed bottom-[4.6rem] sm:bottom-4 left-0 right-0 sm:left-1/2 sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg z-40 px-4 sm:px-5 pt-3.5 sm:pt-4 bg-slate-950/90 sm:rounded-3xl border-t sm:border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl flex items-center justify-between gap-4 animate-screen-up hover:border-teal-400/60 transition-all group btn-sink"
     >
       <div className="flex items-center gap-2.5 sm:gap-3">
         <span className="relative p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-teal-500/15 text-teal-400">
-          <Icon name="shoppingBag" className="w-5 h-5" />
-          <span key={cartCount} className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-badge-pop">
+          <Icon key={`bag-${cartCount}`} name="shoppingBag" className="w-5 h-5 animate-cart-bounce" />
+          <span key={`badge-${cartCount}`} className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-badge-spring">
             {cartCount}
           </span>
         </span>
@@ -7358,7 +7391,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-scale-up">
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
@@ -7514,7 +7547,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 shrink-0 bg-slate-900 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
@@ -7545,8 +7578,8 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
               const isCurrent = idx === currentIdx;
               return (
                 <div key={step.key} className="flex flex-col items-center gap-1.5 sm:gap-2">
-                  <div className={`w-full h-1.5 sm:h-2 rounded-full transition-all duration-500 ${isPassed ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50' : 'bg-slate-700/60'}`} />
-                  <span className={`text-[9px] sm:text-xs font-semibold text-center leading-tight ${isCurrent ? 'text-emerald-300 font-bold scale-105' : isPassed ? 'text-slate-300' : 'text-slate-500'}`}>
+                  <div className={`w-full h-1.5 sm:h-2 rounded-full transition-all duration-500 ${isPassed ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50' : 'bg-slate-700/60'} ${isCurrent ? 'animate-pulse' : ''}`} />
+                  <span className={`text-[9px] sm:text-xs font-semibold text-center leading-tight transition-all ${isCurrent ? 'text-emerald-300 font-bold scale-110 order-timeline-dot--active' : isPassed ? 'text-slate-300' : 'text-slate-500'}`}>
                     {step.label}
                   </span>
                 </div>
@@ -7625,7 +7658,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
                 }}
                 placeholder="Escribe un mensaje…"
                 maxLength={300}
-                className="flex-1 min-w-0 px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
+                className="flex-1 min-w-0 px-3 py-2.5 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
               />
               <button
                 onClick={handleSendMessage}
@@ -7846,7 +7879,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col">
         {/* Handle visual para indicar arrastre en móvil */}
         <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
@@ -8600,7 +8633,7 @@ function AdminView({
         <ProductImg
           product={p}
           alt={p.name}
-          className="w-14 h-14 rounded-xl object-cover bg-slate-900 border border-slate-700 shrink-0"
+          className="w-14 h-14 rounded-xl object-cover glass-strong bg-slate-900 border border-slate-700 shrink-0"
         />
         <div className="flex-1 min-w-0">
           <p className="font-bold text-slate-100 text-sm truncate">{p.name}</p>
@@ -8656,7 +8689,7 @@ function AdminView({
           <ProductImg
             product={p}
             alt={p.name}
-            className="w-12 h-12 rounded-xl object-cover bg-slate-900 border border-slate-700"
+            className="w-12 h-12 rounded-xl object-cover glass-strong bg-slate-900 border border-slate-700"
           />
           <div>
             <p className="font-bold text-slate-100">{p.name}</p>
@@ -8667,7 +8700,7 @@ function AdminView({
         </td>
         <td className="p-4 font-mono text-xs text-slate-400">{p.code}</td>
         <td className="p-4">
-          <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-300">
+          <span className="px-2.5 py-1 rounded-xl glass-strong bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-300">
             {p.category}
           </span>
         </td>
@@ -10632,7 +10665,7 @@ function AdminView({
           {/* Promo Editor Modal */}
           {isPromoModalOpen && promoDraft && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm">
-              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl animate-screen-up space-y-4 max-h-[92vh] overflow-y-auto">
+              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl glass-strong bg-slate-900 border border-slate-700 shadow-2xl animate-screen-up space-y-4 max-h-[92vh] overflow-y-auto">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-white text-lg">{promoDraft.id.startsWith('promo-') ? 'Nueva Promo' : 'Editar Promo'}</h4>
                   <button onClick={() => setIsPromoModalOpen(false)} className="text-slate-400 hover:text-white">
@@ -10730,7 +10763,7 @@ function AdminView({
               {allCustomers.map((c) => (
                 <div
                   key={c.phone}
-                  className="flex flex-wrap items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60"
+                  className="flex flex-wrap items-center gap-3 p-3 rounded-2xl glass-strong bg-slate-900 border border-slate-700/60"
                 >
                   <span
                     className={`p-2 rounded-xl shrink-0 ${
@@ -10806,7 +10839,7 @@ function AdminView({
           </div>
 
           {storeLocation ? (
-            <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/60 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
               <span className="p-2.5 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
                 <Icon name="store" className="w-5 h-5" />
               </span>
@@ -10830,7 +10863,7 @@ function AdminView({
               </a>
             </div>
           ) : (
-            <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
+            <div className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
               Aún no configuraste la ubicación del comercio. Usa el botón para elegirla en el mapa.
             </div>
           )}
@@ -10994,7 +11027,7 @@ function AdminView({
         >
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={closeFicha} />
           <div className="relative h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
-            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up flex flex-col max-h-full">
+            <div className="pointer-events-auto relative w-full max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring flex flex-col max-h-full">
               <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">
                 <div>
                   <h3 className="font-black text-white text-sm flex items-center gap-2">
@@ -11054,7 +11087,7 @@ function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-scale-up">
+      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring">
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm sm:text-base font-black text-white">
@@ -11343,7 +11376,7 @@ function BlacklistAdminView({
           {debtors.map((c) => (
             <div
               key={c.phone}
-              className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-700/60 hover:border-amber-500/40 cursor-pointer transition-all"
+              className="flex items-center gap-3 p-3 rounded-2xl glass-strong bg-slate-900 border border-slate-700/60 hover:border-amber-500/40 cursor-pointer transition-all"
               onClick={() => setSelectedDebtor(c)}
             >
               <span className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
@@ -11408,7 +11441,7 @@ function BlacklistAdminView({
           >
             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsRegisterOpen(false)} />
             <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-              <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-scale-up max-h-full flex flex-col">
+              <div className="pointer-events-auto relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring max-h-full flex flex-col">
                 <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
                   <div>
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -11571,7 +11604,7 @@ function AddDebtProductsModal({ products, rate, customers, onClose, onConfirm, h
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-      <div className="pointer-events-auto relative w-full sm:max-w-2xl bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+      <div className="pointer-events-auto relative w-full sm:max-w-2xl glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -11790,7 +11823,7 @@ function AddDebtAmountModal({ customers, rate, onClose, onConfirm, headerHeight 
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-      <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+      <div className="pointer-events-auto relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -12005,7 +12038,7 @@ function DebtDetailModal({
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-      <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+      <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -12398,7 +12431,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -13358,7 +13391,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <h2 className="text-lg sm:text-xl font-bold text-white">
             {productToEdit ? 'Editar Producto' : 'Crear Nuevo Producto'}
@@ -13655,7 +13688,7 @@ function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', 
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${danger ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
           <Icon name={icon} className="w-6 h-6" />
         </div>
@@ -13696,7 +13729,7 @@ function DeleteConfirmModal({ product, onClose, onConfirm }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
           <Icon name="alertTriangle" className="w-6 h-6" />
         </div>
@@ -13730,7 +13763,7 @@ function DeleteOrderModal({ order, onClose, onConfirm }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
           <Icon name="trash" className="w-6 h-6" />
         </div>
@@ -13965,7 +13998,7 @@ function FacturaQr360({ order, rate }) {
           style={{ transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
         >
           {/* Frente: QR */}
-          <div className="absolute inset-0 backface-hidden rounded-2xl bg-slate-900 border border-slate-700 flex flex-col items-center justify-center gap-3 p-4">
+          <div className="absolute inset-0 backface-hidden rounded-2xl glass-strong bg-slate-900 border border-slate-700 flex flex-col items-center justify-center gap-3 p-4">
             <img
               src={qrUrl}
               alt={`Código QR de la factura #${order.id}`}
@@ -14021,7 +14054,7 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
   return (
     <div className="fixed inset-0 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-scale-up">
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-modal-spring">
         <div className="p-5 sm:p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white">
@@ -14083,6 +14116,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
 
           {/* Estado del pago digital (confirmado / en revisión / rechazado con acciones) */}
           <PaymentStatusCard order={order} isBenefited={isBenefited} onOrderUpdated={onOrderUpdated} addToast={addToast} />
+
+          {/* Línea de tiempo animada del pedido */}
+          <OrderStepsTimeline order={order} />
 
           {/* Mapa de entrega a domicilio */}
           <DeliveryMap order={order} />
@@ -14151,7 +14187,7 @@ function CancelOrderModal({ order, onClose, onConfirm }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
           <Icon name="alertTriangle" className="w-6 h-6" />
         </div>
@@ -14284,7 +14320,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-scale-up">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-modal-spring">
         <div className="flex items-center gap-3">
           <span className={`p-2.5 rounded-2xl shrink-0 ${listening ? 'bg-rose-500/20 text-rose-400 animate-pulse' : 'bg-teal-500/20 text-teal-400'}`}>
             <Icon name="mic" className="w-5 h-5" />
@@ -14326,7 +14362,7 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
                     <span className="block text-xs font-semibold text-slate-200 truncate">{it.product.name}</span>
                     <span className="text-[11px] text-teal-400 font-bold">{formatUsd(it.product.price)} c/u</span>
                   </div>
-                  <span className="shrink-0 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-sm font-black text-white">x{it.qty}</span>
+                  <span className="shrink-0 px-2 py-1 rounded-lg glass-strong bg-slate-900 border border-slate-700 text-sm font-black text-white">x{it.qty}</span>
                 </div>
               ))}
               <div className="flex justify-between text-sm font-black pt-1">
@@ -14413,7 +14449,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-lg bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
           <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -14538,7 +14574,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-scale-up max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-modal-spring max-h-[92vh] flex flex-col">
         <div className="flex items-center gap-3">
           <span className="p-2.5 rounded-2xl bg-indigo-500/20 text-indigo-400 shrink-0">
             <Icon name="users" className="w-5 h-5" />
@@ -14559,7 +14595,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
               readOnly
               value={link}
               onFocus={(e) => e.target.select()}
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-[11px] text-teal-300 font-mono focus:outline-none"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl glass-strong bg-slate-900 border border-slate-700 text-[11px] text-teal-300 font-mono focus:outline-none"
             />
             <button
               onClick={copy}
@@ -14693,7 +14729,7 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
   };
 
   const renderPayment = (p, clientPhone) => (
-    <div key={p.id} className="rounded-2xl bg-slate-900 border border-slate-700/70 p-4 space-y-3">
+    <div key={p.id} className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/70 p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -14825,7 +14861,7 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
     const totalPendiente = pendientes.reduce((sum, p) => sum + Number(p.amountUsd || 0), 0);
 
     return (
-      <div key={client.phone} className="rounded-2xl bg-slate-900 border border-slate-700/70 overflow-hidden">
+      <div key={client.phone} className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/70 overflow-hidden">
         <button
           onClick={() => setExpandedClient(isExpanded ? null : client.phone)}
           className="w-full p-4 flex items-center justify-between gap-3 text-left"
@@ -15133,7 +15169,7 @@ function AikerAssistant({
     <div className="fixed inset-x-0 bottom-0 z-[75] overflow-hidden animate-fade-in" style={{ top: headerHeight }}>
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-md bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div className="pointer-events-auto relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
           <div className="p-4 border-b border-slate-800 flex items-center gap-3 shrink-0 bg-gradient-to-r from-indigo-950/60 to-slate-900">
             <span className="relative p-2.5 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-500/30 shrink-0 animate-glow-pulse">
               <Icon name="chat" className="w-5 h-5" />

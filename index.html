@@ -7,9 +7,8 @@
       // Aplica el tema guardado ANTES del primer pintado para evitar el parpadeo
       // de modo claro→oscuro al abrir la app (sin depender del useEffect).
       try {
-        if (localStorage.getItem('kiosko_theme') === 'light') {
-          document.documentElement.classList.add('light');
-        }
+        const t = localStorage.getItem('kiosko_theme') || 'dark';
+        if (t !== 'dark') document.documentElement.setAttribute('data-theme', t);
       } catch (e) {}
     </script>
     <meta name="theme-color" content="#0f172a" />

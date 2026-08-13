@@ -275,6 +275,9 @@ const fileStore = {
     const state = { ...this.state, settings: { ...this.state.settings } };
     delete state.settings.adminPassword;
     delete state.settings.adminCredentials;
+    delete state.settings.adminSessions;
+    delete state.settings.adminProfiles;
+    delete state.settings.managedAdmins;
     const reserved = reservedByProduct(clientId);
     state.products = withForecast(state.products, state.orders).map((p) => ({ ...p, reserved: reserved.get(p.id) || 0 }));
     return state;
@@ -353,6 +356,66 @@ const fileStore = {
       adminCredentials: { ...(this.state.settings.adminCredentials || {}), [key]: entry }
     };
     this.persist();
+  },
+
+  // Perfil del administrador (nombre, foto). Key = teléfono normalizado.
+  async getAdminProfile(phone) {
+    const key = normalizePhone(phone);
+    return this.state.settings?.adminProfiles?.[key] || null;
+  },
+
+  async setAdminProfile(phone, profile) {
+    const key = normalizePhone(phone);
+    this.state.settings = {
+      ...this.state.settings,
+      adminProfiles: { ...(this.state.settings.adminProfiles || {}), [key]: { ...(this.state.settings.adminProfiles?.[key] || {}), ...profile } }
+    };
+    this.persist();
+  },
+
+  // Admins añadidos/quitados dinámicamente (empleados gestionados por el super admin).
+  async listManagedAdmins() {
+    return Array.isArray(this.state.settings?.managedAdmins) ? this.state.settings.managedAdmins : [];
+  },
+
+  async setManagedAdmins(list) {
+    this.state.settings = { ...this.state.settings, managedAdmins: Array.isArray(list) ? list : [] };
+    this.persist();
+  },
+
+  // Sesiones activas del panel admin. Key = hash del token (nunca el token crudo).
+  async listAdminSessions() {
+    const sessions = this.state.settings?.adminSessions || {};
+    return Object.entries(sessions).map(([hash, s]) => ({ tokenHash: hash, ...s }));
+  },
+
+  async getAdminSession(tokenHash) {
+    return this.state.settings?.adminSessions?.[tokenHash] || null;
+  },
+
+  async saveAdminSession(tokenHash, session) {
+    this.state.settings = {
+      ...this.state.settings,
+      adminSessions: { ...(this.state.settings.adminSessions || {}), [tokenHash]: session }
+    };
+    this.persist();
+  },
+
+  async touchAdminSession(tokenHash) {
+    const existing = this.state.settings?.adminSessions?.[tokenHash];
+    if (!existing) return null;
+    existing.lastSeen = Date.now();
+    this.persist();
+    return existing;
+  },
+
+  async removeAdminSession(tokenHash) {
+    const sessions = { ...(this.state.settings?.adminSessions || {}) };
+    if (sessions[tokenHash]) {
+      delete sessions[tokenHash];
+      this.state.settings = { ...this.state.settings, adminSessions: sessions };
+      this.persist();
+    }
   },
 
   async listCollections() {
@@ -1793,6 +1856,24 @@ export const deleteWebAuthn = (phone) => store.deleteWebAuthn(phone);
 export const getAdminCredential = (phone) => store.getAdminCredential(phone);
 
 export const setAdminCredential = (phone, entry) => store.setAdminCredential(phone, entry);
+
+export const getAdminProfile = (phone) => store.getAdminProfile(phone);
+
+export const setAdminProfile = (phone, profile) => store.setAdminProfile(phone, profile);
+
+export const listManagedAdmins = () => store.listManagedAdmins();
+
+export const setManagedAdmins = (list) => store.setManagedAdmins(list);
+
+export const listAdminSessions = () => store.listAdminSessions();
+
+export const getAdminSession = (tokenHash) => store.getAdminSession(tokenHash);
+
+export const saveAdminSession = (tokenHash, session) => store.saveAdminSession(tokenHash, session);
+
+export const touchAdminSession = (tokenHash) => store.touchAdminSession(tokenHash);
+
+export const removeAdminSession = (tokenHash) => store.removeAdminSession(tokenHash);
 
 export const getAdminPassword = () => store.getAdminPassword();
 

@@ -94,6 +94,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     alertTriangle: <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3zM12 9v4M12 17h.01" />,
     trendingUp: <path d="m22 7-8.5 8.5-5-5L1 18M16 7h6v6" />,
     user: <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
+    userPlus: <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6" />,
     users: <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
     creditCard: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM2 10h20M6 15h4" />,
     chevronRight: <path d="m9 18 6-6-6-6" />,
@@ -105,6 +106,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
     pin: <path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />,
     clock: <path d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
+    lock: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 8v8M8 8h8" />,
     filter: <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />,
     eye: <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
     dollarSign: <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
@@ -411,6 +413,16 @@ const hasRealBiometrics = async () => {
 
 const formatTimestamp = (date = new Date()) =>
   date.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+// Tiempo relativo en español ("hace 3 min", "hace 2 h"), para sesiones activas.
+const formatRelative = (ts) => {
+  if (!ts) return 'ahora';
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 1000));
+  if (seconds < 60) return 'hace segundos';
+  if (seconds < 3600) return `hace ${Math.floor(seconds / 60)} min`;
+  if (seconds < 86400) return `hace ${Math.floor(seconds / 3600)} h`;
+  return `hace ${Math.floor(seconds / 86400)} d`;
+};
 
 const formatSize = (product) => {
   if (!product || product.sizeValue === undefined || product.sizeValue === null || product.sizeValue === '') return '';
@@ -1086,6 +1098,48 @@ export default function App() {
   const [isAdminAuthed, setIsAdminAuthed] = useState(() => Boolean(getToken()));
   const [refreshingDb, setRefreshingDb] = useState(false);
 
+  // Admin actualmente autenticado: teléfono + rol ('admin' | 'superadmin').
+  // Se persiste en sessionStorage para sobrevivir recargas sin pedir login otra vez.
+  const [adminInfo, setAdminInfo] = useState(() => {
+    try {
+      const role = sessionStorage.getItem('kiosko_admin_role');
+      const phone = sessionStorage.getItem('kiosko_admin_phone');
+      return role && phone ? { role, phone } : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Perfil visual del admin autenticado (nombre, foto, teléfono).
+  const [adminProfile, setAdminProfile] = useState(null);
+
+  // Teléfonos que tienen acceso al panel: fijos (config) + empleados añadidos
+  // por el super admin. Viene en /api/state para que el cliente sepa quién
+  // puede entrar al panel sin depender de una lista hardcodeada.
+  const [adminPhones, setAdminPhones] = useState(ADMIN_PHONES);
+
+  // Carga el perfil del admin (nombre, foto) desde el servidor.
+  const loadAdminProfile = useCallback(async (phone) => {
+    const res = await api.getAdminProfile();
+    if (res.ok && res.data) {
+      setAdminProfile(res.data);
+      if (phone) {
+        try { sessionStorage.setItem('kiosko_admin_phone', phone); } catch {}
+      }
+    }
+  }, []);
+
+  // Guarda el admin logueado en sessionStorage y recarga su perfil.
+  const persistAdminInfo = (role, phone) => {
+    const info = { role, phone };
+    setAdminInfo(info);
+    try {
+      sessionStorage.setItem('kiosko_admin_role', role);
+      sessionStorage.setItem('kiosko_admin_phone', phone);
+    } catch {}
+    loadAdminProfile(phone);
+  };
+
   // Identidad de sesión para reservar stock en el servidor (persistente en la pestaña).
   const [clientId] = useState(() => {
     try {
@@ -1131,6 +1185,7 @@ export default function App() {
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
+    if (Array.isArray(res.data.adminPhones)) setAdminPhones(res.data.adminPhones);
     hasDataRef.current = true;
     setIsLoading(false);
   }, [clientId, isAdminAuthed]);
@@ -1155,6 +1210,25 @@ export default function App() {
       document.removeEventListener('visibilitychange', poll);
     };
   }, [loadState]);
+
+  // Al montar con sesión admin activa (recarga), recupera rol/teléfono y perfil.
+  useEffect(() => {
+    if (!isAdminAuthed) return;
+    if (!adminInfo) {
+      const res = api.getAdminProfile();
+      res.then((r) => {
+        if (r.ok && r.data?.phone) {
+          setAdminInfo({ role: r.data.role || 'admin', phone: r.data.phone });
+          try {
+            sessionStorage.setItem('kiosko_admin_role', r.data.role || 'admin');
+            sessionStorage.setItem('kiosko_admin_phone', r.data.phone);
+          } catch {}
+        }
+      }).catch(() => {});
+    }
+    if (!adminProfile) loadAdminProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdminAuthed]);
 
   // Mantiene sincronizadas las vistas del cliente (detalle / rastreo) con la
   // última copia del pedido que trae el polling, para que un cambio de pago o
@@ -1286,12 +1360,13 @@ export default function App() {
     try { return localStorage.getItem('kiosko_push_banner_hidden') === '1'; } catch { return false; }
   });
 
-  // True si el cliente identificado figura en la lista de administradores por teléfono
+  // True si el cliente identificado figura en la lista de administradores por
+  // teléfono (fijos de config + empleados añadidos por el super admin).
   const isCurrentAdmin = useMemo(() => {
     if (!savedCustomer?.phoneNumber) return false;
     const key = `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber}`.replace(/\D/g, '').slice(-11);
-    return ADMIN_PHONES.includes(key);
-  }, [savedCustomer]);
+    return adminPhones.includes(key);
+  }, [savedCustomer, adminPhones]);
 
   // Identificación obligatoria: se abre al entrar como cliente sin datos guardados.
   // identityMode: 'login' (formulario) | 'confirm' (solo biometría para volver/salir).
@@ -1672,6 +1747,7 @@ export default function App() {
       // Bienvenida a pantalla completa con el nombre del administrador. Se resuelve
       // desde el cliente reconocido, la lista de clientes o el perfil en el server.
       const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      persistAdminInfo(res.data.role || 'admin', res.data.phone || phoneKey);
       const adminName = await resolveAdminName(phoneKey);
       setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
       addToast('Sesión iniciada en el panel admin');
@@ -1694,6 +1770,7 @@ export default function App() {
       setToken(res.data.token);
       setIsAdminAuthed(true);
       const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      persistAdminInfo(res.data.role || 'admin', res.data.phone || phoneKey);
       const adminName = await resolveAdminName(phoneKey);
       setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
       addToast('Sesión iniciada en el panel admin');
@@ -1715,6 +1792,7 @@ export default function App() {
       setToken(res.data.token);
       setIsAdminAuthed(true);
       const phoneKey = String(phone || '').replace(/\D/g, '').slice(-11);
+      persistAdminInfo(res.data.role || 'admin', res.data.phone || phoneKey);
       const adminName = await resolveAdminName(phoneKey);
       setWelcome({ name: adminName.split(' ')[0] || 'Administrador', tag: 'Panel de administración' });
       addToast('Sesión iniciada en el panel admin');
@@ -1746,12 +1824,43 @@ export default function App() {
   };
 
   const handleAdminLogout = () => {
+    // Cierra la sesión activa en el servidor (el token deja de valer).
+    api.adminLogout().catch(() => {});
     clearToken();
+    try {
+      sessionStorage.removeItem('kiosko_admin_role');
+      sessionStorage.removeItem('kiosko_admin_phone');
+    } catch {}
+    setAdminInfo(null);
+    setAdminProfile(null);
     setIsAdminAuthed(false);
     setActiveView('customer');
     setAdminTab('inventory');
     setCustomerTab('store');
     addToast('Sesión cerrada', 'info');
+  };
+
+  // Cambio de contraseña del admin desde el panel (verifica la actual).
+  const handleChangeAdminPassword = async (currentPassword, newPassword) => {
+    const res = await api.changeAdminPassword(currentPassword, newPassword);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo cambiar la contraseña', 'error');
+      return false;
+    }
+    addToast('Contraseña actualizada');
+    return true;
+  };
+
+  // Guarda el perfil visual del admin (nombre y foto) y refresca la copia local.
+  const handleSaveAdminProfile = async (data) => {
+    const res = await api.updateAdminProfile(data);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo guardar el perfil', 'error');
+      return false;
+    }
+    setAdminProfile(res.data.profile || adminProfile);
+    addToast('Perfil guardado');
+    return true;
   };
 
   // Cambio de tab del admin desde la barra inferior: carga clientes/cobros
@@ -2904,7 +3013,13 @@ export default function App() {
             addToast={addToast}
             storeLocation={storeLocation}
             onSaveStoreLocation={handleSaveStoreLocation}
-            adminPhone={savedCustomer ? `${savedCustomer.phoneCode || ''} ${savedCustomer.phoneNumber || ''}`.trim() : ''}
+            adminPhone={adminInfo?.phone || `${savedCustomer ? `${savedCustomer.phoneCode || ''}${savedCustomer.phoneNumber || ''}`.replace(/\D/g, '').slice(-11) : ''}`}
+            adminRole={adminInfo?.role || 'admin'}
+            adminProfile={adminProfile}
+            onChangePassword={handleChangeAdminPassword}
+            onSaveAdminProfile={handleSaveAdminProfile}
+            theme={theme}
+            onSetTheme={setTheme}
             headerHeight={headerHeight}
           />
         ) : (
@@ -3152,6 +3267,7 @@ export default function App() {
             setIsIdentityOpen(false);
             setActiveView('admin');
           }}
+          adminPhones={adminPhones}
         />
       )}
 
@@ -5940,7 +6056,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   );
 }
 
-function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, mode = 'login', confirmKind = 'switchback', onClose }) {
+function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, adminPhones, mode = 'login', confirmKind = 'switchback', onClose }) {
   useOverlay(true, onClose);
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
@@ -6382,7 +6498,7 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
                   Volver a {savedCustomer.customerName.split(' ')[0]}
                 </button>
               )}
-              {(isCurrentAdmin || ADMIN_PHONES.includes(`${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11))) && (
+              {(isCurrentAdmin || adminPhones.includes(`${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11))) && (
                 <button
                   type="button"
                   onClick={onGoToAdmin}
@@ -8655,6 +8771,12 @@ function AdminView({
   storeLocation,
   onSaveStoreLocation,
   adminPhone,
+  adminRole,
+  adminProfile,
+  onChangePassword,
+  onSaveAdminProfile,
+  theme,
+  onSetTheme,
   headerHeight
 }) {
   // Order status filter state + preferencias recordadas (filtro, vista, orden
@@ -8680,6 +8802,95 @@ function AdminView({
   const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
   const [ageSortOldest, setAgeSortOldest] = useState(initialOrderPrefs.ageSortOldest);
+
+  // Preferencias del panel por administrador (tema, atajos, columnas visibles).
+  // Se guardan en localStorage con la clave del teléfono: cada admin conserva
+  // su propia configuración aunque compartan el mismo dispositivo.
+  const ADMIN_PREFS_KEY = adminPhone ? `kiosko_admin_prefs_${adminPhone}` : null;
+  const loadAdminPrefs = () => {
+    if (!ADMIN_PREFS_KEY) return null;
+    try {
+      return JSON.parse(localStorage.getItem(ADMIN_PREFS_KEY) || 'null');
+    } catch {
+      return null;
+    }
+  };
+  const [adminPrefs, setAdminPrefs] = useState(loadAdminPrefs);
+  const [showAdminProfile, setShowAdminProfile] = useState(false);
+  const saveAdminPrefs = (next) => {
+    const merged = { ...(adminPrefs || {}), ...next };
+    setAdminPrefs(merged);
+    if (ADMIN_PREFS_KEY) {
+      try { localStorage.setItem(ADMIN_PREFS_KEY, JSON.stringify(merged)); } catch {}
+    }
+  };
+  const isSuperAdmin = adminRole === 'superadmin';
+
+  // Empleados gestionados (solo super admin) + sesiones activas.
+  const [employees, setEmployees] = useState([]);
+  const [activeSessions, setActiveSessions] = useState([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const [newEmployeePhone, setNewEmployeePhone] = useState('');
+  const [newEmployeeName, setNewEmployeeName] = useState('');
+
+  const loadEmployees = useCallback(async () => {
+    setLoadingEmployees(true);
+    try {
+      const [emp, ses] = await Promise.all([api.listAdminEmployees(), api.listAdminSessions()]);
+      if (emp.ok && Array.isArray(emp.data.employees)) setEmployees(emp.data.employees);
+      if (ses.ok && Array.isArray(ses.data.sessions)) setActiveSessions(ses.data.sessions);
+    } catch {}
+    setLoadingEmployees(false);
+  }, []);
+
+  const addEmployee = async () => {
+    const phone = newEmployeePhone.replace(/\D/g, '').slice(-11);
+    if (phone.length < 7) {
+      addToast('Ingresa un teléfono válido (7 dígitos o más)', 'error');
+      return;
+    }
+    const res = await api.addAdminEmployee({ phone, name: newEmployeeName.trim() });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo añadir el empleado', 'error');
+      return;
+    }
+    addToast('Empleado añadido al panel');
+    setNewEmployeePhone('');
+    setNewEmployeeName('');
+    loadEmployees();
+  };
+
+  const removeEmployee = async (phone) => {
+    const res = await api.removeAdminEmployee(phone);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo quitar el empleado', 'error');
+      return;
+    }
+    addToast('Empleado quitado del panel');
+    loadEmployees();
+  };
+
+  const revokeSession = async (phone) => {
+    const res = await api.revokeAdminSession(phone);
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo cerrar la sesión', 'error');
+      return;
+    }
+    addToast('Sesión cerrada remotamente');
+    loadEmployees();
+  };
+
+  // Vista del inventario: 'lista' (tabla/tarjetas) | 'recorrido' (filas
+  // horizontales estilo tienda con las opciones del admin en cada tarjeta).
+  const [invView, setInvView] = useState('lista');
+
+  // Al entrar con un admin que tiene tema propio guardado, se aplica ese tema.
+  useEffect(() => {
+    if (adminPrefs?.theme && theme !== adminPrefs.theme) {
+      onSetTheme(adminPrefs.theme);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [pinnedOrders, setPinnedOrders] = useState(() => {
     try {
       const list = JSON.parse(localStorage.getItem(PINNED_KEY) || '[]');
@@ -8747,6 +8958,19 @@ function AdminView({
       .sort((a, b) => a.localeCompare(b))
       .map((br) => ({ brand: br, items: map[br] }));
   }, [filteredProducts, invGroupByBrand]);
+
+  // Agrupa los productos filtrados por categoría para la góndola del recorrido
+  // (misma forma que groupedByBrand, pero por categoría).
+  const inventoryProductsByCategory = () => {
+    const map = {};
+    filteredProducts.forEach((p) => {
+      const c = p.category || 'Otros';
+      (map[c] = map[c] || []).push(p);
+    });
+    return Object.keys(map)
+      .sort((a, b) => a.localeCompare(b))
+      .map((c) => ({ key: c, label: c, items: map[c] }));
+  };
   const clearInvFilters = () => {
     setInvSearch('');
     setInvCategory('todas');
@@ -9759,10 +9983,52 @@ function AdminView({
           </span>
           <h2 className="font-display text-lg sm:text-2xl font-black text-white mt-2">Control de Inventario y Ventas</h2>
           <p className="text-xs text-slate-400 mt-1">Gestiona tus productos en tiempo real y atiende pedidos entrantes.</p>
+
+          {/* Identidad del admin logueado: avatar, nombre, rol. Abre el perfil. */}
+          <button
+            onClick={() => setShowAdminProfile(true)}
+            className="mt-3 inline-flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-2xl bg-slate-900/60 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-900 transition-all group"
+            title="Abrir mi perfil de administrador"
+          >
+            {adminProfile?.photo ? (
+              <img
+                src={adminProfile.photo}
+                alt={adminProfile.name || 'Admin'}
+                className="w-9 h-9 rounded-xl object-cover bg-slate-800 border border-slate-600/60 shrink-0"
+              />
+            ) : (
+              <span className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-teal-400 text-slate-950 text-sm font-black flex items-center justify-center shrink-0">
+                {(adminProfile?.name || 'A').charAt(0).toUpperCase()}
+              </span>
+            )}
+            <span className="text-left min-w-0">
+              <span className="block text-xs font-bold text-white truncate max-w-40">
+                {adminProfile?.name || (adminPhone ? `Admin ${adminPhone.slice(-4)}` : 'Administrador')}
+              </span>
+              <span className="block text-[10px] text-slate-400 truncate">
+                {isSuperAdmin ? (
+                  <span className="inline-flex items-center gap-1 text-amber-300 font-semibold">
+                    <Icon name="star" className="w-3 h-3" /> Super Admin
+                  </span>
+                ) : (
+                  adminPhone
+                )}
+              </span>
+            </span>
+            <Icon name="chevronRight" className="w-3.5 h-3.5 text-slate-500 group-hover:text-teal-400 transition-colors" />
+          </button>
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAdminProfile(true)}
+            className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-900/70 border border-slate-700 text-slate-300 font-bold text-sm hover:text-teal-300 hover:border-teal-500/40 transition-all flex items-center justify-center gap-2"
+            title="Perfil del administrador y preferencias"
+          >
+            <Icon name="user" className="w-4 h-4" />
+            <span className="hidden sm:inline">Mi Perfil</span>
+          </button>
           <button
             onClick={onOpenAddModal}
             className="flex-1 sm:flex-none px-4 sm:px-5 py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-cyan-400 shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
@@ -9866,7 +10132,8 @@ function AdminView({
           { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
           { key: 'abonos', label: `Abonos (${pendingPayments})`, full: `Abonos por Aprobar (${pendingPayments})`, icon: 'wallet' },
           { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
-          { key: 'analytics', label: 'Finanzas', full: 'Finanzas & Métricas', icon: 'trendingUp' }
+          { key: 'analytics', label: 'Finanzas', full: 'Finanzas & Métricas', icon: 'trendingUp' },
+          ...(isSuperAdmin ? [{ key: 'equipo', label: 'Equipo', full: 'Equipo y Sesiones Activas', icon: 'users' }] : [])
         ].map((tab) => (
           <button
             key={tab.key}
@@ -9874,6 +10141,7 @@ function AdminView({
               if (tab.key === 'benefited' || tab.key === 'blacklist') onLoadCustomers();
               if (tab.key === 'blacklist') onLoadCollections();
               if (tab.key === 'abonos') onLoadPayments();
+              if (tab.key === 'equipo') loadEmployees();
               setAdminTab(tab.key);
             }}
             className={`pb-3 sm:pb-4 text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-all whitespace-nowrap shrink-0 ${
@@ -9945,16 +10213,17 @@ function AdminView({
             </div>
           )}
 
-          {/* Filtros: búsqueda en tiempo real + categoría + agrupación por marca */}
-          <div className="space-y-3">
-            <div className="flex flex-col sm:flex-row gap-2.5">
+          {/* Filtros: búsqueda en tiempo real + categoría + agrupación por marca.
+              La barra queda fija al hacer scroll (sticky) para no perder el filtro. */}
+          <div className="space-y-3" style={{ position: 'sticky', top: headerHeight, zIndex: 30 }}>
+            <div className="flex flex-col sm:flex-row gap-2.5 rounded-2xl bg-slate-900/85 backdrop-blur-md border border-slate-700/80 p-2.5 sm:p-3 shadow-2xl shadow-slate-950/60">
               <div className="relative flex-1">
                 <Icon name="search" className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
                   value={invSearch}
                   onChange={(e) => setInvSearch(e.target.value)}
                   placeholder="Buscar por nombre, código o marca…"
-                  className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-slate-900/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500/60 transition-all"
+                  className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-slate-800/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500/60 transition-all"
                 />
                 {invSearch && (
                   <button
@@ -9966,18 +10235,33 @@ function AdminView({
                   </button>
                 )}
               </div>
-              <button
-                onClick={() => setInvGroupByBrand((v) => !v)}
-                className={`shrink-0 px-3.5 py-2.5 rounded-2xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
-                  invGroupByBrand
-                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
-                    : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
-                }`}
-                title="Agrupar la lista por marca"
-              >
-                <Icon name="layers" className="w-4 h-4" />
-                {invGroupByBrand ? 'Agrupado por marca' : 'Agrupar por marca'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setInvGroupByBrand((v) => !v)}
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                    invGroupByBrand
+                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title="Agrupar la lista por marca"
+                >
+                  <Icon name="layers" className="w-4 h-4" />
+                  <span className="hidden md:inline">{invGroupByBrand ? 'Agrupado por marca' : 'Agrupar por marca'}</span>
+                  <Icon name={invGroupByBrand ? 'check' : 'x'} className="w-3.5 h-3.5 md:hidden" />
+                </button>
+                <button
+                  onClick={() => setInvView((v) => (v === 'lista' ? 'recorrido' : 'lista'))}
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                    invView === 'recorrido'
+                      ? 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-lg shadow-teal-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title="Alternar entre lista y recorrido estilo tienda"
+                >
+                  <Icon name={invView === 'recorrido' ? 'list' : 'store'} className="w-4 h-4" />
+                  <span className="hidden md:inline">{invView === 'recorrido' ? 'Ver lista' : 'Recorrido tienda'}</span>
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
               {inventoryCategories.map((c) => {
@@ -10021,7 +10305,92 @@ function AdminView({
             </div>
           )}
 
-          {/* Mobile: card list */}
+          {/* Recorrido estilo tienda: góndolas horizontales con las mismas
+              acciones del admin (editar / eliminar) en cada producto. */}
+          {invView === 'recorrido' && filteredProducts.length > 0 && (
+            <div className="space-y-5">
+              {(invGroupByBrand
+                ? groupedByBrand.map((g) => ({ key: g.brand, label: g.brand, items: g.items }))
+                : inventoryProductsByCategory()
+              ).map((group) => (
+                <div key={group.key}>
+                  <div className="flex items-center gap-2 px-1 pb-2">
+                    <span className="px-2.5 py-1 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[10px] font-black uppercase tracking-wider">
+                      {group.label}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {group.items.length} producto{group.items.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="shelf-panel px-3 sm:px-4 pb-3 pt-2 bg-slate-900/40 border border-slate-700/50 rounded-2xl">
+                    <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-1 px-1 pt-1 pb-2">
+                      {group.items.map((p, i) => {
+                        const isLow = p.stock <= 5;
+                        const isOut = p.stock === 0;
+                        return (
+                          <div key={p.id} className="shelf-item" style={{ ['--sdel']: `${Math.min(i, 6) * 45}ms` }}>
+                            <div className="shelf-product">
+                              <div className="shelf-product__art">
+                                <ProductImg product={p} alt={p.name} loading="lazy" className="shelf-product__img" />
+                              </div>
+                              <span className="shelf-product__shadow" />
+                            </div>
+                            <div className="mt-2 space-y-1.5">
+                              <div className="flex items-center justify-between gap-1">
+                                <p className="truncate text-[11px] font-bold text-slate-100">{p.name}</p>
+                                <span
+                                  className={`shrink-0 px-1.5 py-0.5 rounded-md text-[9px] font-black border ${
+                                    isOut
+                                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                      : isLow
+                                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                      : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                  }`}
+                                >
+                                  {isOut ? 'Agotado' : `${p.stock} un.`}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 truncate">{p.code}</p>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="min-w-0 text-[11px] font-extrabold text-teal-400">
+                                  {formatUsd(p.price)}
+                                  {rate?.rate > 0 && (
+                                    <span className="block text-[9px] text-slate-500 font-semibold">
+                                      {formatBs(usdToBs(p.price, rate.rate))}
+                                    </span>
+                                  )}
+                                </span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    onClick={() => onEditProduct(p)}
+                                    className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-slate-700 text-cyan-400 transition-all"
+                                    title="Editar producto"
+                                  >
+                                    <Icon name="edit" className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => onDeleteProduct(p)}
+                                    className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-rose-500/20 text-rose-400 transition-all"
+                                    title="Eliminar producto"
+                                  >
+                                    <Icon name="trash" className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="shelf-lip" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Mobile: card list (oculta en modo recorrido, que ya muestra góndolas) */}
+          {invView === 'lista' && (
           <div className="grid grid-cols-1 gap-3 sm:hidden">
             {invGroupByBrand
               ? groupedByBrand.map((g) => (
@@ -10041,8 +10410,10 @@ function AdminView({
                 ))
               : filteredProducts.map((p) => renderMobileCard(p))}
           </div>
+          )}
 
-          {/* Desktop: table */}
+          {/* Desktop: table (oculta en modo recorrido) */}
+          {invView === 'lista' && (
           <div className="hidden sm:block bg-slate-800/60 border border-slate-700/60 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -10078,6 +10449,7 @@ function AdminView({
               </table>
             </div>
           </div>
+          )}
         </div>
       )}
 
@@ -11418,6 +11790,147 @@ function AdminView({
           </div>
         </div>
       )}
+      {isSuperAdmin && adminTab === 'equipo' && (
+        <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl space-y-5 sm:space-y-6 backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <Icon name="users" className="w-5 h-5 text-amber-300" />
+            <h3 className="text-lg sm:text-xl font-bold text-white">Equipo y Sesiones Activas</h3>
+          </div>
+
+          {/* Sesiones activas */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 sm:p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <Icon name="clock" className="w-4 h-4 text-teal-400" />
+                Quién está conectado ahora
+              </h4>
+              <button
+                onClick={loadEmployees}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-xs font-bold text-slate-300 hover:text-teal-300 hover:border-teal-500/40 transition-all"
+              >
+                <Icon name="refresh" className="w-3.5 h-3.5" />
+                Refrescar
+              </button>
+            </div>
+            {loadingEmployees ? (
+              <p className="text-xs text-slate-400">Cargando sesiones...</p>
+            ) : activeSessions.length === 0 ? (
+              <p className="text-xs text-slate-400">No hay sesiones activas de administradores.</p>
+            ) : (
+              <ul className="space-y-2">
+                {activeSessions.map((s, i) => {
+                  const isSelf = s.phone === adminPhone;
+                  const emp = employees.find((e) => e.phone === s.phone);
+                  const displayName = emp?.name || s.name || (s.phone ? `Admin ${s.phone.slice(-4)}` : 'Desconocido');
+                  return (
+                    <li key={s.id || i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70">
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isSelf ? 'bg-emerald-400 animate-pulse' : 'bg-teal-400'}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-white truncate">
+                          {displayName}
+                          {s.role === 'superadmin' && (
+                            <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-black align-middle">
+                              Super Admin
+                            </span>
+                          )}
+                          {isSelf && (
+                            <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-black align-middle">
+                              Este dispositivo
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          {s.phone} · Última actividad {formatRelative(s.lastSeen)}
+                        </p>
+                      </div>
+                      {!isSelf && (
+                        <button
+                          onClick={() => revokeSession(s.phone)}
+                          className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[10px] sm:text-xs font-bold hover:bg-rose-500/25 transition-all shrink-0"
+                        >
+                          <Icon name="logOut" className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
+                          Cerrar sesión
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* Gestión de empleados */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 sm:p-5 space-y-3">
+            <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Icon name="userPlus" className="w-4 h-4 text-teal-400" />
+              Administradores del panel
+            </h4>
+            <p className="text-[11px] text-slate-400">
+              Añade o quita teléfonos autorizados para entrar al panel. Los administradores fijos de la configuración
+              no pueden quitarse desde aquí.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                value={newEmployeeName}
+                onChange={(e) => setNewEmployeeName(e.target.value)}
+                placeholder="Nombre (opcional)"
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+              />
+              <input
+                value={newEmployeePhone}
+                onChange={(e) => setNewEmployeePhone(e.target.value.replace(/[^\d+]/g, ''))}
+                placeholder="Teléfono (ej. 04129862577)"
+                inputMode="tel"
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+              />
+              <button
+                onClick={addEmployee}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-950 text-xs sm:text-sm font-bold hover:from-teal-400 hover:to-cyan-400 transition-all inline-flex items-center justify-center gap-1.5"
+              >
+                <Icon name="plus" className="w-4 h-4" />
+                Añadir
+              </button>
+            </div>
+            {employees.length === 0 ? (
+              <p className="text-xs text-slate-400">No hay administradores gestionados por el super admin.</p>
+            ) : (
+              <ul className="space-y-2">
+                {employees.map((e) => {
+                  const isSelf = e.phone === adminPhone;
+                  const active = activeSessions.some((s) => s.phone === e.phone);
+                  return (
+                    <li key={e.phone} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70">
+                      <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${active ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40' : 'bg-slate-700 text-slate-400'}`}>
+                        {(e.name || e.phone.slice(-2)).toUpperCase().slice(0, 2)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-white truncate">
+                          {e.name || `Admin ${e.phone.slice(-4)}`}
+                          {active && (
+                            <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-teal-500/20 text-teal-300 font-black align-middle">
+                              En línea
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[10px] text-slate-400">{e.phone}</p>
+                      </div>
+                      {!isSelf && (
+                        <button
+                          onClick={() => removeEmployee(e.phone)}
+                          className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[10px] sm:text-xs font-bold hover:bg-rose-500/25 transition-all shrink-0"
+                        >
+                          <Icon name="trash" className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
+                          Quitar
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
       {overdueList.length === 1 && (
         <OverdueCollectionToast
           collection={overdueList[0]}
@@ -11476,6 +11989,20 @@ function AdminView({
             </div>
           </div>
         </div>
+      )}
+      {showAdminProfile && (
+        <AdminProfileModal
+          phone={adminPhone}
+          role={adminRole}
+          profile={adminProfile}
+          onClose={() => setShowAdminProfile(false)}
+          onChangePassword={onChangePassword}
+          onSaveProfile={onSaveAdminProfile}
+          adminPrefs={adminPrefs}
+          onSavePrefs={saveAdminPrefs}
+          theme={theme}
+          onSetTheme={onSetTheme}
+        />
       )}
     </div>
   );
@@ -11576,6 +12103,254 @@ function PaymentProofModal({ order, onClose, onUpdateOrderPayment }) {
               </p>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Perfil visual del admin: nombre, foto, teléfono y rol. Incluye cambio de
+// contraseña y preferencias personales (tema) que se guardan por admin.
+function AdminProfileModal({ phone, role, profile, onClose, onChangePassword, onSaveProfile, adminPrefs, onSavePrefs, theme, onSetTheme }) {
+  useOverlay(true, onClose);
+  const [name, setName] = useState(profile?.name || '');
+  const [photo, setPhoto] = useState(profile?.photo || '');
+  const [saving, setSaving] = useState(false);
+
+  // Cambio de contraseña
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwDone, setPwDone] = useState(false);
+
+  const fileInputRef = useRef(null);
+
+  const pickPhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    compressImage(file, 800, 0.8)
+      .then(setPhoto)
+      .catch(() => {});
+  };
+
+  const saveProfile = async () => {
+    if (saving) return;
+    setSaving(true);
+    await onSaveProfile({ name: name.trim(), photo });
+    setSaving(false);
+  };
+
+  const submitPassword = async () => {
+    setPwError('');
+    setPwDone(false);
+    if (!currentPassword) { setPwError('Ingresa tu contraseña actual.'); return; }
+    if (newPassword.length < 4) { setPwError('La nueva contraseña debe tener al menos 4 caracteres.'); return; }
+    if (newPassword !== confirmPassword) { setPwError('La confirmación no coincide con la nueva contraseña.'); return; }
+    if (changingPassword) return;
+    setChangingPassword(true);
+    const ok = await onChangePassword(currentPassword, newPassword);
+    setChangingPassword(false);
+    if (ok) {
+      setPwDone(true);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    }
+  };
+
+  const applyPrefsTheme = (t) => {
+    onSetTheme(t);
+    onSavePrefs({ theme: t });
+  };
+
+  const THEME_OPTIONS = [
+    { key: 'dark', label: 'Oscuro', icon: 'moon', desc: 'El clásico para la noche' },
+    { key: 'light', label: 'Claro', icon: 'sun', desc: 'Ideal para el día' },
+    { key: 'neon', label: 'Neón', icon: 'zap', desc: 'Brillante y llamativo' }
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <Icon name="user" className="w-5 h-5 text-teal-400" />
+              Mi Perfil de Administrador
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Personaliza tu identidad, cambia tu contraseña y ajusta tus preferencias.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
+          {/* Datos del perfil */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 space-y-3">
+            <div className="flex items-center gap-4">
+              {photo ? (
+                <img src={photo} alt={name || 'Admin'} className="w-16 h-16 rounded-2xl object-cover border-2 border-teal-500/50" />
+              ) : (
+                <span className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-500 to-teal-400 text-slate-950 text-xl font-black flex items-center justify-center">
+                  {(name || 'A').charAt(0).toUpperCase()}
+                </span>
+              )}
+              <div className="space-y-2 flex-1">
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  onChange={pickPhoto}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-600 text-slate-200 text-xs font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all inline-flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="image" className="w-3.5 h-3.5" />
+                  {photo ? 'Cambiar foto' : 'Subir foto'}
+                </button>
+                {photo && (
+                  <button
+                    onClick={() => setPhoto('')}
+                    className="w-full px-3 py-1.5 rounded-xl text-rose-300 text-[11px] font-bold hover:bg-rose-500/10 transition-all"
+                  >
+                    Quitar foto
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1">Nombre visible</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Tu nombre (ej: María)"
+                maxLength={80}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1">Teléfono</label>
+                <p className="px-3.5 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/60 text-sm text-slate-300 font-bold truncate">
+                  {phone}
+                </p>
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1">Rol</label>
+                <p className="px-3.5 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/60 text-sm font-bold truncate flex items-center gap-1.5">
+                  {role === 'superadmin' ? (
+                    <>
+                      <Icon name="star" className="w-4 h-4 text-amber-300" />
+                      <span className="text-amber-300">Super Admin</span>
+                    </>
+                  ) : (
+                    <span className="text-teal-300">Administrador</span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={saveProfile}
+              disabled={saving}
+              className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-cyan-400 transition-all disabled:opacity-60 active:scale-[0.99]"
+            >
+              {saving ? 'Guardando…' : 'Guardar perfil'}
+            </button>
+          </div>
+
+          {/* Preferencias por admin */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 space-y-3">
+            <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Icon name="settings" className="w-4 h-4 text-teal-400" />
+              Mis preferencias
+            </h4>
+            <p className="text-[11px] text-slate-400">
+              El tema que eliges aquí solo se aplica cuando tú entras al panel; no cambia el tema de los clientes.
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {THEME_OPTIONS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => applyPrefsTheme(t.key)}
+                  className={`p-3 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1.5 transition-all ${
+                    (adminPrefs?.theme || theme) === t.key
+                      ? 'bg-teal-500/15 border-teal-500/50 text-teal-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-teal-500/40'
+                  }`}
+                >
+                  <Icon name={t.icon} className="w-4 h-4" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-500">{THEME_OPTIONS.find((t) => t.key === (adminPrefs?.theme || theme))?.desc}</p>
+          </div>
+
+          {/* Cambio de contraseña */}
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 space-y-3">
+            <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Icon name="lock" className="w-4 h-4 text-teal-400" />
+              Cambiar contraseña
+            </h4>
+            {pwDone ? (
+              <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/40 p-3 text-center space-y-2">
+                <p className="text-xs text-emerald-300 font-bold">¡Contraseña actualizada!</p>
+                <button
+                  onClick={() => setPwDone(false)}
+                  className="text-[11px] text-teal-300 font-bold hover:underline"
+                >
+                  Cambiarla de nuevo
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Contraseña actual"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+                />
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Nueva contraseña (mín. 4 caracteres)"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+                />
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repite la nueva contraseña"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 outline-none focus:border-teal-500/60"
+                />
+                {pwError && (
+                  <p className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5">
+                    {pwError}
+                  </p>
+                )}
+                <button
+                  onClick={submitPassword}
+                  disabled={changingPassword}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 text-slate-200 font-bold text-sm hover:border-teal-500/50 hover:text-teal-300 transition-all disabled:opacity-60 active:scale-[0.99]"
+                >
+                  {changingPassword ? 'Actualizando…' : 'Actualizar contraseña'}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -12093,7 +12093,7 @@ function AdminView({
             ) : filteredSystemUsers.length === 0 ? (
               <p className="text-xs text-slate-400">Ningún usuario coincide con la búsqueda.</p>
             ) : (
-              <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
+              <ul className="space-y-2 max-h-[60vh] min-h-24 overflow-y-auto overscroll-contain pr-1">
                 {filteredSystemUsers.map((c) => (
                   <li key={c.phone} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70">
                     <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${c.disabled ? 'bg-slate-700 text-slate-500' : 'bg-teal-500/20 text-teal-300 border border-teal-500/40'}`}>

@@ -418,6 +418,30 @@ const fileStore = {
     }
   },
 
+  // Teléfonos de admin revocados por el super admin. Aunque una sesión concreta
+  // desaparezca (logout, registro previo al tracking), el teléfono queda vetado
+  // hasta que el admin vuelva a iniciar sesión (nuevo login lo des-revoca).
+  async listRevokedAdminPhones() {
+    const v = this.state.settings?.revokedAdminPhones;
+    return Array.isArray(v) ? v : [];
+  },
+
+  async revokeAdminPhone(phone) {
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const list = await this.listRevokedAdminPhones();
+    if (!key || list.includes(key)) return;
+    this.state.settings = { ...this.state.settings, revokedAdminPhones: [...list, key] };
+    this.persist();
+  },
+
+  async unrevokeAdminPhone(phone) {
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const list = await this.listRevokedAdminPhones();
+    if (!key || !list.includes(key)) return;
+    this.state.settings = { ...this.state.settings, revokedAdminPhones: list.filter((p) => p !== key) };
+    this.persist();
+  },
+
   async listCollections() {
     return this.state.settings?.collections || [];
   },
@@ -477,6 +501,7 @@ const fileStore = {
       balance: Number(existing?.balance) || 0,
       isBenefited: Boolean(existing?.isBenefited),
       creditLimit: existing?.creditLimit ?? null,
+      disabled: Boolean(existing?.disabled),
       createdAt: existing?.createdAt || now,
       lastOrderAt: now
     };
@@ -494,7 +519,8 @@ const fileStore = {
         ...c,
         balance: Number(c.balance) || 0,
         isBenefited: Boolean(c.isBenefited),
-        creditLimit: c.creditLimit ?? null
+        creditLimit: c.creditLimit ?? null,
+        disabled: Boolean(c.disabled)
       }))
       .sort((a, b) => normalizePhone(a.phone).localeCompare(normalizePhone(b.phone)));
   },
@@ -545,6 +571,32 @@ const fileStore = {
     ];
     this.persist();
     return updated;
+  },
+
+  // Inhabilita/habilita la cuenta de un cliente (no podrá pasar del login).
+  async setCustomerDisabled(phone, disabled) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const existing = this.state.customers.find((c) => c.phone === key);
+    if (!existing) return null;
+    const updated = { ...existing, disabled: Boolean(disabled) };
+    this.state.customers = [
+      updated,
+      ...this.state.customers.filter((c) => c.phone !== key)
+    ];
+    this.persist();
+    return updated;
+  },
+
+  // Elimina por completo el perfil de un cliente del sistema.
+  async deleteCustomer(phone) {
+    const key = normalizePhone(phone);
+    if (!key) return false;
+    const before = this.state.customers.length;
+    this.state.customers = this.state.customers.filter((c) => c.phone !== key);
+    const removed = this.state.customers.length !== before;
+    if (removed) this.persist();
+    return removed;
   },
 
   async addOrderToAccount(order) {
@@ -793,7 +845,7 @@ export async function refreshMirror() {
         } else {
           // Clientes: agrega/actualiza desde producción pero conserva los que solo
           // existen en staging y NO pisa balance/isBenefited/creditLimit locales.
-          const kept = ['balance', 'isBenefited', 'creditLimit'];
+          const kept = ['balance', 'isBenefited', 'creditLimit', 'disabled'];
           const updateSet = srcCols.rows
             .map((c) => c.column_name)
             .filter((col) => col !== pk && !kept.includes(col))
@@ -897,7 +949,8 @@ const pgStore = {
         "lastOrderAt" TEXT,
         balance NUMERIC DEFAULT 0,
         "isBenefited" BOOLEAN DEFAULT false,
-        "creditLimit" NUMERIC
+        "creditLimit" NUMERIC,
+        disabled BOOLEAN DEFAULT false
       );
       CREATE TABLE IF NOT EXISTS ${q('webauthn_credentials')} (
         phone TEXT PRIMARY KEY,
@@ -932,6 +985,7 @@ const pgStore = {
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "creditLimit" NUMERIC`);
+    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
     await this.pool.query(`ALTER TABLE ${q('webauthn_credentials')} ADD COLUMN IF NOT EXISTS rpID TEXT`);
     await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lat NUMERIC`);
@@ -1166,6 +1220,26 @@ const pgStore = {
     await this.setSetting('adminSessions', rest);
   },
 
+  // Teléfonos de admin revocados por el super admin (revocación global, ver fileStore).
+  async listRevokedAdminPhones() {
+    const v = await this.getSetting('revokedAdminPhones');
+    return Array.isArray(v) ? v : [];
+  },
+
+  async revokeAdminPhone(phone) {
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const list = await this.listRevokedAdminPhones();
+    if (!key || list.includes(key)) return;
+    await this.setSetting('revokedAdminPhones', [...list, key]);
+  },
+
+  async unrevokeAdminPhone(phone) {
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const list = await this.listRevokedAdminPhones();
+    if (!key || !list.includes(key)) return;
+    await this.setSetting('revokedAdminPhones', list.filter((p) => p !== key));
+  },
+
   async listCollections() {
     const { rows } = await this.pool.query(`SELECT value FROM ${q('settings')} WHERE key = $1`, ['collections']);
     if (!rows[0]) return [];
@@ -1224,7 +1298,8 @@ const pgStore = {
       ...r,
       balance: Number(r.balance) || 0,
       isBenefited: Boolean(r.isBenefited),
-      creditLimit: r.creditLimit ?? null
+      creditLimit: r.creditLimit ?? null,
+      disabled: Boolean(r.disabled)
     }));
   },
 
@@ -1261,6 +1336,24 @@ const pgStore = {
     );
     if (!rows[0]) return null;
     return { ...rows[0], balance: Number(rows[0].balance) || 0 };
+  },
+
+  async setCustomerDisabled(phone, disabled) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    const { rows } = await this.pool.query(
+      `UPDATE ${q('customers')} SET disabled = $2 WHERE phone = $1 RETURNING *`,
+      [key, Boolean(disabled)]
+    );
+    if (!rows[0]) return null;
+    return { ...rows[0], balance: Number(rows[0].balance) || 0, disabled: Boolean(rows[0].disabled) };
+  },
+
+  async deleteCustomer(phone) {
+    const key = normalizePhone(phone);
+    if (!key) return false;
+    const { rowCount } = await this.pool.query(`DELETE FROM ${q('customers')} WHERE phone = $1`, [key]);
+    return rowCount > 0;
   },
 
   async addOrderToAccount(order) {
@@ -1457,7 +1550,8 @@ const pgStore = {
       lastOrderAt: now,
       balance: Number(existing?.balance) || 0,
       isBenefited: Boolean(existing?.isBenefited),
-      creditLimit: existing?.creditLimit ?? null
+      creditLimit: existing?.creditLimit ?? null,
+      disabled: Boolean(existing?.disabled)
     };
   },
 
@@ -1868,6 +1962,10 @@ export const setCustomerCreditLimit = (phone, creditLimit) => store.setCustomerC
 
 export const setCustomerBalance = (phone, amount) => store.setCustomerBalance(phone, amount);
 
+export const setCustomerDisabled = (phone, disabled) => store.setCustomerDisabled(phone, disabled);
+
+export const deleteCustomer = (phone) => store.deleteCustomer(phone);
+
 export const addOrderToAccount = (order) => store.addOrderToAccount(order);
 
 export const addDebtToCustomer = (data) => store.addDebtToCustomer(data);
@@ -1923,6 +2021,12 @@ export const saveAdminSession = (tokenHash, session) => store.saveAdminSession(t
 export const touchAdminSession = (tokenHash) => store.touchAdminSession(tokenHash);
 
 export const removeAdminSession = (tokenHash) => store.removeAdminSession(tokenHash);
+
+export const listRevokedAdminPhones = () => store.listRevokedAdminPhones();
+
+export const revokeAdminPhone = (phone) => store.revokeAdminPhone(phone);
+
+export const unrevokeAdminPhone = (phone) => store.unrevokeAdminPhone(phone);
 
 export const getAdminPassword = () => store.getAdminPassword();
 

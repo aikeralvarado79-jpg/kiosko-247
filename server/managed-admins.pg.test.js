@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const settingsMap = new Map();
+const customersMap = new Map();
 
 class FakePool {
   async query(sql, params = []) {
@@ -17,6 +18,15 @@ class FakePool {
       settingsMap.set(params[0], JSON.parse(params[1]));
       return { rowCount: 1 };
     }
+    if (sql.includes('UPDATE customers SET disabled')) {
+      const key = params[0];
+      const updated = { ...(customersMap.get(key) || { phone: key, customerName: 'Maria' }), disabled: params[1] };
+      customersMap.set(key, updated);
+      return { rows: [updated] };
+    }
+    if (sql.includes('DELETE FROM customers')) {
+      return { rowCount: customersMap.delete(params[0]) ? 1 : 0 };
+    }
     return { rows: [], rowCount: 0 };
   }
 }
@@ -28,6 +38,7 @@ describe('pgStore: admins gestionados y sesiones (regresion PR #144)', () => {
 
   beforeEach(async () => {
     settingsMap.clear();
+    customersMap.clear();
     process.env.DATABASE_URL = 'postgres://fake';
     process.env.KIOSKO_DB_SCHEMA = 'public';
     vi.resetModules();
@@ -54,5 +65,27 @@ describe('pgStore: admins gestionados y sesiones (regresion PR #144)', () => {
     await store.removeAdminSession('hash2');
     expect(await store.getAdminSession('hash2')).toBeNull();
     expect(await store.listAdminSessions()).toHaveLength(1);
+  });
+
+  it('revoca y des-revoca teléfonos de admin vía settings (cierre remoto)', async () => {
+    expect(await store.listRevokedAdminPhones()).toEqual([]);
+    await store.revokeAdminPhone('04120000000');
+    expect(await store.listRevokedAdminPhones()).toEqual(['04120000000']);
+    await store.revokeAdminPhone('04120000000'); // idempotente
+    expect(await store.listRevokedAdminPhones()).toHaveLength(1);
+    await store.unrevokeAdminPhone('04120000000');
+    expect(await store.listRevokedAdminPhones()).toEqual([]);
+  });
+
+  it('inhabilita y elimina usuarios (lista de usuarios en el sistema)', async () => {
+    const disabled = await store.setCustomerDisabled('04125557777', true);
+    expect(disabled).not.toBeNull();
+    expect(disabled.disabled).toBe(true);
+
+    const reEnabled = await store.setCustomerDisabled('04125557777', false);
+    expect(reEnabled.disabled).toBe(false);
+
+    expect(await store.deleteCustomer('04125557777')).toBe(true);
+    expect(await store.deleteCustomer('04125557777')).toBe(false);
   });
 });

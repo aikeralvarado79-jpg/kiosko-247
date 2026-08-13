@@ -5967,12 +5967,13 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
 
   // Flujo del formulario (login o registro nuevo).
   const runWebAuthn = async () => {
+    setWebauthnError('');
+    // Dispositivo sin biometría/Face ID: no bloquear el ingreso, se accede igual.
     if (!webauthnSupported) {
-      setStep('form');
-      setWebauthnError('Tu dispositivo no soporta biometría. Usa un celular actualizado con huella o Face ID.');
+      persistRemember();
+      onConfirm({ customerName: customerName.trim(), phoneCode, phoneNumber });
       return;
     }
-    setWebauthnError('');
     setStep('webauthn');
     setIsWorking(true);
     try {
@@ -6016,11 +6017,12 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
       setWebauthnError('No hay un usuario activo para confirmar.');
       return;
     }
+    setWebauthnError('');
+    // Sin biometría disponible: permitir continuar igual.
     if (!webauthnSupported) {
-      setWebauthnError('Tu dispositivo no soporta biometría. Usa un celular actualizado con huella o Face ID.');
+      onConfirmBiometric(confirmKindState);
       return;
     }
-    setWebauthnError('');
     setStep('webauthn');
     setIsWorking(true);
     const confirmKey = `${code}${phone}`.replace(/\D/g, '').slice(-11);
@@ -6099,10 +6101,15 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
                   )}
                 </span>
                 <span className="flex-1 text-left">
-                  <span className="block text-[11px] font-bold text-teal-300">Confirmar con biometría</span>
+                  <span className="block text-[11px] font-bold text-teal-300">
+                    {webauthnSupported ? 'Confirmar con biometría' : 'Continuar sin biometría'}
+                  </span>
                   <span className="block text-[11px] text-slate-400 leading-snug">
-                    {IS_IOS ? 'Usa tu Face ID' : 'Usa tu huella'}
-                    {!webauthnSupported && <span className="text-rose-400"> · Tu dispositivo no lo soporta</span>}
+                    {!webauthnSupported
+                      ? 'Tu dispositivo no tiene biometría. Podés continuar igual.'
+                      : IS_IOS
+                      ? 'Usa tu Face ID'
+                      : 'Usa tu huella'}
                   </span>
                 </span>
                 <Icon name="arrowRight" className="w-4 h-4 text-teal-400 shrink-0" />
@@ -6234,8 +6241,11 @@ function IdentityModal({ knownCustomers, savedCustomer, onConfirm, onConfirmBiom
               <span className="flex-1 text-left">
                 <span className="block text-[11px] font-bold text-teal-300">Verificar con biometría</span>
                 <span className="block text-[11px] text-slate-400 leading-snug">
-                  {IS_IOS ? 'Usa tu Face ID' : 'Usa tu huella'}
-                  {!webauthnSupported && <span className="text-rose-400"> · Tu dispositivo no lo soporta</span>}
+                  {!webauthnSupported
+                    ? 'Tu dispositivo no tiene biometría. Podés entrar con tu teléfono y nombre.'
+                    : IS_IOS
+                    ? 'Usa tu Face ID'
+                    : 'Usa tu huella'}
                 </span>
               </span>
               <Icon name="arrowRight" className="w-4 h-4 text-teal-400 shrink-0" />

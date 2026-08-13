@@ -2,13 +2,37 @@
 // Service Worker: caché del app shell para que la app funcione instalada y
 // offline en el móvil. Solo cachea estáticos (nunca /api, para no servir datos
 // viejos). Al actualizar el versionado, reemplaza la caché vieja.
-const CACHE = 'kiosko-app-shell-v5';
+//
+// APP_VERSION se reemplaza en el build por un hash de los assets generados
+// (ver vite.config.js). Como sw.js cambia en cada deploy, los navegadores con
+// una versión vieja detectan el nuevo service worker al chequear y se les
+// muestra el aviso con el botón "Actualizar" (ver src/main.jsx).
+const APP_VERSION = '__APP_VERSION__';
+const CACHE = 'kiosko-app-shell-v6';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(['/', '/manifest.webmanifest'])).catch(() => {})
+    caches.open(CACHE).then((cache) => {
+      // Registra la versión del build que quedó en caché (útil para depurar qué
+      // versión tiene un dispositivo). La ruta __build-info__ nunca se pide
+      // desde la app, así que no estorba al fetch handler.
+      cache
+        .put('/__build-info__', new Response(JSON.stringify({ version: APP_VERSION }), { headers: { 'Content-Type': 'application/json' } }))
+        .catch(() => {});
+      return cache.addAll(['/', '/manifest.webmanifest']).catch(() => {});
+    }).catch(() => {})
   );
-  self.skipWaiting();
+  // No se llama skipWaiting(): la versión nueva queda en "waiting" hasta que el
+  // usuario confirme el aviso "Actualizar" (mensaje SKIP_WAITING), para no
+  // recargar la app a mitad de un pedido.
+});
+
+// El botón "Actualizar" del aviso (src/App.jsx → src/main.jsx) manda este
+// mensaje para que el service worker nuevo tome el control de inmediato.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {

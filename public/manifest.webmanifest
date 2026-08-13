@@ -1,7 +1,7 @@
 {
-  "name": "Kiosko 24/7 · Empresas Alvarados",
-  "short_name": "Kiosko 24/7",
-  "description": "Kiosko 24/7 Empresas Alvarados: pedidos al instante, retiro en tienda o entrega a domicilio.",
+  "name": "Empresas Alvarados · Kiosko 24/7",
+  "short_name": "Empresas Alvarados",
+  "description": "Empresas Alvarados · Kiosko 24/7: pedidos al instante, retiro en tienda o entrega a domicilio.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -4031,42 +4031,11 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   }, []);
 
   // Recovery state
-
-  // Recovery state
   const [recoverMode, setRecoverMode] = useState(false);
-  const [recoverStep, setRecoverStep] = useState('phone'); // 'phone' | 'biometric' | 'newpass'
+  const [recoverStep, setRecoverStep] = useState('phone'); // 'phone' | 'newpass'
   const [recoverPhone, setRecoverPhone] = useState({ code: '0412', number: '' });
-  const [recoverOptions, setRecoverOptions] = useState(null);
-  const [biometricResponse, setBiometricResponse] = useState(null);
   const [newPassword, setNewPassword] = useState({ a: '', b: '' });
   const [recoverError, setRecoverError] = useState('');
-
-  // Pre-carga los options de WebAuthn al completar el teléfono para que
-  // startAuthentication se llame de forma síncrona en el tap (requisito de iOS
-  // para mostrar el prompt de Face ID en lugar de solo la biometría).
-  // Solo se hace UN fetch por teléfono: prefetches solapados pisan el challenge
-  // en el server y rompen la verificación ("Unexpected authentication response challenge").
-  const recoveryFetchKeyRef = useRef('');
-  useEffect(() => {
-    const valid = recoverMode && recoverStep === 'phone' && /^\d{7}$/.test(recoverPhone.number);
-    if (!valid) return undefined;
-    const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
-    if (recoveryFetchKeyRef.current === phoneKey) return undefined;
-    let cancelled = false;
-    api
-      .webauthnLoginOptions({ phone: phoneKey })
-      .then((res) => {
-        if (cancelled) return;
-        if (res.ok) {
-          recoveryFetchKeyRef.current = phoneKey;
-          setRecoverOptions(res.data.options);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [recoverMode, recoverStep, recoverPhone.code, recoverPhone.number]);
 
   // Pre-carga las opciones de biometría del login admin al completar el teléfono.
   // Solo se hace UN fetch por teléfono: prefetches solapados pisan el challenge
@@ -4200,40 +4169,8 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       setRecoverError('Ingresa el número de teléfono de administrador.');
       return;
     }
-    const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
-    // Dispositivos sin biometría (ni Face ID ni huella): la recuperación se hace
-    // sin validación. No hay nada que verificar, pasamos directo a la nueva clave.
-    if (!webauthnSupported) {
-      setBiometricResponse(null);
-      setRecoverStep('newpass');
-      return;
-    }
-    // Si el prefetch no terminó, pedimos las options ahora en vez de fallar.
-    if (recoveryFetchKeyRef.current !== phoneKey || !recoverOptions) {
-      try {
-        const res = await api.webauthnLoginOptions({ phone: phoneKey });
-        if (!res.ok) {
-          setRecoverError('Este número no tiene biometría registrada para verificar.');
-          return;
-        }
-        recoveryFetchKeyRef.current = phoneKey;
-        setRecoverOptions(res.data.options);
-      } catch {
-        setRecoverError('No se pudo conectar con el servidor. Intenta de nuevo.');
-        return;
-      }
-    }
-    setRecoverStep('biometric');
-    try {
-      const authResponse = await startAuthentication({ optionsJSON: recoverOptions });
-      setBiometricResponse(authResponse);
-      setRecoverStep('newpass');
-      setRecoverError('');
-    } catch {
-      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intenta de nuevo.');
-      setRecoverStep('phone');
-    }
+    setRecoverStep('newpass');
   };
 
   const submitNewPassword = async () => {
@@ -4247,7 +4184,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     }
     const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
-    const res = await api.recoverPassword(phoneKey, biometricResponse, newPassword.a);
+    const res = await api.recoverPassword(phoneKey, null, newPassword.a);
     if (!res.ok) {
       setRecoverError(res.data.error || 'No se pudo recuperar la contraseña.');
       return;
@@ -4255,9 +4192,6 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     setRecoverMode(false);
     setRecoverStep('phone');
     setNewPassword({ a: '', b: '' });
-    recoveryFetchKeyRef.current = '';
-    setRecoverOptions(null);
-    setBiometricResponse(null);
     setRecoverPhone({ code: '0412', number: '' });
     setError('Contraseña restablecida. Ahora puedes iniciar sesión.');
   };
@@ -4271,11 +4205,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               <Icon name="key" className="w-7 h-7" />
             </span>
             <h2 className="text-xl font-black text-white">Recuperar Contraseña</h2>
-            <p className="text-xs text-slate-400">
-              {webauthnSupported
-                ? 'Verifica con biometría y crea una nueva contraseña.'
-                : 'Tu dispositivo no tiene biometría. Continúa solo con tu teléfono.'}
-            </p>
+            <p className="text-xs text-slate-400">Crea una nueva contraseña para tu teléfono de administrador.</p>
           </div>
 
           {recoverStep === 'phone' && (
@@ -4306,14 +4236,8 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                 onClick={startRecovery}
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-bold text-sm hover:from-amber-400 hover:to-rose-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
               >
-                {webauthnSupported ? 'Verificar con biometría' : 'Continuar sin biometría'}
+                Continuar
               </button>
-            </div>
-          )}
-
-          {recoverStep === 'biometric' && (
-            <div className="text-center space-y-3">
-              <p className="text-xs text-slate-400">Esperando verificación biométrica...</p>
             </div>
           )}
 
@@ -4351,7 +4275,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
 
           <button
             type="button"
-            onClick={() => { setRecoverMode(false); setRecoverStep('phone'); setRecoverError(''); setNewPassword({ a: '', b: '' }); recoveryFetchKeyRef.current = ''; setRecoverOptions(null); setBiometricResponse(null); setRecoverPhone({ code: '0412', number: '' }); }}
+            onClick={() => { setRecoverMode(false); setRecoverStep('phone'); setRecoverError(''); setNewPassword({ a: '', b: '' }); setRecoverPhone({ code: '0412', number: '' }); }}
             className="w-full py-2 text-xs text-slate-400 hover:text-white transition-colors"
           >
             ← Volver al login

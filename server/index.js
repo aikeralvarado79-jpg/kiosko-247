@@ -218,24 +218,18 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Recuperación de contraseña admin: verifica biometría del teléfono admin y guarda nueva contraseña.
-// Si el dispositivo no tiene biometría (ni Face ID ni huella), el cliente puede
-// recuperar sin validación (response null).
+// Recuperación de contraseña admin: guarda la nueva contraseña validando solo
+// que el teléfono sea de un administrador (sin biometría, para que funcione en
+// cualquier dispositivo/ambiente).
 app.post('/api/auth/recover', async (req, res) => {
   try {
-    const { phone, response, newPassword } = req.body || {};
+    const { phone, newPassword } = req.body || {};
     const key = String(phone || '').replace(/\D/g, '').slice(-11);
     if (!ADMIN_PHONES.includes(key)) {
       return res.status(403).json({ error: 'Este número no es administrador' });
     }
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
-    }
-    if (response) {
-      const v = await webauthn.verifyAuth(key, response, req);
-      if (!v.ok) {
-        return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
-      }
     }
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.createHash('sha256').update(salt + newPassword).digest('hex');

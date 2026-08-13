@@ -2795,16 +2795,19 @@ export default function App() {
       {/* Aviso de versión nueva: no recarga sola para no perder el estado */}
       {updateReady && (
         <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[62] w-[92vw] max-w-sm rounded-2xl bg-slate-900 border border-teal-500/40 shadow-2xl shadow-teal-500/10 p-3.5 animate-fade-in">
-          <p className="text-xs font-bold text-white">Hay una versión nueva</p>
+          <p className="text-xs font-bold text-white">Hay una versión nueva disponible</p>
           <p className="text-[11px] text-slate-400 mt-0.5">
-            Recarga cuando quieras para ver los últimos cambios. Si estás en un pedido, continúa y hazlo al terminar.
+            Pulsa actualizar para recibir los últimos cambios. Si estás en un pedido, termínalo primero.
           </p>
           <div className="flex gap-2 mt-2.5">
             <button
-              onClick={() => window.location.reload()}
+              onClick={() => {
+                if (typeof window.__kioskoActivateUpdate === 'function') window.__kioskoActivateUpdate();
+                else window.location.reload();
+              }}
               className="flex-1 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-bold hover:from-teal-400 hover:to-emerald-400 transition-all"
             >
-              Recargar
+              Actualizar
             </button>
             <button
               onClick={() => setUpdateReady(false)}

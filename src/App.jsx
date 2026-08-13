@@ -102,6 +102,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     chevronUp: <path d="m18 15-6-6-6 6" />,
     chevronDown: <path d="m6 9 6 6 6-6" />,
     maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />,
+    minimize: <path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" />,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
     mapPin: <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />,
     pin: <path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />,
@@ -5566,6 +5567,7 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
 function CalcFab({ open, onToggle, rate, forceMobileVisible = false, zClass = 'z-[46]' }) {
   const [usdInput, setUsdInput] = useState('');
   const [bsInput, setBsInput] = useState('');
+  const [fullscreen, setFullscreen] = useState(false);
   const r = rate?.rate || 0;
 
   // Formatea mientras se teclea: coloca los puntos de miles automáticamente y
@@ -5585,88 +5587,126 @@ function CalcFab({ open, onToggle, rate, forceMobileVisible = false, zClass = 'z
     setUsdInput(Number.isFinite(num) && r > 0 ? formatAmount(num / r) : '');
   };
 
+  const body = (
+    <div className="space-y-2">
+      <div>
+        <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+          US$ (divisas)
+        </span>
+        <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-2">
+          <Icon name="dollarSign" className="w-4 h-4 text-teal-400 shrink-0" />
+          <input
+            type="text"
+            inputMode="decimal"
+            value={usdInput}
+            onChange={(e) => handleUsd(e.target.value)}
+            placeholder="0.00"
+            className="w-full bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-center text-slate-600">
+        <Icon name="refresh" className="w-4 h-4 rotate-90" />
+      </div>
+
+      <div>
+        <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+          Bs (bolívares)
+        </span>
+        <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-2">
+          <span className="text-teal-300 font-bold text-sm shrink-0">Bs</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={bsInput}
+            onChange={(e) => handleBs(e.target.value)}
+            placeholder="0,00"
+            className="w-full bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
+          />
+        </div>
+      </div>
+
+      {r > 0 && (
+        <p className="text-[10px] text-slate-500">
+          Calculado a la tasa BCV del día ({rate?.source}). Toque fuera o la X para cerrar.
+        </p>
+      )}
+    </div>
+  );
+
+  const header = (onClose) => (
+    <div className="flex items-center justify-between px-3.5 pt-3 pb-1">
+      <span className="text-xs font-black text-white flex items-center gap-1.5 min-w-0">
+        <Icon name="calculator" className="w-4 h-4 text-teal-400 shrink-0" />
+        <span className="truncate">
+          Calculadora · tasa {r ? r.toLocaleString('es-AR') : '—'} Bs
+        </span>
+      </span>
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          onClick={() => setFullscreen((v) => !v)}
+          aria-label={fullscreen ? 'Salir de pantalla completa' : 'Ver calculadora en pantalla completa'}
+          className="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+        >
+          <Icon name={fullscreen ? 'minimize' : 'maximize'} className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={onClose}
+          aria-label="Cerrar calculadora"
+          className="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+        >
+          <Icon name="x" className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <>
       {/* Botón fijo: solo escritorio (en móvil el acceso vive en la barra inferior).
-          forceMobileVisible lo fuerza visible también en móvil (perfil admin). */}
-      <button
-        onClick={onToggle}
-        aria-label={open ? 'Cerrar calculadora' : 'Abrir calculadora'}
-        aria-expanded={open}
-        className={`${forceMobileVisible ? 'flex' : 'hidden sm:flex'} fixed right-5 bottom-6 ${zClass} p-3.5 rounded-2xl shadow-xl border backdrop-blur-md transition-all active:scale-90 ${
-          open
-            ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-teal-500/30'
-            : 'bg-slate-800/90 text-teal-300 border-teal-500/40 shadow-teal-500/10 hover:bg-slate-800'
-        }`}
-      >
-        <Icon name="calculator" className="w-5 h-5 sm:w-6 sm:h-6" />
-      </button>
-
-      {/* Panel flotante no modal: no cubre toda la pantalla y deja navegar de fondo */}
-      {open && (
-        <div
-          className={`fixed right-3 sm:right-5 bottom-[4.75rem] sm:bottom-24 ${zClass} w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-modal-spring`}
+          forceMobileVisible lo fuerza visible también en móvil (panel admin); ahí se
+          coloca por encima de la barra inferior de opciones. */}
+      {!fullscreen && (
+        <button
+          onClick={onToggle}
+          aria-label={open ? 'Cerrar calculadora' : 'Abrir calculadora'}
+          aria-expanded={open}
+          className={`${forceMobileVisible ? 'flex' : 'hidden sm:flex'} fixed right-5 ${forceMobileVisible ? 'bottom-[4.75rem] sm:bottom-6' : 'bottom-6'} ${zClass} p-3.5 rounded-2xl shadow-xl border backdrop-blur-md transition-all active:scale-90 ${
+            open
+              ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-teal-500/30'
+              : 'bg-slate-800/90 text-teal-300 border-teal-500/40 shadow-teal-500/10 hover:bg-slate-800'
+          }`}
         >
-          <div className="flex items-center justify-between px-3.5 pt-3 pb-1">
-            <span className="text-xs font-black text-white flex items-center gap-1.5 min-w-0">
-              <Icon name="calculator" className="w-4 h-4 text-teal-400 shrink-0" />
-              <span className="truncate">
-                Calculadora · tasa {r ? r.toLocaleString('es-AR') : '—'} Bs
-              </span>
-            </span>
-            <button
-              onClick={onToggle}
-              aria-label="Cerrar calculadora"
-              className="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
-            >
-              <Icon name="x" className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          <Icon name="calculator" className="w-5 h-5 sm:w-6 sm:h-6" />
+        </button>
+      )}
 
-          <div className="px-3.5 pb-3.5 space-y-2">
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                US$ (divisas)
-              </span>
-              <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-2">
-                <Icon name="dollarSign" className="w-4 h-4 text-teal-400 shrink-0" />
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={usdInput}
-                  onChange={(e) => handleUsd(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
-                />
-              </div>
-            </div>
+      {/* Vista normal: panel flotante no modal, no cubre toda la pantalla */}
+      {open && !fullscreen && (
+        <div
+          className={`fixed right-3 sm:right-5 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] sm:bottom-24 ${zClass} w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-modal-spring`}
+        >
+          {header(onToggle)}
+          <div className="px-3.5 pb-3.5">{body}</div>
+        </div>
+      )}
 
-            <div className="flex items-center justify-center text-slate-600">
-              <Icon name="refresh" className="w-4 h-4 rotate-90" />
-            </div>
-
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                Bs (bolívares)
-              </span>
-              <div className="flex items-center gap-1.5 bg-slate-800/70 border border-slate-700/80 rounded-xl px-3 py-2">
-                <span className="text-teal-300 font-bold text-sm shrink-0">Bs</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={bsInput}
-                  onChange={(e) => handleBs(e.target.value)}
-                  placeholder="0,00"
-                  className="w-full bg-transparent text-slate-100 text-sm font-semibold placeholder-slate-600 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {r > 0 && (
-              <p className="text-[10px] text-slate-500">
-                Calculado a la tasa BCV del día ({rate?.source}). Toque fuera o la X para cerrar.
-              </p>
-            )}
+      {/* Vista fullscreen: modal grande centrado frente a toda la app */}
+      {open && fullscreen && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in"
+          onClick={() => setFullscreen(false)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-3xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-modal-spring"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {header(() => {
+              setFullscreen(false);
+              onToggle();
+            })}
+            <div className="px-4 pb-5">{body}</div>
           </div>
         </div>
       )}
@@ -12391,7 +12431,6 @@ function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, on
   const [name, setName] = useState(profile?.name || '');
   const [photo, setPhoto] = useState(profile?.photo || '');
   const [saving, setSaving] = useState(false);
-  const [photoFullscreen, setPhotoFullscreen] = useState(false);
 
   // Cambio de contraseña
   const [currentPassword, setCurrentPassword] = useState('');
@@ -12469,20 +12508,11 @@ function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, on
           <div className="rounded-2xl bg-slate-900/60 border border-slate-700/80 p-4 space-y-3">
             <div className="flex items-center gap-4">
               {photo ? (
-                <div className="relative shrink-0">
-                  <img
-                    src={photo}
-                    alt={name || 'Admin'}
-                    className="w-16 h-16 rounded-2xl object-cover border-2 border-teal-500/50"
-                  />
-                  <button
-                    onClick={() => setPhotoFullscreen(true)}
-                    aria-label="Ver foto en pantalla completa"
-                    className="absolute -bottom-1.5 -right-1.5 p-1.5 rounded-xl bg-slate-800 border border-slate-600 text-teal-300 hover:text-white hover:border-teal-500/60 transition-all active:scale-90 shadow-lg"
-                  >
-                    <Icon name="maximize" className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                <img
+                  src={photo}
+                  alt={name || 'Admin'}
+                  className="w-16 h-16 rounded-2xl object-cover border-2 border-teal-500/50"
+                />
               ) : (
                 <span className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-500 to-teal-400 text-slate-950 text-xl font-black flex items-center justify-center">
                   {(name || 'A').charAt(0).toUpperCase()}
@@ -12639,28 +12669,6 @@ function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, on
             )}
           </div>
         </div>
-
-      {/* Visor de la foto de perfil a pantalla (modal centrado con X para cerrar) */}
-      {photoFullscreen && (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in"
-          onClick={() => setPhotoFullscreen(false)}
-        >
-          <div
-            className="relative max-w-[92vw] max-h-[85vh] rounded-3xl overflow-hidden bg-slate-900 border border-slate-700 shadow-2xl animate-modal-spring"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img src={photo || ''} alt={name || 'Admin'} className="max-w-full max-h-[85vh] object-contain" />
-            <button
-              onClick={() => setPhotoFullscreen(false)}
-              aria-label="Cerrar foto"
-              className="absolute top-3 right-3 p-2 rounded-full bg-slate-950/70 border border-white/15 text-slate-200 hover:text-white hover:border-teal-400/50 transition-all active:scale-90 z-10"
-            >
-              <Icon name="x" className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      )}
     </>
   );
 }

@@ -2931,7 +2931,7 @@ export default function App() {
       <RateBanner rate={rate} />
       {activeView === 'customer' && <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} headerHeight={headerHeight} />}
       {activeView === 'admin' && isAdminAuthed && (
-        <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} zClass="z-[76]" headerHeight={headerHeight} />
+        <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} zClass="z-[76]" headerHeight={headerHeight} admin />
       )}
 
       {/* Main Container */}
@@ -5569,7 +5569,7 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
 // del botón. Manteniéndolo presionado se puede arrastrar a otra posición (la
 // animación de despliegue se origina desde la posición actual del botón). La
 // posición se persiste en localStorage.
-function CalcFab({ open, onToggle, rate, zClass = 'z-[46]', headerHeight = 0 }) {
+function CalcFab({ open, onToggle, rate, zClass = 'z-[46]', headerHeight = 0, admin = false }) {
   const [usdInput, setUsdInput] = useState('');
   const [bsInput, setBsInput] = useState('');
   const [fullscreen, setFullscreen] = useState(false);
@@ -5771,7 +5771,8 @@ function CalcFab({ open, onToggle, rate, zClass = 'z-[46]', headerHeight = 0 }) 
         </div>
       )}
 
-      {/* Vista fullscreen: modal grande centrado frente a toda la app */}
+      {/* Vista fullscreen: modal grande centrado frente a toda la app.
+          Para el admin incluye la calculadora de operaciones matemáticas. */}
       {open && fullscreen && (
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in"
@@ -5785,11 +5786,157 @@ function CalcFab({ open, onToggle, rate, zClass = 'z-[46]', headerHeight = 0 }) 
               setFullscreen(false);
               onToggle();
             })}
-            <div className="px-4 pb-5">{body}</div>
+            <div className="px-4 pb-5">{admin ? <MathCalculator rate={rate} /> : body}</div>
           </div>
         </div>
       )}
     </>
+  );
+}
+
+// Calculadora de operaciones matemáticas básicas (solo el fullscreen del admin).
+// Un botón define la moneda del resultado: "$" cuando está activo en dólares y,
+// al presionarlo de nuevo, "Bs". Cada resultado se muestra en la moneda activa y
+// también convertido a la moneda contraria según la tasa BCV.
+function MathCalculator({ rate }) {
+  const r = rate?.rate || 0;
+  const [display, setDisplay] = useState('0');
+  const [acc, setAcc] = useState(null);
+  const [op, setOp] = useState(null);
+  const [waiting, setWaiting] = useState(false);
+  const [currency, setCurrency] = useState('USD');
+
+  const inputDigit = (d) => {
+    if (waiting) {
+      setDisplay(d);
+      setWaiting(false);
+      return;
+    }
+    setDisplay(d === '.' && (display.includes('.') || display === '0') ? (display === '0' ? '0.' : display) : display === '0' && d !== '.' ? d : display + d);
+  };
+
+  const compute = (a, b) => {
+    switch (op) {
+      case '+': return a + b;
+      case '-': return a - b;
+      case '×': return a * b;
+      case '÷': return b === 0 ? 0 : a / b;
+      default: return b;
+    }
+  };
+
+  const commit = () => {
+    const cur = parseFloat(display || '0');
+    if (acc == null || op == null) return cur;
+    const res = Math.round(compute(acc, cur) * 1e10) / 1e10;
+    return res;
+  };
+
+  const chooseOp = (nextOp) => {
+    const res = commit();
+    setAcc(res);
+    setDisplay(String(res));
+    setOp(nextOp);
+    setWaiting(true);
+  };
+
+  const equals = () => {
+    if (op == null) return;
+    const res = commit();
+    setDisplay(String(res));
+    setAcc(null);
+    setOp(null);
+    setWaiting(true);
+  };
+
+  const clearAll = () => {
+    setDisplay('0');
+    setAcc(null);
+    setOp(null);
+    setWaiting(false);
+  };
+
+  const backspace = () => {
+    if (waiting) return;
+    setDisplay(display.length > 1 ? display.slice(0, -1) : '0');
+  };
+
+  const toggleSign = () => setDisplay(String(parseFloat(display || '0') * -1));
+
+  const num = parseFloat(display || '0');
+  const isUsd = currency === 'USD';
+
+  const keyBtn = (label, onClick, extra = '') => (
+    <button
+      onClick={onClick}
+      className={`h-12 rounded-xl text-base font-bold transition-all active:scale-95 bg-slate-800/80 border border-slate-700/60 text-slate-100 hover:bg-slate-700/80 hover:border-teal-500/40 ${extra}`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="space-y-3">
+      {/* Pantalla con el botón de moneda ($ ⇄ Bs) y el resultado en ambas monedas */}
+      <div className="rounded-2xl bg-slate-950/70 border border-slate-700/80 p-3 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+            Resultado en {isUsd ? 'US$' : 'Bs'}
+          </span>
+          <button
+            onClick={() => setCurrency(isUsd ? 'BS' : 'USD')}
+            aria-label={`Cambiar moneda del resultado (ahora ${isUsd ? 'US$' : 'Bs'})`}
+            className={`px-3 py-1 rounded-xl text-xs font-black border transition-all active:scale-90 ${
+              isUsd
+                ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-teal-500/20'
+                : 'bg-amber-500 text-slate-950 border-amber-300 shadow-amber-500/20'
+            }`}
+          >
+            {isUsd ? '$' : 'Bs'}
+          </button>
+        </div>
+        <div className="text-right text-2xl sm:text-3xl font-black text-white truncate tabular-nums">
+          {isUsd ? '$' : 'Bs'} {formatAmount(num, 2)}
+        </div>
+        {r > 0 && (
+          <div className="text-right text-xs text-teal-400 font-semibold tabular-nums">
+            {isUsd ? '≈ Bs' : '≈ $'} {formatAmount(isUsd ? num * r : num / r, 2)} · tasa {r.toLocaleString('es-AR')} Bs
+          </div>
+        )}
+      </div>
+
+      {/* Teclado: números 0-9, punto, ±, y operaciones + − × ÷ = C ⌫ */}
+      <div className="grid grid-cols-4 gap-2">
+        {keyBtn('C', clearAll, 'bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25')}
+        {keyBtn('⌫', backspace, 'text-slate-300')}
+        {keyBtn('÷', () => chooseOp('÷'), 'bg-teal-500/15 text-teal-300 border-teal-500/30 hover:bg-teal-500/25')}
+        {keyBtn('×', () => chooseOp('×'), 'bg-teal-500/15 text-teal-300 border-teal-500/30 hover:bg-teal-500/25')}
+
+        {keyBtn('7', () => inputDigit('7'))}
+        {keyBtn('8', () => inputDigit('8'))}
+        {keyBtn('9', () => inputDigit('9'))}
+        {keyBtn('−', () => chooseOp('-'), 'bg-teal-500/15 text-teal-300 border-teal-500/30 hover:bg-teal-500/25')}
+
+        {keyBtn('4', () => inputDigit('4'))}
+        {keyBtn('5', () => inputDigit('5'))}
+        {keyBtn('6', () => inputDigit('6'))}
+        {keyBtn('+', () => chooseOp('+'), 'bg-teal-500/15 text-teal-300 border-teal-500/30 hover:bg-teal-500/25')}
+
+        {keyBtn('1', () => inputDigit('1'))}
+        {keyBtn('2', () => inputDigit('2'))}
+        {keyBtn('3', () => inputDigit('3'))}
+        <button
+          onClick={equals}
+          className="h-12 rounded-xl text-base font-black transition-all active:scale-95 bg-teal-500 text-slate-950 border border-teal-300 shadow-teal-500/20 hover:bg-teal-400"
+        >
+          =
+        </button>
+
+        {keyBtn('±', toggleSign, 'text-slate-300')}
+        {keyBtn('0', () => inputDigit('0'))}
+        {keyBtn('.', () => inputDigit('.'))}
+      </div>
+    </div>
   );
 }
 

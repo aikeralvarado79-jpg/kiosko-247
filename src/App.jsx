@@ -1114,7 +1114,7 @@ export default function App() {
     }
     return [
       'En Chrome/Edge tocá el icono de instalación (monitor con flecha ↓) al final de la barra de direcciones.',
-      'O abrí el menú ⋮ y tocá «Instalar Kiosko 24/7».',
+      'O abrí el menú ⋮ y tocá «Instalar Empresas Alvarados».',
     ];
   }, []);
 

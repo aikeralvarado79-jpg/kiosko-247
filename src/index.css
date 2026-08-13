@@ -205,6 +205,30 @@ html[data-theme="light"] .skeleton-block {
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
+/* Menú de pestañas del panel admin: scroll horizontal con scrollbar fino solo
+   en pantallas medianas y desktop (en móvil se oculta para no ensuciar). */
+.tabs-scroll-x {
+  scroll-behavior: smooth;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.tabs-scroll-x::-webkit-scrollbar { display: none; }
+@media (min-width: 640px) {
+  .tabs-scroll-x {
+    -ms-overflow-style: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.4) transparent;
+  }
+  .tabs-scroll-x::-webkit-scrollbar { display: block; height: 8px; }
+  .tabs-scroll-x::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 116, 139, 0.35);
+    border-radius: 999px;
+  }
+  html[data-theme="light"] .tabs-scroll-x::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 116, 139, 0.45);
+  }
+}
+
 /* Scrollbar estilizada para modo claro y oscuro */
 * {
   scrollbar-width: thin;

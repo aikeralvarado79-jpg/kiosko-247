@@ -8910,6 +8910,13 @@ function AdminView({
   const [usersFilter, setUsersFilter] = useState('');
   const [usersBusy, setUsersBusy] = useState(false);
 
+  // Scroll horizontal del menú de pestañas (PC/laptop): flechas + scrollbar fino.
+  const adminTabsRef = useRef(null);
+  const scrollAdminTabs = (dir) => {
+    const el = adminTabsRef.current;
+    if (el) el.scrollBy({ left: dir * 260, behavior: 'smooth' });
+  };
+
   const loadEmployees = useCallback(async () => {
     setLoadingEmployees(true);
     try {
@@ -10256,44 +10263,64 @@ function AdminView({
         </div>
       </div>
 
-      {/* Admin Tabs */}
-      <div className="flex border-b border-slate-800 gap-4 sm:gap-6 overflow-x-auto scrollbar-none -mx-3 sm:mx-0 px-3 sm:px-0">
-        {[
-          { key: 'inventory', label: 'Inventario', full: 'Inventario de Productos', icon: 'package' },
-          { key: 'orders', label: `Pedidos (${pendingOrders.length})`, full: `Pedidos en Vivo (${pendingOrders.length})`, icon: 'clock' },
-          { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
-          { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
-          { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
-          { key: 'abonos', label: `Abonos (${pendingPayments})`, full: `Abonos por Aprobar (${pendingPayments})`, icon: 'wallet' },
-          { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
-          { key: 'analytics', label: 'Finanzas', full: 'Finanzas & Métricas', icon: 'trendingUp' },
-          ...(isSuperAdmin ? [{ key: 'equipo', label: 'Equipo', full: 'Equipo y Sesiones Activas', icon: 'users' }] : [])
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => {
-              if (tab.key === 'benefited' || tab.key === 'blacklist') onLoadCustomers();
-              if (tab.key === 'blacklist') onLoadCollections();
-              if (tab.key === 'abonos') onLoadPayments();
-              if (tab.key === 'equipo') loadEmployees();
-              setAdminTab(tab.key);
-            }}
-            className={`pb-3 sm:pb-4 text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-all whitespace-nowrap shrink-0 ${
-              adminTab === tab.key
-                ? 'border-teal-400 text-teal-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Icon name={tab.icon} className="w-4 h-4" />
-            <span className="sm:hidden">{tab.label}</span>
-            <span className="hidden sm:inline">{tab.full}</span>
-            {tab.key === 'orders' && unviewedCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black leading-none shrink-0">
-                {unviewedCount}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* Admin Tabs: scroll horizontal con flechas en desktop (móvil desplaza
+          por gesto) */}
+      <div className="flex items-center border-b border-slate-800">
+        <button
+          onClick={() => scrollAdminTabs(-1)}
+          aria-label="Anterior pestaña"
+          className="hidden md:flex shrink-0 items-center justify-center w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-teal-300 hover:border-teal-500/40 transition-all cursor-pointer"
+        >
+          <Icon name="chevronLeft" className="w-4 h-4" />
+        </button>
+        <div
+          ref={adminTabsRef}
+          className="flex items-center flex-1 gap-4 sm:gap-6 overflow-x-auto tabs-scroll-x -mx-3 sm:mx-0 px-3 sm:px-0"
+        >
+          {[
+            { key: 'inventory', label: 'Inventario', full: 'Inventario de Productos', icon: 'package' },
+            { key: 'orders', label: `Pedidos (${pendingOrders.length})`, full: `Pedidos en Vivo (${pendingOrders.length})`, icon: 'clock' },
+            { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
+            { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
+            { key: 'blacklist', label: 'Lista Negra', full: 'Lista Negra (Deudores)', icon: 'alertTriangle' },
+            { key: 'abonos', label: `Abonos (${pendingPayments})`, full: `Abonos por Aprobar (${pendingPayments})`, icon: 'wallet' },
+            { key: 'tienda', label: 'Tienda', full: 'Ubicación del Comercio', icon: 'store' },
+            { key: 'analytics', label: 'Finanzas', full: 'Finanzas & Métricas', icon: 'trendingUp' },
+            ...(isSuperAdmin ? [{ key: 'equipo', label: 'Equipo', full: 'Equipo y Sesiones Activas', icon: 'users' }] : [])
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                if (tab.key === 'benefited' || tab.key === 'blacklist') onLoadCustomers();
+                if (tab.key === 'blacklist') onLoadCollections();
+                if (tab.key === 'abonos') onLoadPayments();
+                if (tab.key === 'equipo') loadEmployees();
+                setAdminTab(tab.key);
+              }}
+              className={`pb-3 sm:pb-4 text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-all whitespace-nowrap shrink-0 ${
+                adminTab === tab.key
+                  ? 'border-teal-400 text-teal-300'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Icon name={tab.icon} className="w-4 h-4" />
+              <span className="sm:hidden">{tab.label}</span>
+              <span className="hidden sm:inline">{tab.full}</span>
+              {tab.key === 'orders' && unviewedCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black leading-none shrink-0">
+                  {unviewedCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => scrollAdminTabs(1)}
+          aria-label="Siguiente pestaña"
+          className="hidden md:flex shrink-0 items-center justify-center w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-teal-300 hover:border-teal-500/40 transition-all cursor-pointer"
+        >
+          <Icon name="chevronRight" className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Tab 1: Inventory Management */}

@@ -2927,11 +2927,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tasa BCV del día + Calculadora flotante (botón fijo; en móvil se abre desde la barra inferior) */}
+      {/* Tasa BCV del día + Calculadora flotante (botón bajo el logo, arrastrable) */}
       <RateBanner rate={rate} />
-      {activeView === 'customer' && <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} />}
+      {activeView === 'customer' && <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} headerHeight={headerHeight} />}
       {activeView === 'admin' && isAdminAuthed && (
-        <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} forceMobileVisible zClass="z-[76]" />
+        <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} zClass="z-[76]" headerHeight={headerHeight} />
       )}
 
       {/* Main Container */}
@@ -5564,11 +5564,82 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
 // Calculadora flotante: botón fijo (solo escritorio; en móvil se abre desde la
 // barra inferior) que despliega un panel no modal de conversión $ ⇄ Bs. El panel
 // tiene pointer-events solo sobre sí mismo: no bloquea la navegación ni el scroll.
-function CalcFab({ open, onToggle, rate, forceMobileVisible = false, zClass = 'z-[46]' }) {
+// Calculadora flotante: botón fijo posicionado por defecto justo debajo del logo
+// (bajo el header), que despliega un panel no modal hacia abajo desde la posición
+// del botón. Manteniéndolo presionado se puede arrastrar a otra posición (la
+// animación de despliegue se origina desde la posición actual del botón). La
+// posición se persiste en localStorage.
+function CalcFab({ open, onToggle, rate, zClass = 'z-[46]', headerHeight = 0 }) {
   const [usdInput, setUsdInput] = useState('');
   const [bsInput, setBsInput] = useState('');
   const [fullscreen, setFullscreen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const r = rate?.rate || 0;
+
+  // Posición del botón (coordenadas absolutas). Por defecto debajo del logo,
+  // alineado con el padding del header. Se persiste en localStorage.
+  const [pos, setPos] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('calc_fab_pos'));
+      if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') return saved;
+    } catch {}
+    return { x: 12, y: (headerHeight || 64) + 8 };
+  });
+
+  useEffect(() => {
+    if (!localStorage.getItem('calc_fab_pos') && headerHeight > 0) {
+      setPos({ x: 12, y: headerHeight + 8 });
+    }
+  }, [headerHeight]);
+
+  const dragRef = useRef({ startX: 0, startY: 0, baseX: 0, baseY: 0, moved: false });
+  const lastPosRef = useRef(pos);
+  const longPressRef = useRef(null);
+  const cancelLongPress = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  };
+
+  const handleDown = (e) => {
+    if (e.button != null && e.button !== 0) return;
+    cancelLongPress();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, baseX: pos.x, baseY: pos.y, moved: false };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    longPressRef.current = setTimeout(() => {
+      setDragActive(true);
+      longPressRef.current = null;
+    }, 350);
+  };
+
+  const handleMove = (e) => {
+    if (!dragActive) return;
+    const { startX, startY, baseX, baseY } = dragRef.current;
+    if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) dragRef.current.moved = true;
+    const nx = Math.max(4, Math.min(baseX + (e.clientX - startX), window.innerWidth - 64));
+    const ny = Math.max(4, Math.min(baseY + (e.clientY - startY), window.innerHeight - 64));
+    lastPosRef.current = { x: nx, y: ny };
+    setPos(lastPosRef.current);
+  };
+
+  const handleUp = (e) => {
+    cancelLongPress();
+    const wasDrag = dragActive && dragRef.current.moved;
+    setDragActive(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+    if (wasDrag) {
+      try {
+        localStorage.setItem('calc_fab_pos', JSON.stringify(lastPosRef.current));
+      } catch {}
+    } else {
+      onToggle();
+    }
+  };
 
   // Formatea mientras se teclea: coloca los puntos de miles automáticamente y
   // deja que el usuario escriba la coma para los decimales (igual que los
@@ -5662,30 +5733,38 @@ function CalcFab({ open, onToggle, rate, forceMobileVisible = false, zClass = 'z
     </div>
   );
 
+  const panelLeft = Math.max(8, Math.min(pos.x, (typeof window !== 'undefined' ? window.innerWidth : 400) - 336));
+  const panelTop = pos.y + 48;
+
   return (
     <>
-      {/* Botón fijo: solo escritorio (en móvil el acceso vive en la barra inferior).
-          forceMobileVisible lo fuerza visible también en móvil (panel admin); ahí se
-          coloca por encima de la barra inferior de opciones. */}
-      {!fullscreen && (
-        <button
-          onClick={onToggle}
-          aria-label={open ? 'Cerrar calculadora' : 'Abrir calculadora'}
-          aria-expanded={open}
-          className={`${forceMobileVisible ? 'flex' : 'hidden sm:flex'} fixed right-5 ${forceMobileVisible ? 'bottom-[4.75rem] sm:bottom-6' : 'bottom-6'} ${zClass} p-3.5 rounded-2xl shadow-xl border backdrop-blur-md transition-all active:scale-90 ${
-            open
-              ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-teal-500/30'
-              : 'bg-slate-800/90 text-teal-300 border-teal-500/40 shadow-teal-500/10 hover:bg-slate-800'
-          }`}
-        >
-          <Icon name="calculator" className="w-5 h-5 sm:w-6 sm:h-6" />
-        </button>
-      )}
+      {/* Botón fijo bajo el logo. Mantener presionado para arrastrarlo a otra posición. */}
+      <button
+        onPointerDown={handleDown}
+        onPointerMove={handleMove}
+        onPointerUp={handleUp}
+        onPointerCancel={handleUp}
+        style={{ left: pos.x, top: pos.y, touchAction: 'none' }}
+        aria-label={open ? 'Cerrar calculadora' : 'Abrir calculadora'}
+        aria-expanded={open}
+        title={dragActive ? 'Arrastra para mover la calculadora' : 'Calculadora · mantén presionado para moverla'}
+        className={`fixed flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 ${zClass} rounded-2xl shadow-xl border backdrop-blur-md transition-colors active:scale-90 select-none cursor-grab ${
+          dragActive ? 'cursor-grabbing ring-2 ring-teal-400/60 scale-110' : ''
+        } ${
+          open
+            ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-teal-500/30'
+            : 'bg-slate-800/90 text-teal-300 border-teal-500/40 shadow-teal-500/10 hover:bg-slate-800'
+        }`}
+      >
+        <Icon name="calculator" className="w-5 h-5 sm:w-6 sm:h-6" />
+      </button>
 
-      {/* Vista normal: panel flotante no modal, no cubre toda la pantalla */}
+      {/* Panel no modal: se despliega hacia abajo desde la posición actual del botón.
+          La animación crece desde arriba (transform-origin top) siguiendo al botón. */}
       {open && !fullscreen && (
         <div
-          className={`fixed right-3 sm:right-5 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] sm:bottom-24 ${zClass} w-[calc(100vw-1.5rem)] max-w-xs rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-modal-spring`}
+          style={{ left: panelLeft, top: panelTop }}
+          className={`fixed w-[calc(100vw-1.5rem)] max-w-xs ${zClass} rounded-2xl bg-slate-900/95 border border-teal-500/30 shadow-2xl backdrop-blur-xl animate-calc-drop`}
         >
           {header(onToggle)}
           <div className="px-3.5 pb-3.5">{body}</div>

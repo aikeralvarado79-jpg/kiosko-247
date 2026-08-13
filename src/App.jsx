@@ -4627,7 +4627,8 @@ function CustomerView({
   }, [allProducts, orders]);
 
   // Estantes del recorrido virtual: agrupa los productos visibles por categoría,
-  // en el orden de las categorías de la tienda (máx. 6 pisos × 8 ítems).
+  // en el orden de las categorías de la tienda (máx. 6 pisos, todos los
+  // productos de cada góndola — el scroll/deslizamiento los recorre).
   const shelfGroups = useMemo(() => {
     if (!Array.isArray(products) || products.length === 0) return [];
     const byCat = {};
@@ -4638,7 +4639,7 @@ function CustomerView({
     const order = [...new Set([...categories, ...Object.keys(byCat)])];
     return order
       .filter((c) => byCat[c] && byCat[c].length > 0)
-      .map((c) => ({ category: c, items: byCat[c].slice(0, 8) }))
+      .map((c) => ({ category: c, items: byCat[c] }))
       .slice(0, 6);
   }, [products, categories]);
 

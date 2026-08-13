@@ -3023,6 +3023,7 @@ export default function App() {
           isBenefited={Boolean(customerProfile?.isBenefited)}
           onOrderUpdated={handleOrderUpdated}
           addToast={addToast}
+          headerHeight={headerHeight}
           onClose={() => setOrderDetailOrder(null)}
           onTrackLiveOrder={(order) => {
             setOrderDetailOrder(null);
@@ -14046,16 +14047,17 @@ function FacturaQr360({ order, rate }) {
   );
 }
 
-function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast }) {
+function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast, headerHeight = 0 }) {
   useOverlay(true, onClose);
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
   const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
   return (
-    <div className="fixed inset-0 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] overflow-y-auto animate-modal-spring">
-        <div className="p-5 sm:p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 flex items-center justify-between gap-3">
+    <div className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in" style={{ top: headerHeight }}>
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring max-h-full flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-800 shrink-0 bg-slate-900 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white">
               Detalle del Pedido <span className="text-teal-400">#{order.id}</span>
@@ -14070,7 +14072,7 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
           </button>
         </div>
 
-        <div className="p-5 sm:p-6 space-y-4">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {needsPaymentValidation(order) && (
             <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
               <Icon name="clock" className="w-4 h-4 shrink-0" />
@@ -14176,6 +14178,7 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
               Cancelar este pedido
             </button>
           )}
+        </div>
         </div>
       </div>
     </div>

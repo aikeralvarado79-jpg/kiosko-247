@@ -2931,7 +2931,7 @@ export default function App() {
       {activeView === 'customer' && <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} />}
 
       {/* Main Container */}
-      <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
+      <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 lg:p-6 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
         {isLoading ? (
           <LoadingScreen />
         ) : loadError ? (
@@ -3959,7 +3959,7 @@ function LoadingScreen() {
       </div>
 
       {/* Grid de tarjetas skeleton */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5">
         {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="rounded-2xl sm:rounded-3xl bg-slate-800/40 border border-slate-700/40 overflow-hidden">
             <div className="skeleton-block aspect-square w-full rounded-none" />
@@ -4627,7 +4627,8 @@ function CustomerView({
   }, [allProducts, orders]);
 
   // Estantes del recorrido virtual: agrupa los productos visibles por categoría,
-  // en el orden de las categorías de la tienda (máx. 6 pisos × 8 ítems).
+  // en el orden de las categorías de la tienda (máx. 6 pisos, todos los
+  // productos de cada góndola — el scroll/deslizamiento los recorre).
   const shelfGroups = useMemo(() => {
     if (!Array.isArray(products) || products.length === 0) return [];
     const byCat = {};
@@ -4638,7 +4639,7 @@ function CustomerView({
     const order = [...new Set([...categories, ...Object.keys(byCat)])];
     return order
       .filter((c) => byCat[c] && byCat[c].length > 0)
-      .map((c) => ({ category: c, items: byCat[c].slice(0, 8) }))
+      .map((c) => ({ category: c, items: byCat[c] }))
       .slice(0, 6);
   }, [products, categories]);
 
@@ -5365,7 +5366,7 @@ function CustomerView({
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5">
           {products.map((product, idx) => (
             <RevealOnScroll key={product.id} delay={Math.min(idx, 8) * 60}>
               <ProductCard
@@ -5425,6 +5426,34 @@ function ProductImg({ product, image, name, brand, alt, className = '', loading 
 // Estante interactivo: un anaquel (categoría) con los productos "de pie" sobre
 // el borde, en fila horizontal scrolleable con leve 3D al pasar el cursor.
 // Tocar el producto abre el detalle; el botón lo suma al carrito al instante.
+// Scroll horizontal de anaqueles/góndolas: en PC la rueda del mouse mueve la
+// fila horizontalmente (solo si hay overflow, conservando el scroll vertical
+// de la página cuando no) y en móvil se desliza con el dedo (snap).
+function useShelfWheelScroll(ref) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      const canScrollX = el.scrollWidth > el.clientWidth + 1;
+      if (!canScrollX || (e.deltaY === 0 && e.deltaX === 0)) return;
+      el.scrollLeft += e.deltaY + e.deltaX;
+      e.preventDefault();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [ref]);
+}
+
+function ShelfScroller({ className, children }) {
+  const ref = useRef(null);
+  useShelfWheelScroll(ref);
+  return (
+    <div ref={ref} className={className}>
+      {children}
+    </div>
+  );
+}
+
 function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductModal, onSelectCategory }) {
   const id = categoryIdentity(category);
   const [justAddedId, setJustAddedId] = useState(null);
@@ -5467,7 +5496,7 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
 
       {/* Tablero del estante con los productos en fila */}
       <div className="shelf-panel mt-2 px-3 sm:px-4 pb-3 pt-1">
-        <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-3 px-3 pt-1 pb-2">
+        <ShelfScroller className="flex gap-3 overflow-x-auto shelf-scroll-x snap-x snap-mandatory -mx-3 px-3 pt-1 pb-2">
           {items.map((p, i) => {
             const avail = Math.max(0, Number(p.stock) - Number(p.reserved || 0));
             const out = avail <= 0;
@@ -5517,7 +5546,7 @@ function Shelf({ category, items, floor, isActive, onAddToCart, onOpenProductMod
               </div>
             );
           })}
-        </div>
+        </ShelfScroller>
         <div className="shelf-lip" />
       </div>
     </article>
@@ -10484,7 +10513,7 @@ function AdminView({
                     </span>
                   </div>
                   <div className="shelf-panel px-3 sm:px-4 pb-3 pt-2 bg-slate-900/40 border border-slate-700/50 rounded-2xl">
-                    <div className="flex gap-3 overflow-x-auto scrollbar-none snap-x snap-mandatory -mx-1 px-1 pt-1 pb-2">
+                    <ShelfScroller className="flex gap-3 overflow-x-auto shelf-scroll-x snap-x snap-mandatory -mx-1 px-1 pt-1 pb-2">
                       {group.items.map((p, i) => {
                         const isLow = p.stock <= 5;
                         const isOut = p.stock === 0;
@@ -10542,7 +10571,7 @@ function AdminView({
                           </div>
                         );
                       })}
-                    </div>
+                    </ShelfScroller>
                     <div className="shelf-lip" />
                   </div>
                 </div>
@@ -10733,7 +10762,7 @@ function AdminView({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
             {filteredOrders.length === 0 ? (
               <div className="col-span-full py-16 text-center text-slate-500 space-y-2">
                 <Icon name="clock" className="w-12 h-12 text-slate-700 mx-auto" />

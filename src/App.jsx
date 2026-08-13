@@ -2929,6 +2929,9 @@ export default function App() {
       {/* Tasa BCV del día + Calculadora flotante (botón fijo; en móvil se abre desde la barra inferior) */}
       <RateBanner rate={rate} />
       {activeView === 'customer' && <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} />}
+      {activeView === 'admin' && isAdminAuthed && (
+        <CalcFab open={calcOpen} onToggle={toggleCalc} rate={rate} forceMobileVisible zClass="z-[76]" />
+      )}
 
       {/* Main Container */}
       <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 lg:p-6 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
@@ -12663,30 +12666,24 @@ function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, on
 }
 
 // Modal clásico de perfil (escritorio / pantallas grandes).
-function AdminProfileModal({ onClose, rate, ...rest }) {
+function AdminProfileModal({ onClose, ...rest }) {
   useOverlay(true, onClose);
-  const [calcOpen, setCalcOpen] = useState(false);
   return (
-    <>
-      <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-        <div className="absolute inset-0" onClick={onClose} />
-        <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
-          <AdminProfilePanel onClose={onClose} {...rest} />
-        </div>
+    <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
+        <AdminProfilePanel onClose={onClose} {...rest} />
       </div>
-      <CalcFab open={calcOpen} onToggle={() => setCalcOpen((v) => !v)} rate={rate} forceMobileVisible zClass="z-[76]" />
-    </>
+    </div>
   );
 }
 
 // Vista completa "Mi perfil administrador" (móvil): en vez de modal, cambia
 // la vista de la app entera. Se abre desde la barra inferior de opciones.
-function AdminProfileView({ onBack, rate, ...rest }) {
-  const [calcOpen, setCalcOpen] = useState(false);
+function AdminProfileView({ onBack, ...rest }) {
   return (
     <div className="fixed inset-0 z-[70] bg-slate-950 flex flex-col">
       <AdminProfilePanel onClose={onBack} {...rest} />
-      <CalcFab open={calcOpen} onToggle={() => setCalcOpen((v) => !v)} rate={rate} forceMobileVisible zClass="z-[71]" />
     </div>
   );
 }

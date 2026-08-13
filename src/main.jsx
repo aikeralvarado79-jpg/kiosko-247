@@ -130,3 +130,20 @@ if ('serviceWorker' in navigator) {
     announceUpdate();
   });
 }
+
+// Instalación PWA: se suprime el banner nativo del navegador y se expone el
+// evento para que el tutorial integrado (App.jsx) decida cuándo mostrarlo y
+// pueda lanzar el diálogo de instalación de Chrome/Android bajo demanda.
+let __kioskoDeferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  __kioskoDeferredPrompt = e;
+});
+window.addEventListener('appinstalled', () => {
+  __kioskoDeferredPrompt = null;
+  window.dispatchEvent(new CustomEvent('kiosko:app-installed'));
+});
+window.__kioskoGetDeferredPrompt = () => __kioskoDeferredPrompt;
+window.__kioskoClearDeferredPrompt = () => {
+  __kioskoDeferredPrompt = null;
+};

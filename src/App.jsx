@@ -5804,12 +5804,14 @@ function MathCalculator({ rate }) {
   const [acc, setAcc] = useState(null);
   const [op, setOp] = useState(null);
   const [waiting, setWaiting] = useState(false);
+  const [expr, setExpr] = useState('');
   const [currency, setCurrency] = useState('USD');
 
   const inputDigit = (d) => {
     if (waiting) {
-      setDisplay(d);
+      setDisplay(d === '.' ? '0.' : d);
       setWaiting(false);
+      if (acc == null && op == null) setExpr('');
       return;
     }
     setDisplay(d === '.' && (display.includes('.') || display === '0') ? (display === '0' ? '0.' : display) : display === '0' && d !== '.' ? d : display + d);
@@ -5825,24 +5827,28 @@ function MathCalculator({ rate }) {
     }
   };
 
-  const commit = () => {
-    const cur = parseFloat(display || '0');
-    if (acc == null || op == null) return cur;
-    const res = Math.round(compute(acc, cur) * 1e10) / 1e10;
-    return res;
-  };
+  const round = (n) => Math.round(n * 1e10) / 1e10;
 
   const chooseOp = (nextOp) => {
-    const res = commit();
-    setAcc(res);
-    setDisplay(String(res));
+    const cur = parseFloat(display || '0');
+    let base = cur;
+    let exprBase = formatAmount(cur, 2);
+    if (acc != null && op != null) {
+      base = round(compute(acc, cur));
+      exprBase = `${expr} ${formatAmount(cur, 2)}`;
+    }
+    setAcc(base);
+    setExpr(`${exprBase} ${nextOp}`);
     setOp(nextOp);
+    setDisplay('0');
     setWaiting(true);
   };
 
   const equals = () => {
-    if (op == null) return;
-    const res = commit();
+    if (op == null || acc == null) return;
+    const cur = parseFloat(display || '0');
+    const res = round(compute(acc, cur));
+    setExpr(`${expr} ${formatAmount(cur, 2)} =`);
     setDisplay(String(res));
     setAcc(null);
     setOp(null);
@@ -5854,6 +5860,7 @@ function MathCalculator({ rate }) {
     setAcc(null);
     setOp(null);
     setWaiting(false);
+    setExpr('');
   };
 
   const backspace = () => {
@@ -5877,7 +5884,8 @@ function MathCalculator({ rate }) {
 
   return (
     <div className="space-y-3">
-      {/* Pantalla con el botón de moneda ($ ⇄ Bs) y el resultado en ambas monedas */}
+      {/* Pantalla: expresión en curso arriba (primer monto + símbolo + segundo
+          monto) y el monto/resultado actual abajo, en ambas monedas. */}
       <div className="rounded-2xl bg-slate-950/70 border border-slate-700/80 p-3 space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
@@ -5895,6 +5903,11 @@ function MathCalculator({ rate }) {
             {isUsd ? '$' : 'Bs'}
           </button>
         </div>
+        {expr && (
+          <div className="text-right text-sm sm:text-base text-teal-300/90 font-bold truncate tabular-nums">
+            {isUsd ? '$' : 'Bs'} {expr}
+          </div>
+        )}
         <div className="text-right text-2xl sm:text-3xl font-black text-white truncate tabular-nums">
           {isUsd ? '$' : 'Bs'} {formatAmount(num, 2)}
         </div>

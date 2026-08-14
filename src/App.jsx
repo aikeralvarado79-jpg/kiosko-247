@@ -1465,7 +1465,10 @@ export default function App() {
   // Identificación obligatoria: se abre al entrar como cliente sin datos guardados.
   // identityMode: 'login' (formulario) | 'confirm' (solo biometría para volver/salir).
   // identityConfirmKind: 'switchback' | 'logout'.
-  const [isIdentityOpen, setIsIdentityOpen] = useState(() => !loadSavedCustomer());
+  // Invitados: el login NO se abre automáticamente. Navegan la tienda libremente
+  // (catálogo, recorrido horizontal, más pedidos) y solo se identifican al pulsar
+  // "Iniciar sesión" en la barra inferior o al comprar (el checkout pide los datos).
+  const [isIdentityOpen, setIsIdentityOpen] = useState(false);
   const [identityMode, setIdentityMode] = useState('login');
   const [identityConfirmKind, setIdentityConfirmKind] = useState('switchback');
 
@@ -1482,14 +1485,6 @@ export default function App() {
     setIdentityConfirmKind('logout');
     setIsIdentityOpen(true);
   };
-
-  // Reabrir la identificación si el usuario entra a la tienda sin estar identificado
-  useEffect(() => {
-    if (activeView === 'customer' && !savedCustomer) {
-      setIdentityMode('login');
-      setIsIdentityOpen(true);
-    }
-  }, [activeView, savedCustomer]);
 
   // Perfil del cliente desde el servidor (direcciones guardadas, balance, etc.)
   // Se recarga también cuando cambia orders (polling) para que el saldo de Mi
@@ -3527,6 +3522,7 @@ export default function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onCustomerLogout={openIdentityLogout}
+        onOpenLogin={openIdentityLogin}
         adminTab={adminTab}
         onAdminTab={handleAdminTabChange}
         pendingOrders={orders.filter((o) => !['entregado', 'cancelado'].includes(o.status)).length}
@@ -5272,7 +5268,7 @@ function CustomerView({
         <div className="space-y-2.5">
           {/* Category Pills: cada categoría tiene su color e icono de identidad */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {['Todas', 'Favoritos', ...categories].map((cat) => {
+            {['Todas', ...(savedCustomer ? ['Favoritos'] : []), ...categories].map((cat) => {
               const isFav = cat === 'Favoritos';
               const id = isFav ? null : categoryIdentity(cat);
               const active = selectedCategory === cat;
@@ -7506,6 +7502,7 @@ function BottomTabBar({
   onOpenCart,
   onGoAdmin,
   onGoStore,
+  onOpenLogin,
   onCustomerLogout,
   adminTab,
   onAdminTab,
@@ -7537,39 +7534,31 @@ function BottomTabBar({
       onClick: onToggleCalc,
       badge: null
     },
-    {
-      key: 'cart',
-      label: 'Carrito',
-      icon: 'bag',
-      onClick: onOpenCart,
-      badge: cartCount > 0 ? cartCount : null
-    },
-    {
-      key: 'orders',
-      label: 'Mis Pedidos',
-      icon: 'list',
-      onClick: () => {
-        if (!hasCustomer) {
-          onOpenCart(); // el checkout/identidad obliga a identificarse
-          return;
-        }
-        onCustomerTab('orders');
-      },
-      badge: null
-    },
-    {
-      key: 'account',
-      label: 'Mi Cuenta',
-      icon: 'user',
-      onClick: () => {
-        if (!hasCustomer) {
-          onOpenCart();
-          return;
-        }
-        onCustomerTab('account');
-      },
-      badge: null
-    }
+    ...(hasCustomer
+      ? [
+          {
+            key: 'cart',
+            label: 'Carrito',
+            icon: 'bag',
+            onClick: onOpenCart,
+            badge: cartCount > 0 ? cartCount : null
+          },
+          {
+            key: 'orders',
+            label: 'Mis Pedidos',
+            icon: 'list',
+            onClick: () => onCustomerTab('orders'),
+            badge: null
+          },
+          {
+            key: 'account',
+            label: 'Mi Cuenta',
+            icon: 'user',
+            onClick: () => onCustomerTab('account'),
+            badge: null
+          }
+        ]
+      : [])
   ];
 
   const adminTabs = [
@@ -7623,6 +7612,16 @@ function BottomTabBar({
           <span className="text-[10px] font-bold leading-none truncate">{t.label}</span>
         </button>
       ))}
+      {activeView === 'customer' && !hasCustomer && (
+        <button
+          onClick={onOpenLogin}
+          className={`${base} text-teal-400 hover:text-teal-300 ${idleTab}`}
+          aria-label="Iniciar sesión"
+        >
+          <Icon name="userPlus" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Iniciar sesión</span>
+        </button>
+      )}
       {activeView === 'customer' && isAdmin && (
         <button
           onClick={onGoAdmin}

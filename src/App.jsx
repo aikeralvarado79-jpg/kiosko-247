@@ -112,6 +112,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     lock: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 8v8M8 8h8" />,
     filter: <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />,
     eye: <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+    eyeOff: <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12A3 3 0 1 1 9.88 9.88M1 1l22 22" /></>,
     dollarSign: <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
     layers: <path d="m12 2 10 5-10 5L2 7zm0 10 10 5-10 5-10-5zm0 10 10 5-10 5-10-5z" />,
     refresh: <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />,
@@ -397,6 +398,10 @@ const IS_IOS =
 
 const IS_ANDROID =
   typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
+
+// Nombre del método biométrico según plataforma para textos al usuario:
+// iOS → Face ID; otros → huella (o biometría genérica cuando no hay sensor).
+const BIO_METHOD_LABEL = IS_IOS ? 'Face ID' : IS_ANDROID ? 'huella' : 'biometría';
 
 // ¿La app ya está instalada y abierta como app (fuera del navegador)?
 const isInstalledPWA = () =>
@@ -1856,7 +1861,7 @@ export default function App() {
     try {
       const res = await api.adminBiometricLogin(phone, response);
       if (!res.ok) {
-        addToast(res.data.error || 'La biometría no coincidió', 'error');
+        addToast(res.data.error || (IS_IOS ? 'Face ID no coincidió' : 'La biometría no coincidió'), 'error');
         return false;
       }
       setToken(res.data.token);
@@ -4169,6 +4174,7 @@ function LoadErrorScreen({ error, onRetry }) {
 
 function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack, initialPhone = null }) {
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -4210,6 +4216,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const [recoverOptions, setRecoverOptions] = useState(null);
   const [biometricResponse, setBiometricResponse] = useState(null);
   const [newPassword, setNewPassword] = useState({ a: '', b: '' });
+  const [showNewPassword, setShowNewPassword] = useState({ a: false, b: false });
   const [recoverError, setRecoverError] = useState('');
 
   // Pre-carga los options de WebAuthn al completar el teléfono para que
@@ -4317,7 +4324,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
           setBioNeedsRegister(true);
           setBioOptions(null);
         } else {
-          setBioError('No se pudo iniciar la verificación con biometría. Intenta de nuevo.');
+          setBioError(`No se pudo iniciar la verificación con ${BIO_METHOD_LABEL}. Intenta de nuevo.`);
           return;
         }
       } catch {
@@ -4334,13 +4341,13 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
         if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el registro');
         const regResponse = await startRegistration({ optionsJSON: rres.data.options });
         const ok = await onBiometricRegister(phoneKey, regResponse);
-        if (!ok) setBioError('No se pudo guardar tu biometría. Intenta de nuevo.');
+        if (!ok) setBioError(`No se pudo guardar tu ${BIO_METHOD_LABEL}. Intenta de nuevo.`);
         setBioNeedsRegister(false);
         return;
       }
       const authResponse = await startAuthentication({ optionsJSON: bioOptions });
       const ok = await onBiometricLogin(phoneKey, authResponse);
-      if (!ok) setBioError('La biometría no coincidió. Verifica que tu número sea de administrador.');
+      if (!ok) setBioError((IS_IOS ? 'Face ID no coincidió' : `La ${BIO_METHOD_LABEL} no coincidió`) + '. Verifica que tu número sea de administrador.');
     } catch (err) {
       // Si la credencial se registró bajo un rpID anterior (dominio distinto),
       // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
@@ -4357,7 +4364,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
         if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
         const regResponse = await startRegistration({ optionsJSON: rres.data.options });
         const ok = await onBiometricRegister(phoneKey, regResponse);
-        if (!ok) setBioError('No se pudo guardar tu biometría. Intenta de nuevo.');
+        if (!ok) setBioError(`No se pudo guardar tu ${BIO_METHOD_LABEL}. Intenta de nuevo.`);
       } catch (regErr) {
         setBioError(friendlyAuthError(regErr));
       }
@@ -4378,7 +4385,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       try {
         const res = await api.webauthnLoginOptions({ phone: phoneKey });
         if (!res.ok) {
-          setRecoverError('Este número no tiene biometría registrada para verificar.');
+          setRecoverError(`Este número no tiene ${BIO_METHOD_LABEL} registrada para verificar.`);
           return;
         }
         recoveryFetchKeyRef.current = phoneKey;
@@ -4395,7 +4402,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       setRecoverStep('newpass');
       setRecoverError('');
     } catch {
-      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intenta de nuevo.');
+      setRecoverError(`No se pudo verificar con ${BIO_METHOD_LABEL}. Si la cancelaste o no coincidió, intenta de nuevo.`);
       setRecoverStep('phone');
     }
   };
@@ -4435,7 +4442,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               <Icon name="key" className="w-7 h-7" />
             </span>
             <h2 className="text-xl font-black text-white">Recuperar Contraseña</h2>
-            <p className="text-xs text-slate-400">Verifica con biometría y crea una nueva contraseña.</p>
+            <p className="text-xs text-slate-400">Verifica con {BIO_METHOD_LABEL} y crea una nueva contraseña.</p>
           </div>
 
           {recoverStep === 'phone' && (
@@ -4466,14 +4473,14 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                 onClick={startRecovery}
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-bold text-sm hover:from-amber-400 hover:to-rose-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
               >
-                Verificar con biometría
+Verificar con {BIO_METHOD_LABEL}
               </button>
             </div>
           )}
 
           {recoverStep === 'biometric' && (
             <div className="text-center space-y-3">
-              <p className="text-xs text-slate-400">Esperando verificación biométrica...</p>
+              <p className="text-xs text-slate-400">Esperando {IS_IOS ? 'tu Face ID' : IS_ANDROID ? 'tu huella' : 'la verificación biométrica'}...</p>
             </div>
           )}
 
@@ -4481,23 +4488,43 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Nueva contraseña</label>
-                <input
-                  type="password"
-                  value={newPassword.a}
-                  onChange={(e) => setNewPassword({ ...newPassword, a: e.target.value })}
-                  placeholder="Mínimo 6 caracteres"
-                  className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword.a ? 'text' : 'password'}
+                    value={newPassword.a}
+                    onChange={(e) => setNewPassword({ ...newPassword, a: e.target.value })}
+                    placeholder="Mínimo 6 caracteres"
+                    className="w-full px-4 py-3 pr-11 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((s) => ({ ...s, a: !s.a }))}
+                    aria-label={showNewPassword.a ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-100 transition-colors"
+                  >
+                    <Icon name={showNewPassword.a ? 'eyeOff' : 'eye'} className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Repetir contraseña</label>
-                <input
-                  type="password"
-                  value={newPassword.b}
-                  onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
-                  placeholder="Repite la contraseña"
-                  className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword.b ? 'text' : 'password'}
+                    value={newPassword.b}
+                    onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
+                    placeholder="Repite la contraseña"
+                    className="w-full px-4 py-3 pr-11 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((s) => ({ ...s, b: !s.b }))}
+                    aria-label={showNewPassword.b ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-100 transition-colors"
+                  >
+                    <Icon name={showNewPassword.b ? 'eyeOff' : 'eye'} className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
               {recoverError && <p className="text-xs text-rose-400 mt-2">{recoverError}</p>}
               <button
@@ -4529,7 +4556,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             <Icon name="layers" className="w-7 h-7" />
           </span>
           <h2 className="text-xl font-black text-white">Acceso al Panel Admin</h2>
-          <p className="text-xs text-slate-400">Inicia sesión con tu contraseña o biometría para gestionar inventario y pedidos.</p>
+          <p className="text-xs text-slate-400">Inicia sesión con tu contraseña o {BIO_METHOD_LABEL} para gestionar inventario y pedidos.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -4559,13 +4586,23 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Contraseña</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-3 pr-11 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-100 transition-colors"
+              >
+                <Icon name={showPassword ? 'eyeOff' : 'eye'} className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           <button
@@ -4613,7 +4650,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             className="w-full py-2 text-xs text-amber-300 hover:text-amber-200 hover:bg-slate-800/60 rounded-xl transition-all flex items-center justify-center gap-1.5"
           >
             <Icon name="key" className="w-3.5 h-3.5" />
-            ¿Olvidaste tu contraseña? Recuperar con biometría
+            ¿Olvidaste tu contraseña? Recuperar con {BIO_METHOD_LABEL}
           </button>
           <button
             type="button"
@@ -6658,7 +6695,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
     if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar el registro');
     const regResponse = await startRegistration({ optionsJSON: res.data.options });
     const verifyRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
-    if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'No se pudo guardar tu biometría');
+    if (!verifyRes.ok) throw new Error(verifyRes.data.error || `No se pudo guardar tu ${BIO_METHOD_LABEL}`);
   };
 
   // Login o registro con biometría. Si no hay credencial previa, la registra en
@@ -6672,7 +6709,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
       try {
         const authResponse = await startAuthentication({ optionsJSON: res.data.options });
         const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
-        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
+        if (!verifyRes.ok) throw new Error(verifyRes.data.error || (IS_IOS ? 'Face ID no coincidió' : 'La huella no coincidió'));
       } catch (authErr) {
         // rpID distinto (dominio anterior): re-registra en el dominio actual.
         const isRpidMismatch = authErr?.name === 'NotAllowedError';
@@ -6720,7 +6757,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
   // Botón de biometría del formulario: exige el número antes de continuar.
   const handleBiometricAction = () => {
     if (!/^\d{7}$/.test(phoneNumber)) {
-      setErrors((prev) => ({ ...prev, phone: 'Ingresa los 7 dígitos del número para verificar con biometría' }));
+      setErrors((prev) => ({ ...prev, phone: `Ingresa los 7 dígitos del número para verificar con ${BIO_METHOD_LABEL}` }));
       return;
     }
     runWebAuthn();
@@ -6803,10 +6840,10 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             {panel === 'confirm'
-              ? 'Confirma tu identidad con biometría para continuar.'
+              ? `Confirma tu identidad con ${BIO_METHOD_LABEL} para continuar.`
               : registerMode
-              ? 'Regístrate en segundos con tu teléfono y biometría. El nombre se autocompleta en tus próximos accesos.'
-              : 'Identifícate para pedir. Tu teléfono + biometría es tu tarjeta de cliente.'}
+              ? `Regístrate en segundos con tu teléfono y ${BIO_METHOD_LABEL}. El nombre se autocompleta en tus próximos accesos.`
+              : `Identifícate para pedir. Tu teléfono + ${BIO_METHOD_LABEL} es tu tarjeta de cliente.`}
           </p>
         </div>
 
@@ -6831,11 +6868,11 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
                 </span>
                 <span className="flex-1 text-left">
                   <span className="block text-[11px] font-bold text-teal-300">
-                    {webauthnSupported ? 'Confirmar con biometría' : 'Continuar sin biometría'}
+                    {webauthnSupported ? `Confirmar con ${BIO_METHOD_LABEL}` : 'Continuar sin biometría'}
                   </span>
                   <span className="block text-[11px] text-slate-400 leading-snug">
                     {!webauthnSupported
-                      ? 'Tu dispositivo no tiene biometría. Podés continuar igual.'
+                      ? `Tu dispositivo no tiene ${BIO_METHOD_LABEL}. Podés continuar igual.`
                       : IS_IOS
                       ? 'Usa tu Face ID'
                       : 'Usa tu huella'}
@@ -6870,7 +6907,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
               </div>
               <div>
                 <h3 className="text-base sm:text-lg font-bold text-white">
-                  {webAuthnStep === 'login' ? 'Confirma tu identidad' : 'Registra tu biometría'}
+                  {webAuthnStep === 'login' ? 'Confirma tu identidad' : `Registra tu ${BIO_METHOD_LABEL}`}
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                   {webAuthnStep === 'login'
@@ -6968,10 +7005,10 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
                 )}
               </span>
               <span className="flex-1 text-left">
-                <span className="block text-[11px] font-bold text-teal-300">Verificar con biometría</span>
+                <span className="block text-[11px] font-bold text-teal-300">Verificar con {BIO_METHOD_LABEL}</span>
                 <span className="block text-[11px] text-slate-400 leading-snug">
                   {!webauthnSupported
-                    ? 'Tu dispositivo no tiene biometría. Podés entrar con tu teléfono y nombre.'
+                    ? `Tu dispositivo no tiene ${BIO_METHOD_LABEL}. Podés entrar con tu teléfono y nombre.`
                     : IS_IOS
                     ? 'Usa tu Face ID'
                     : 'Usa tu huella'}
@@ -7038,7 +7075,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white">
-                {webAuthnStep === 'login' ? 'Confirma tu identidad' : 'Registra tu biometría'}
+                {webAuthnStep === 'login' ? 'Confirma tu identidad' : `Registra tu ${BIO_METHOD_LABEL}`}
               </h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 {webAuthnStep === 'login'
@@ -15028,10 +15065,10 @@ const friendlyAuthError = (err) => {
   // del servidor o un fallback amigable, así que se muestran tal cual.
   if (name === 'Error' && err?.message) return err.message;
   if (name === 'NotAllowedError') {
-    return 'Verificación cancelada. Para continuar, acepta la huella o Face ID cuando tu teléfono lo pida.';
+    return `Verificación cancelada. Para continuar, acepta tu ${BIO_METHOD_LABEL} cuando tu teléfono lo pida.`;
   }
   if (name === 'NotFoundError' || name === 'NotSupportedError') {
-    return 'Tu dispositivo no tiene biometría configurada. Activa la huella o Face ID en los ajustes y prueba de nuevo.';
+    return `Tu dispositivo no tiene ${BIO_METHOD_LABEL} configurada. Activa tu ${BIO_METHOD_LABEL} en los ajustes y prueba de nuevo.`;
   }
   if (name === 'AbortError') {
     return 'La verificación tardó demasiado y se canceló. Intenta de nuevo.';

@@ -114,5 +114,6 @@ export const api = {
   getOrderProof: (id, phone) => request(`/api/orders/${id}/proof?phone=${encodeURIComponent(phone || '')}`),
   convertOrderToCredit: (id, phone) => request(`/api/orders/${id}/payment/credit`, { method: 'POST', body: JSON.stringify({ phone }) }),
   getOrderMessages: (id, phone) => request(`/api/orders/${id}/messages?phone=${encodeURIComponent(phone || '')}`),
-  sendOrderMessage: (id, phone, text) => request(`/api/orders/${id}/messages`, { method: 'POST', body: JSON.stringify({ phone, text }) })
+  sendOrderMessage: (id, phone, text) => request(`/api/orders/${id}/messages`, { method: 'POST', body: JSON.stringify({ phone, text }) }),
+  assistantEscalate: (data) => request('/api/assistant/escalate', { method: 'POST', body: JSON.stringify(data) })
 };

@@ -888,6 +888,27 @@ app.post('/api/push/broadcast', requireAdmin, async (req, res) => {
   }
 });
 
+// Escalamiento del asistente IA "Don Aiker": cuando el chat no resuelve una
+// pregunta y el cliente pide ayuda humana, se avisa a todos los admins por push.
+// No requiere sesión admin: lo llama el cliente desde la tienda.
+app.post('/api/assistant/escalate', async (req, res) => {
+  try {
+    const { text, customerName, phone } = req.body || {};
+    const allPhones = await getAllAdminPhones();
+    let sent = 0;
+    if (allPhones.length) {
+      sent = await push.sendToPhone(allPhones, {
+        title: '🆘 Cliente pidió ayuda humana',
+        body: `${customerName || 'Cliente'}${phone ? ` · ${phone}` : ''}${text ? ` — "${String(text).slice(0, 120)}"` : ''}`,
+        url: '/'
+      });
+    }
+    res.json({ ok: true, sent });
+  } catch (err) {
+    fail(res, err, 'No se pudo notificar al equipo.');
+  }
+});
+
 // Recordatorio de deuda a un cliente (solo admin). Usa el balance actual.
 app.post('/api/push/reminder', requireAdmin, async (req, res) => {
   try {

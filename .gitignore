@@ -1,6 +1,7 @@
 node_modules/
 dist/
 server/data.json
+server/config.json
+mirror-db.tmp.mjs
 .env
 *.log
-mirror-db.tmp.mjs

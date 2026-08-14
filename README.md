@@ -17,7 +17,7 @@ App de kiosco con catálogo, pedidos con retiro o envío, y panel de administrac
 | Servicio   | Valor                                                                                                   |
 | ---------- | ------------------------------------------------------------------------------------------------------- |
 | URL pública | `https://kiosko-247.onrender.com`                                                                      |
-| Admin pass | Master `kiosko247Aa` (`ADMIN_PASSWORD` en Render; localmente `server/config.json` → `kiosko123`). Cada admin puede tener su propia contraseña (login por teléfono + contraseña, configurada con "Recuperar contraseña"). |
+| Admin pass | Master definida en **Render** (`ADMIN_PASSWORD`, no está en el repo; ver §Descripción del proyecto). Cada admin puede tener su propia contraseña (login por teléfono + contraseña, configurada con "Recuperar contraseña"). En local, definir `ADMIN_PASSWORD` y `ADMIN_PHONES` en el entorno (ver `server/config.example.json`). |
 | Neon        | BD Postgres activa (plan free, 0.5 GB). Connection string se setea en `DATABASE_URL` en Render (no está en el repo). |
 | Supabase    | ref `xhklvjvqhnnfpccqygti`; **respaldo** de la BD y host de Storage para comprobantes. Se conecta por transaction pooler puerto 6543 (el directo 5432 es IPv6-only). |
 
@@ -60,7 +60,7 @@ Sin `DATABASE_URL` configurada, el backend usa `server/data.json` como almacenam
 1. Subí el repo a GitHub (`aikeralvarado79-jpg/kiosko-247`).
 2. En Render: **New → Blueprint**, seleccioná el repo.
 3. En `render.yaml` las variables `ADMIN_PASSWORD` y `DATABASE_URL` están como `sync: false`, así que Render te las pide al crear.
-4. `ADMIN_PASSWORD=kiosko247Aa` y `DATABASE_URL=postgresql://...neon.tech/neondb?sslmode=require` (connection string de Neon, se setea manualmente en el dashboard de Render; no está en el repo).
+4. Definí en el dashboard de Render los secrets `ADMIN_PASSWORD` (contraseña maestra del panel), `ADMIN_PHONES` y `DATABASE_URL` (connection string de Neon). No se commitearn al repo.
 5. **Apply** y esperá el deploy (2–3 min). La URL queda en `https://kiosko-247.onrender.com`.
 
 ### Costo y modo free

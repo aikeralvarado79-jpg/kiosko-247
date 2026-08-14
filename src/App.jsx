@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment 
 import { createPortal } from 'react-dom';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken } from './api.js';
+import { ADMIN_PHONES } from './data.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import LoadingScreen from './components/LoadingScreen.jsx';
@@ -488,9 +489,6 @@ const formatAmountBsInput = (raw) => {
 const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
 
 const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
-
-// Administradores reconocidos por teléfono (formato 11 dígitos, sin espacios).
-const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'];
 
 const CUSTOMER_KEY = 'kiosko_customer';
 

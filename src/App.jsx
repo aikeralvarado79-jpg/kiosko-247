@@ -17021,29 +17021,42 @@ const PRODUCT_SYNONYMS = {
   hielo: ['hielo', 'helado']
 };
 
-// Obtiene matches del texto contra el catálogo con scoring: nombre completo,
-// primera palabra, cualquier token y sinónimos. Devuelve hasta `limit`.
+// Palabras de relleno que no deben puntuar en la búsqueda de productos.
+const AI_STOPWORDS = new Set([
+  'que', 'con', 'para', 'esta', 'este', 'estas', 'estos', 'cual', 'cuales', 'como', 'cuando',
+  'donde', 'muy', 'mas', 'menos', 'por', 'los', 'las', 'una', 'uno', 'unos', 'el', 'la', 'lo',
+  'de', 'del', 'me', 'mi', 'tu', 'te', 'se', 'su', 'sus', 'y', 'o', 'a', 'hay', 'tienes',
+  'tiene', 'tengo', 'quiero', 'quieres', 'puedes', 'podrias', 'favor', 'disponible', 'precio',
+  'cuanto', 'cuanta', 'cuantos', 'cuantas', 'es', 'son', 'estoy', 'eso', 'eso', 'algo', 'dame',
+  'da', 'haz', 'muestra', 'dime', 'decime', 'saber', 'queria', 'quisiera', 'puedo', 'agregar',
+  'agregame', 'comprar', 'compra', 'pasame', 'pasar', 'busca', 'buscar', 'opcion', 'opciones'
+]);
+
+// Obtiene matches del texto contra el catálogo con scoring estricto: nombre completo,
+// contención del texto completo, token exacto, token parcial (3+ letras) y sinónimos.
+// Devuelve hasta `limit` y solo si el mejor match supera el umbral.
 function matchAiProducts(products, query, limit = 4) {
   if (!Array.isArray(products) || products.length === 0) return [];
   const q = normalizeAiText(query);
   if (!q) return [];
-  const tokens = q.split(' ').filter((t) => t.length > 1);
+  const tokens = q.split(' ').filter((t) => t.length > 2 && !AI_STOPWORDS.has(t));
   const scored = (products || [])
     .filter((p) => p && p.name)
     .map((p) => {
       const n = normalizeAiText(p.name);
-      const nameTokens = n.split(' ').filter((t) => t.length > 1);
+      const nameTokens = n.split(' ').filter((t) => t.length > 2 && !AI_STOPWORDS.has(t));
       let score = 0;
       if (n === q) score += 100;
-      else if (n.includes(q)) score += 70;
+      else if (q.length > 3 && n.includes(q)) score += 70;
       else if (tokens.length && tokens.some((t) => nameTokens.some((nt) => nt === t))) score += 50;
-      // partial match por token
+      // partial match por token relevante (nunca con stopwords ni tokens de 1-2 letras)
       tokens.forEach((t) => {
-        if (nameTokens.some((nt) => nt.startsWith(t) || nt.includes(t) || t.startsWith(nt))) score += 20;
+        if (t.length >= 3 && nameTokens.some((nt) => nt.startsWith(t))) score += 20;
+        else if (nameTokens.some((nt) => nt.length >= 4 && (nt.includes(t) || t.startsWith(nt)))) score += 20;
       });
-      // sinónimos: cada keyword del diccionario que aparezca aporta por sus variantes
+      // sinónimos: solo si la keyword aparece completa en la pregunta
       Object.entries(PRODUCT_SYNONYMS).forEach(([kw, alts]) => {
-        if (q.includes(kw) || kw.includes(q.slice(0, 3))) {
+        if (q.includes(kw)) {
           alts.forEach((alt) => {
             if (n.includes(alt)) score += 25;
           });
@@ -17051,7 +17064,7 @@ function matchAiProducts(products, query, limit = 4) {
       });
       return { p, score };
     })
-    .filter((x) => x.score > 0)
+    .filter((x) => x.score >= 40)
     .sort((a, b) => b.score - a.score);
   return scored.slice(0, limit).map((x) => x.p);
 }

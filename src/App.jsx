@@ -17069,8 +17069,26 @@ function matchAiProducts(products, query, limit = 4) {
   return scored.slice(0, limit).map((x) => x.p);
 }
 
-// Lee la respuesta del asistente en voz alta (TTS).
+// Lectura de la respuesta del asistente en voz alta (TTS).
 const sayAi = (text) => speakText(text);
+
+// Menú de capacidades del asistente: el cliente escribe el número del punto
+// que desea ejecutar y el chat lo resuelve. Texto con puntos numerados.
+const AI_HELP_MENU = [
+  { n: 1, text: 'Consultar mi deuda o saldo' },
+  { n: 2, text: 'Ver mi último pedido y dónde va' },
+  { n: 3, text: 'Promos y ofertas activas' },
+  { n: 4, text: 'La tasa del día (dólar/bolívar)' },
+  { n: 5, text: 'Repetir mi último pedido' },
+  { n: 6, text: 'Ver el catálogo y agregar productos' },
+  { n: 7, text: 'Ver mi carrito o ir a pagar' },
+  { n: 8, text: 'Hablar con una persona del kiosko' }
+];
+
+// Texto de la respuesta con la lista de puntos que muestra el botón de ayuda.
+const AI_HELP_TEXT = `Claro, te cuento todo lo que puedo hacer por ti 😊\n\n${AI_HELP_MENU.map(
+  (m) => `${m.n}. ${m.text}`
+).join('\n')}\n\nEscribe el número del punto que quieres y lo ejecuto enseguida.`;
 
 // Bienvenida proactiva contextual según lo que el cliente tiene en curso.
 function buildAiWelcome(params) {
@@ -17127,7 +17145,7 @@ function AikerAssistant({
     }
   ]);
   const [thinking, setThinking] = useState(false);
-  const [action, setAction] = useState(null);
+  const [action, setAction] = useState([{ kind: 'help', label: 'Conoce en qué te puedo ayudar', icon: 'sparkles' }]);
   const [followUps, setFollowUps] = useState([]);
   const [draft, setDraft] = useState('');
   const [suggestions, setSuggestions] = useState([]);
@@ -17182,6 +17200,35 @@ function AikerAssistant({
     const raw = String(q || '').trim();
     const t = normalizeAiText(raw);
     if (!t) return null;
+
+    // ---- Menú de capacidades: "¿qué puedes hacer?" o un número del menú ----
+    if (/que puedes hacer|que haces|en que me ayudas|como me ayudas|como puedes ayudarme|menu|puntos|como funciona/.test(t)) {
+      return {
+        text: AI_HELP_TEXT,
+        followUps: AI_HELP_MENU.map((m) => String(m.n))
+      };
+    }
+    if (/^\d{1,2}$/.test(t)) {
+      const n = Number(t);
+      const item = AI_HELP_MENU.find((m) => m.n === n);
+      if (item) {
+        const map = {
+          1: '¿Cuánto debo?',
+          2: '¿Dónde está mi pedido?',
+          3: 'Promos activas',
+          4: '¿Cuál es la tasa?',
+          5: 'Repetir mi último pedido',
+          6: '¿Qué venden?',
+          7: 'Ver mi carrito',
+          8: 'Quiero hablar con una persona real'
+        };
+        return respond(map[n]);
+      }
+      return {
+        text: `Ese punto (${n}) no está en la lista. Escribí un número del 1 al ${AI_HELP_MENU.length} o tocá la opción de abajo.`,
+        followUps: AI_HELP_MENU.map((m) => String(m.n))
+      };
+    }
 
     // ---- Detección de productos (siempre primero: "agregar milka") ----
     const matches = matchAiProducts(products, raw, 4);
@@ -17551,6 +17598,10 @@ function AikerAssistant({
       onOpenCheckout?.();
     } else if (a.kind === 'catalog') {
       onClose();
+    } else if (a.kind === 'help') {
+      // El botón "Conoce en qué te puedo ayudar" muestra el menú de capacidades.
+      send('Ayuda: ¿qué puedes hacer?');
+      return;
     }
     if (a.kind !== 'product') onClose();
   };
@@ -17595,11 +17646,6 @@ function AikerAssistant({
           <div ref={scrollRef} className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0 bg-slate-950/40">
             {messages.map((m, i) => (
               <div key={i} className={`flex ${m.from === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-                {m.from === 'ai' && (
-                  <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
-                    <Icon name="chat" className="w-3.5 h-3.5" />
-                  </span>
-                )}
                 <div
                   className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed whitespace-pre-line ${
                     m.from === 'user'
@@ -17614,7 +17660,7 @@ function AikerAssistant({
 
             {/* Rastreo con progreso en vivo dentro del chat */}
             {liveOrder && !thinking && (
-              <div className="flex justify-start pl-9 animate-fade-in">
+              <div className="flex justify-start animate-fade-in">
                 <div className="w-full max-w-[80%] rounded-2xl bg-slate-900 border border-slate-700 p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
@@ -17644,7 +17690,7 @@ function AikerAssistant({
 
             {/* Acciones profundas (botones bajo el mensaje; puede haber varias) */}
             {Array.isArray(action) && action.length > 0 && (
-              <div className="flex flex-wrap justify-start pl-9 gap-2 animate-fade-in">
+              <div className="flex flex-wrap justify-start gap-2 animate-fade-in">
                 {action.map((a, i) => (
                   <button
                     key={i}
@@ -17659,10 +17705,7 @@ function AikerAssistant({
             )}
 
             {thinking && (
-              <div className="flex justify-start items-center gap-2 animate-fade-in">
-                <span className="shrink-0 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
-                  <Icon name="chat" className="w-3.5 h-3.5" />
-                </span>
+              <div className="flex justify-start items-center animate-fade-in">
                 <div className="px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-sm rounded-bl-md flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }} />
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '120ms' }} />

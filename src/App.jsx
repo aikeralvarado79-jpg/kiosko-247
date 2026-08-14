@@ -3472,12 +3472,6 @@ export default function App() {
           onConfirm={handleIdentifyCustomer}
           onConfirmBiometric={handleIdentityConfirmBiometric}
           onClose={() => setIsIdentityOpen(false)}
-          isCurrentAdmin={isCurrentAdmin}
-          onGoToAdmin={() => {
-            setIsIdentityOpen(false);
-            setActiveView('admin');
-          }}
-          adminPhones={adminPhones}
         />
       )}
 
@@ -6594,7 +6588,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   );
 }
 
-function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, adminPhones, mode = 'login', confirmKind = 'switchback', onClose }) {
+function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm, onConfirmBiometric, mode = 'login', confirmKind = 'switchback', onClose }) {
   useOverlay(true, onClose);
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
@@ -7065,16 +7059,6 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
                   className="w-full py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-700/70 transition-all"
                 >
                   Volver a {savedCustomer.customerName.split(' ')[0]}
-                </button>
-              )}
-              {(isCurrentAdmin || adminPhones.includes(`${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11))) && (
-                <button
-                  type="button"
-                  onClick={onGoToAdmin}
-                  className="w-full py-2 text-[11px] text-slate-500 hover:text-teal-300 transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Icon name="layers" className="w-3.5 h-3.5" />
-                  ¿Eres el administrador? Ir al panel
                 </button>
               )}
             </div>

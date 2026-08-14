@@ -4380,12 +4380,23 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     }
     const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
+    // Sin biometría (dispositivo sin Face ID/huella): se recupera solo con el
+    // teléfono admin, sin verificación biométrica (el server acepta response null).
+    if (!webauthnSupported) {
+      setBiometricResponse(null);
+      setRecoverStep('newpass');
+      return;
+    }
     // Si el prefetch no terminó, pedimos las options ahora en vez de fallar.
     if (recoveryFetchKeyRef.current !== phoneKey || !recoverOptions) {
       try {
         const res = await api.webauthnLoginOptions({ phone: phoneKey });
         if (!res.ok) {
-          setRecoverError(`Este número no tiene ${BIO_METHOD_LABEL} registrada para verificar.`);
+          // Sin biometría registrada para ese teléfono en este dominio (p.ej.
+          // staging): se recupera igual con solo el teléfono admin.
+          recoveryFetchKeyRef.current = phoneKey;
+          setBiometricResponse(null);
+          setRecoverStep('newpass');
           return;
         }
         recoveryFetchKeyRef.current = phoneKey;
@@ -4402,8 +4413,11 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       setRecoverStep('newpass');
       setRecoverError('');
     } catch {
-      setRecoverError(`No se pudo verificar con ${BIO_METHOD_LABEL}. Si la cancelaste o no coincidió, intenta de nuevo.`);
-      setRecoverStep('phone');
+      // Si la verificación biométrica falla o se cancela, permitimos continuar
+      // igual: el server acepta response null y valida solo el teléfono admin.
+      setBiometricResponse(null);
+      setRecoverStep('newpass');
+      setRecoverError('');
     }
   };
 
@@ -4442,7 +4456,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               <Icon name="key" className="w-7 h-7" />
             </span>
             <h2 className="text-xl font-black text-white">Recuperar Contraseña</h2>
-            <p className="text-xs text-slate-400">Verifica con {BIO_METHOD_LABEL} y crea una nueva contraseña.</p>
+            <p className="text-xs text-slate-400">Ingresa tu teléfono de administrador y crea una nueva contraseña.</p>
           </div>
 
           {recoverStep === 'phone' && (
@@ -4473,7 +4487,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                 onClick={startRecovery}
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-bold text-sm hover:from-amber-400 hover:to-rose-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
               >
-Verificar con {BIO_METHOD_LABEL}
+                Continuar
               </button>
             </div>
           )}

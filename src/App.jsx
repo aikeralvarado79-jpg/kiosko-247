@@ -1279,7 +1279,12 @@ export default function App() {
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
-    if (Array.isArray(res.data.adminPhones)) setAdminPhones(res.data.adminPhones);
+    // Unión de teléfonos admin: los fijos del cliente + los que envía el servidor
+    // (env, config o empleados añadidos). El servidor puede devolver lista vacía
+    // si no tiene ADMIN_PHONES configurado; no debe borrarse el fallback local.
+    if (Array.isArray(res.data.adminPhones)) {
+      setAdminPhones([...new Set([...ADMIN_PHONES, ...res.data.adminPhones])]);
+    }
     hasDataRef.current = true;
     setIsLoading(false);
   }, [clientId, isAdminAuthed]);

@@ -3,6 +3,8 @@
 App de kiosco con catálogo, pedidos con retiro o envío, y panel de administración. Frontend React + Vite, backend Express, persistencia en Postgres (Neon) con fallback local a archivo y Supabase como respaldo.
 
 **Producción:** https://kiosko-247.onrender.com
+**Calidad (staging):** https://kiosko-247-staging.onrender.com (despliega `develop`)
+**Desarrollo (dev):** https://kiosko-247-dev.onrender.com (arena para refactors grandes)
 
 ## Stack
 
@@ -99,6 +101,30 @@ npm run check        # lint + test + build (gate de calidad local)
 - **Ramas:** los cambios van por PR a `develop` y de ahí a `main`. `main` protegida (sin push directo).
 - **Tests:** `server/store.test.js` (stock/cancelación/eliminación de pedidos), `server/rate.test.js` (tasa BCV con fallbacks) y `src/data.test.js` (helpers). Los tests usan un archivo temporal (`KIOSKO_DATA_FILE`) para no tocar `server/data.json`.
 - Antes de pushear: `npm run check`.
+
+## Ambientes
+
+| Ambiente    | Servicio Render          | Rama      | Neon schema          | Datos                                            |
+| ----------- | ------------------------ | --------- | -------------------- | ------------------------------------------------ |
+| Producción  | `kiosko-247`             | `main`    | `public`             | Reales (se escribe/lee aquí)                     |
+| Calidad     | `kiosko-247-staging`     | `develop` | `staging`            | Espejo automático `public → staging`             |
+| Desarrollo  | `kiosko-247-dev`         | `develop` (cambiable) | `dev` | Espejo automático `public → dev`                 |
+
+**Ambiente de desarrollo** (agregado para el refactor de `App.jsx`): arena aislada
+donde probar cambios grandes sin riesgo para calidad ni producción. Comparte la
+misma Neon pero opera solo sobre el schema `dev` (`KIOSKO_DB_SCHEMA=dev`), con
+espejo automático `public → dev` cada hora (`KIOSKO_REFRESH_INTERVAL_MS=3600000`)
+igual que staging. Para validar un refactor:
+
+1. Pusheá la rama del PR (`git push origin mi-rama`).
+2. En el dashboard de Render → `kiosko-247-dev` → **Deploy** → **Branch**, elegí la
+   rama del PR (Render usa el último commit de esa rama).
+3. Probá la UI en `https://kiosko-247-dev.onrender.com` con los datos reales espejados.
+4. Solo cuando no se perdió nada: merge a `develop` (calidad) y de ahí a `main` (producción).
+
+> **Horas del plan free:** los tres servicios comparten las horas gratuitas de la
+> cuenta de Render. Apagá `kiosko-247-dev` cuando no lo uses (el espejo igual se
+> rellena al volver a encenderlo o en el próximo refresco horario).
 
 ## Estructura
 

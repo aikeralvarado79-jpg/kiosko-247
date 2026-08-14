@@ -2182,6 +2182,14 @@ if (fileStore) fileStore.load();
 
 export async function initStore() {
   if (pgPool) {
+    // Bootstrap del schema aislado (staging/dev). En el primer deploy el schema
+    // no existe todavía (refreshMirror lo crea, pero corre después de ensureSchema),
+    // así que se crea aquí para que CREATE TABLE IF NOT EXISTS no falle.
+    if (DB_SCHEMA !== 'public') {
+      await retryingQuery(pgPool, `CREATE SCHEMA IF NOT EXISTS ${DB_SCHEMA}`).catch((err) =>
+        console.warn('[kiosko] No se pudo crear el schema:', err.message)
+      );
+    }
     await pgStore.ensureSchema();
     await pgStore.seedIfEmpty();
     await applyPgMigrations();

@@ -16,6 +16,17 @@ const app = express();
 app.use(express.json({ limit: '8mb' }));
 app.use(compression());
 
+// Log de cada request con request-id, latencia y status. Consola de Render.
+app.use((req, res, next) => {
+  req.id = crypto.randomUUID().slice(0, 8);
+  const start = Date.now();
+  res.on('finish', () => {
+    const ms = Date.now() - start;
+    console.log(`[kiosko] ${req.id} ${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms`);
+  });
+  next();
+});
+
 let config = {};
 try {
   config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')) || {};
@@ -62,6 +73,59 @@ const signToken = (payload) => {
   const sig = crypto.createHmac('sha256', adminPassword).update(data).digest('base64url');
   return `${data}.${sig}`;
 };
+
+// ---- Hash de contraseñas admin con scrypt (Node nativo, sin dependencias) ----
+// Reemplaza el sha256(salt+pass) original. scrypt es resistente a fuerza bruta
+// (memoria + CPU + salt por credencial). El formato viejo se acepta al
+// verificar y se migra solo a scrypt en la próxima contraseña válida.
+const SCRYPT_KEYLEN = 64;
+
+function hashScrypt(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, SCRYPT_KEYLEN).toString('hex');
+  return { salt, hash };
+}
+
+function verifyScrypt(salt, hash, input) {
+  try {
+    const derived = crypto.scryptSync(String(input), String(salt), SCRYPT_KEYLEN);
+    const expected = Buffer.from(hash, 'hex');
+    return derived.length === expected.length && crypto.timingSafeEqual(derived, expected);
+  } catch {
+    return false;
+  }
+}
+
+// ---- Rate limiting por IP y por teléfono (en memoria) ----
+// Render free es un único dyno, por lo que el contador en memoria es exacto y
+// no hace falta un servicio externo. Frena fuerza bruta en login y recuperación.
+const loginAttempts = new Map(); // `ip:${ip}` | `ph:${phone}` -> { count, resetAt }
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+const RATE_MAX = 8;
+
+function consumeRateKey(key) {
+  const now = Date.now();
+  let rec = loginAttempts.get(key);
+  if (!rec || rec.resetAt <= now) {
+    rec = { count: 0, resetAt: now + RATE_WINDOW_MS };
+    loginAttempts.set(key, rec);
+  }
+  rec.count += 1;
+  if (rec.count > RATE_MAX) return true;
+  setTimeout(() => {
+    if (loginAttempts.get(key) === rec && rec.count >= RATE_MAX) loginAttempts.delete(key);
+  }, RATE_WINDOW_MS + 1000).unref?.();
+  return false;
+}
+
+function resetRateKey(key) {
+  loginAttempts.delete(key);
+}
+
+function rateLimited(ip, phone) {
+  const labels = [phone, ip].filter(Boolean);
+  return labels.some((l) => consumeRateKey(l));
+}
 
 const verifyToken = (token) => {
   const [data, sig] = String(token).split('.');
@@ -143,16 +207,26 @@ async function verifyAdminPassword(phone, input) {
   if (key && allPhones.includes(key)) {
     const cred = await store.getAdminCredential(key);
     if (cred && cred.salt && cred.hash) {
-      const hash = crypto.createHash('sha256').update(cred.salt + input).digest('hex');
-      if (hash === cred.hash) return true;
+      // Formato nuevo (scrypt).
+      if (verifyScrypt(cred.salt, cred.hash, input)) return true;
+      // Formato legacy sha256: se acepta una única vez y se migra a scrypt.
+      const legacy = crypto.createHash('sha256').update(cred.salt + input).digest('hex');
+      if (legacy === cred.hash) {
+        await store.setAdminCredential(key, hashScrypt(input)).catch(() => {});
+        return true;
+      }
     }
   }
   if (input === adminPassword) return true;
   // Último recurso: override compartido legacy guardado en el store.
   const legacy = await store.getAdminPassword();
   if (legacy && legacy.salt && legacy.hash) {
-    const hash = crypto.createHash('sha256').update(legacy.salt + input).digest('hex');
-    return hash === legacy.hash;
+    if (verifyScrypt(legacy.salt, legacy.hash, input)) return true;
+    const legacyHash = crypto.createHash('sha256').update(legacy.salt + input).digest('hex');
+    if (legacyHash === legacy.hash) {
+      await store.setAdminPassword(hashScrypt(input)).catch(() => {});
+      return true;
+    }
   }
   return false;
 }
@@ -201,12 +275,18 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { phone, password } = req.body || {};
     const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const ip = req.ip || req.socket?.remoteAddress || '';
+    if (key && rateLimited(ip, key)) {
+      return res.status(429).json({ error: 'Demasiados intentos fallidos. Esperá unos minutos y volvé a intentar.' });
+    }
     const allPhones = await getAllAdminPhones();
     if (key && !allPhones.includes(key)) {
       return res.status(401).json({ error: 'Ese número no tiene acceso al panel' });
     }
     const ok = await verifyAdminPassword(key || phone, password);
     if (!ok) return res.status(401).json({ error: 'Contraseña incorrecta' });
+    resetRateKey(key);
+    if (ip) resetRateKey(ip);
     const role = SUPER_ADMIN_PHONES.includes(key) ? 'superadmin' : 'admin';
     const token = signToken({ role, phone: key || '', iat: Date.now() });
     const hash = sha256(token);
@@ -223,6 +303,10 @@ app.post('/api/auth/recover', async (req, res) => {
   try {
     const { phone, response, newPassword } = req.body || {};
     const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const ip = req.ip || req.socket?.remoteAddress || '';
+    if (key && rateLimited(ip, key)) {
+      return res.status(429).json({ error: 'Demasiados intentos fallidos. Esperá unos minutos y volvé a intentar.' });
+    }
     if (!ADMIN_PHONES.includes(key)) {
       return res.status(403).json({ error: 'Este número no es administrador' });
     }
@@ -233,9 +317,10 @@ app.post('/api/auth/recover', async (req, res) => {
     if (!v.ok) {
       return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
     }
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.createHash('sha256').update(salt + newPassword).digest('hex');
-    await store.setAdminCredential(key, { salt, hash });
+    const entry = hashScrypt(newPassword);
+    await store.setAdminCredential(key, entry);
+    resetRateKey(key);
+    if (ip) resetRateKey(ip);
     res.json({ ok: true });
   } catch (err) {
     fail(res, err, 'No se pudo recuperar la contraseña. Intenta de nuevo.');
@@ -262,9 +347,8 @@ app.post('/api/auth/change-password', requireAdmin, async (req, res) => {
     }
     const ok = await verifyAdminPassword(phone, currentPassword || '');
     if (!ok) return res.status(401).json({ error: 'La contraseña actual no es correcta' });
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.createHash('sha256').update(salt + newPassword).digest('hex');
-    await store.setAdminCredential(phone, { salt, hash });
+    const entry = hashScrypt(newPassword);
+    await store.setAdminCredential(phone, entry);
     res.json({ ok: true });
   } catch (err) {
     fail(res, err, 'No se pudo cambiar la contraseña. Intenta de nuevo.');
@@ -1411,10 +1495,90 @@ function scheduleAutoRefresh() {
   console.log(`[kiosko] Refresco automático del espejo cada ${interval} ms`);
 }
 
+// ---- Salud y observabilidad (gratis, sin servicios externos) ----
+
+// Pasivo: el proceso está vivo. Sirve para el healthcheck de Render.
+app.get('/healthz', (req, res) => {
+  res.json({ ok: true, uptime: Math.round(process.uptime()) });
+});
+
+// Activo: además valida que la base responde (SELECT 1). Si Neon está en
+// auto-pause, este endpoint devuelve 503 hasta que la conexión revive.
+app.get('/readyz', async (req, res) => {
+  try {
+    if (store.isMirrorEnabled()) await store.pingDb();
+    res.json({ ok: true, db: 'up' });
+  } catch (err) {
+    res.status(503).json({ ok: false, db: 'down', lastPoolError: store.getLastPoolError()?.message || err.message });
+  }
+});
+
+// Métricas internas (solo admin): conteos por tabla, memoria, uptime. Sirve
+// para vigilar el crecimiento de la base (clave con el límite de 0.5 GB).
+app.get('/api/health/metrics', requireAdmin, async (req, res) => {
+  try {
+    res.json(await store.getMetrics());
+  } catch (err) {
+    fail(res, err, 'No se pudieron obtener las métricas.');
+  }
+});
+
+// Reporte de errores del frontend: el navegador manda los errores no capturados
+// (se guardan en un ring buffer y se loguean). Sin datos personales.
+const reportedErrors = [];
+app.post('/api/errors', (req, res) => {
+  const { error, message, stack, url } = req.body || {};
+  const entry = {
+    message: String((error?.message || message) || '').slice(0, 500),
+    stack: String((error?.stack || stack) || '').slice(0, 2000),
+    url: String((error?.url || url) || '').slice(0, 500),
+    at: new Date().toISOString()
+  };
+  if (entry.message || !Array.isArray(req.body)) {
+    console.error(`[kiosko] Error reportado por el navegador: ${entry.message} (${entry.url})`);
+    reportedErrors.push(entry);
+    if (reportedErrors.length > 200) reportedErrors.shift();
+  }
+  res.json({ ok: true });
+});
+
+app.get('/api/errors', requireAdmin, (req, res) => res.json({ errors: reportedErrors }));
+
+// ---- Apagado ordenado (SIGTERM/SIGINT) e integridad del proceso ----
+// Render manda SIGTERM en cada redeploy y espera ~30 s. Cerramos el server y el
+// pool para no colgar conexiones ni dejar estados a medias.
+let server = null;
+
+async function shutdown(reason) {
+  console.log(`[kiosko] Apagando (${reason})...`);
+  const timeout = setTimeout(() => process.exit(1), 8000);
+  timeout.unref();
+  try {
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+    }
+    await store.closePool();
+  } catch (err) {
+    console.error('[kiosko] Error durante el apagado:', err.message);
+  } finally {
+    process.exit(0);
+  }
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('unhandledRejection', (reason) => {
+  console.error('[kiosko] Promesa no manejada:', reason instanceof Error ? reason.stack || reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[kiosko] Excepción no capturada:', err.stack || err.message);
+  shutdown('uncaughtException');
+});
+
 store.initStore().then(async () => {
   scheduleAutoRefresh();
   await push.ensureVapid().catch((err) => console.warn('[kiosko] VAPID no listo:', err.message));
-  app.listen(PORT, () => {
+  server = app.listen(PORT, () => {
     console.log(`[kiosko] Servidor corriendo en http://localhost:${PORT}`);
   });
 }).catch((err) => {

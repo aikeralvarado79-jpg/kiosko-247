@@ -147,6 +147,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
        </>
       ),
       mic: <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />,
+      volume2: <path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6" />,
       share2: <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" />,
       barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
       star: <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />,
@@ -3636,6 +3637,8 @@ export default function App() {
           promos={promos}
           rate={rate}
           savedCustomer={savedCustomer}
+          storeLocation={storeLocation}
+          cartCount={cartCount}
           headerHeight={headerHeight}
           onClose={() => setIsAikerOpen(false)}
           onOpenDebt={() => {
@@ -3655,6 +3658,14 @@ export default function App() {
           onRepeatLastOrder={() => {
             setIsAikerOpen(false);
             handleRepeatLastOrder();
+          }}
+          onOpenCart={() => {
+            setIsAikerOpen(false);
+            setIsCartOpen(true);
+          }}
+          onOpenCheckout={() => {
+            setIsAikerOpen(false);
+            setIsCheckoutOpen(true);
           }}
         />
       )}
@@ -16973,6 +16984,102 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
 // Asistente IA "Don Aiker": chat que responde con datos reales del negocio
 // (deuda, pedidos, promos, tasa, productos) usando reglas locales sin API.
 // ============================================================================
+
+// Normaliza texto para matching tolerante: minúsculas, sin acentos, sin puntuación.
+const normalizeAiText = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+// Sinónimos comunes de productos para la búsqueda con partial match.
+const PRODUCT_SYNONYMS = {
+  gaseosa: ['coca', 'pepsi', 'sprite', 'cola', 'chicha', 'jugo', 'refresco'],
+  agua: ['agua', 'mineral'],
+  pan: ['pan', 'tostada', 'bimbo', 'integral'],
+  galleta: ['galleta', 'cookie', 'dulce'],
+  cafe: ['cafe', 'capuchino', 'express', 'nescafe'],
+  chocolate: ['chocolate', 'sublime', 'nutella'],
+  arroz: ['arroz', 'integral'],
+  aceite: ['aceite', 'vegetal', 'oliva'],
+  azucar: ['azucar', 'endulzante', 'stevia'],
+  harina: ['harina', 'maiz', 'pan'],
+  pasta: ['pasta', 'fideo', 'espagueti', 'tallarin'],
+  cerveza: ['cerveza', 'polar', 'solera', 'zulia'],
+  jugo: ['jugo', 'nectar', 'caja'],
+  leche: ['leche', 'evaporada', 'entera', 'descremada'],
+  queso: ['queso', 'fresco', 'guayanés', 'país'],
+  refresco: ['refresco', 'cola', 'cloro', 'pepsi', 'hit'],
+  jabon: ['jabon', 'aseo', 'tocador', 'lavanderia'],
+  cloro: ['cloro', 'lejia', 'limpieza'],
+  pañal: ['pañal', 'pnial', 'panal', 'bebe'],
+  papel: ['papel', 'toalla', 'higienico', 'servilleta'],
+  velas: ['velas', 'vela'],
+  hielo: ['hielo', 'helado']
+};
+
+// Obtiene matches del texto contra el catálogo con scoring: nombre completo,
+// primera palabra, cualquier token y sinónimos. Devuelve hasta `limit`.
+function matchAiProducts(products, query, limit = 4) {
+  if (!Array.isArray(products) || products.length === 0) return [];
+  const q = normalizeAiText(query);
+  if (!q) return [];
+  const tokens = q.split(' ').filter((t) => t.length > 1);
+  const scored = (products || [])
+    .filter((p) => p && p.name)
+    .map((p) => {
+      const n = normalizeAiText(p.name);
+      const nameTokens = n.split(' ').filter((t) => t.length > 1);
+      let score = 0;
+      if (n === q) score += 100;
+      else if (n.includes(q)) score += 70;
+      else if (tokens.length && tokens.some((t) => nameTokens.some((nt) => nt === t))) score += 50;
+      // partial match por token
+      tokens.forEach((t) => {
+        if (nameTokens.some((nt) => nt.startsWith(t) || nt.includes(t) || t.startsWith(nt))) score += 20;
+      });
+      // sinónimos: cada keyword del diccionario que aparezca aporta por sus variantes
+      Object.entries(PRODUCT_SYNONYMS).forEach(([kw, alts]) => {
+        if (q.includes(kw) || kw.includes(q.slice(0, 3))) {
+          alts.forEach((alt) => {
+            if (n.includes(alt)) score += 25;
+          });
+        }
+      });
+      return { p, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((x) => x.p);
+}
+
+// Lee la respuesta del asistente en voz alta (TTS).
+const sayAi = (text) => speakText(text);
+
+// Bienvenida proactiva contextual según lo que el cliente tiene en curso.
+function buildAiWelcome(params) {
+  const { name, activePromos, pendingOrder, balance } = params || {};
+  const parts = [`¡Hola${name ? `, ${name}` : ''}! Soy Don Aiker, el asistente del kiosko 📣`];
+  if (Array.isArray(activePromos) && activePromos.length) {
+    const n = activePromos.length;
+    parts.push(`Mira, hoy hay ${n} promo${n > 1 ? 's' : ''} activa${n > 1 ? 's' : ''} 🎉.`);
+  }
+  if (pendingOrder) {
+    const label =
+      pendingOrder.status === 'en_camino'
+        ? 'tu pedido está en camino, seguilo abajo 🛵'
+        : `tienes ${pendingOrder.id} en curso (${STATUS_LABELS[pendingOrder.status] || pendingOrder.status})`;
+    parts.push(label);
+  } else if (balance > 0) {
+    parts.push(`Recuerda que tienes ${formatUsd(balance)} de deuda pendiente.`);
+  }
+  parts.push('Toca una pregunta rápida o pide un producto. Puedo contarte tu deuda, tus pedidos, las promos, la tasa y agregar al carrito. 😊');
+  return parts.join('\n');
+}
+
 function AikerAssistant({
   customer,
   customerOrders,
@@ -16980,33 +17087,53 @@ function AikerAssistant({
   promos,
   rate,
   savedCustomer,
+  storeLocation,
+  cartCount = 0,
   headerHeight = 0,
   onClose,
   onOpenDebt,
   onOpenOrders,
   onTrackOrder,
   onAddToCart,
-  onRepeatLastOrder
+  onRepeatLastOrder,
+  onOpenCart,
+  onOpenCheckout
 }) {
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState(() => [
     {
       from: 'ai',
-      text: '¡Hola! Soy Don Aiker, el asistente del kiosko. Toca una pregunta rápida o pide un producto para agregarlo al carrito. Puedo contarte tu deuda, tus pedidos, las promos y la tasa del día. 😊'
+      text: (() => {
+        const bal = Number(customer?.balance) || 0;
+        const ordinal = customer ? normalizePhoneDigits(customer.phone) : null;
+        const ords = (customerOrders || []).filter((o) => (ordinal ? normalizePhoneDigits(o.phone) === ordinal : true));
+        const pend = ords.find((o) => !['entregado', 'cancelado'].includes(o.status)) || null;
+        const active = (promos || []).filter((p) => p.active);
+        const firstName = customer?.customerName?.split(' ')[0] || savedCustomer?.customerName?.split(' ')[0] || '';
+        return buildAiWelcome({ name: firstName, activePromos: active, pendingOrder: pend, balance: bal });
+      })()
     }
   ]);
   const [thinking, setThinking] = useState(false);
-  // Acción profunda asociada a la última respuesta del asistente (botón debajo
-  // del mensaje): ver deuda, seguir pedido, repetir pedido o agregar al carrito.
   const [action, setAction] = useState(null);
+  const [followUps, setFollowUps] = useState([]);
   const [draft, setDraft] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [listening, setListening] = useState(false);
+  const [speechOn, setSpeechOn] = useState(false);
+  const [escalated, setEscalated] = useState(false);
+  const [liveOrder, setLiveOrder] = useState(null);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+  const recRef = useRef(null);
+  const replyTimerRef = useRef(null);
 
   useOverlay(true, onClose);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, thinking]);
+  }, [messages, thinking, liveOrder]);
+
+  useEffect(() => () => clearTimeout(replyTimerRef.current), []);
 
   const balance = Number(customer?.balance) || 0;
   const name = customer?.customerName?.split(' ')[0] || savedCustomer?.customerName?.split(' ')[0] || 'cliente';
@@ -17030,119 +17157,296 @@ function AikerAssistant({
       .slice(0, 3);
   }, [products, customerOrders]);
 
+  // Preguntas rápidas base (según el estado real del cliente).
   const baseReplies = ['¿Cuánto debo?', '¿Dónde está mi pedido?', 'Promos activas', '¿Cuál es la tasa?'];
   const quickReplies = myOrders.length ? [...baseReplies, 'Repetir mi último pedido'] : baseReplies;
 
-  // Responde una pregunta y adosale una acción profunda cuando corresponde.
+  const appendAi = (text) => setMessages((m) => [...m, { from: 'ai', text }]);
+
+  // Detector de intención: scoring sobre texto normalizado en vez de solo
+  // keywords crudas. Calcula un puntaje por categoría y gana la mejor reunión.
   const respond = (q) => {
-    const t = q.toLowerCase();
-    // Saludos
-    if (/hola|buenas|saludos|hey|qué tal|que tal|^hi|^hello/.test(t)) {
+    const raw = String(q || '').trim();
+    const t = normalizeAiText(raw);
+    if (!t) return null;
+
+    // ---- Detección de productos (siempre primero: "agregar milka") ----
+    const matches = matchAiProducts(products, raw, 4);
+    const isProductIntent = /(agregar|quiero|una|un|hnos|da|pide|hay |quiere|cuesta|precio)/.test(t) || !!matches.length;
+    if (matches.length) {
+      if (matches.length === 1) {
+        const prod = matches[0];
+        const avail = Math.max(0, Number(prod.stock) - Number(prod.reserved || 0));
+        const priceBs = rate?.rate > 0 ? ` (${formatBs(usdToBs(prod.price, rate.rate))})` : '';
+        return {
+          text: `Encontré "${prod.name}" a ${formatUsd(prod.price)}${priceBs}${
+            avail > 0 ? ` con ${avail} ${avail === 1 ? 'unidad' : 'unidades'} en stock` : ', pero está agotado por ahora'
+          }.`,
+          action: avail > 0 ? { kind: 'product', product: prod, label: 'Agregar al carrito', icon: 'plus' } : null,
+          followUps: [
+            ...(cartCount > 0 ? ['Ver mi carrito'] : []),
+            ...(avail > 0 ? ['Agregar y pagar'] : []),
+            'Ver promos activas'
+          ]
+        };
+      }
+      // varios matches → mostrar lista con botón por cada producto
+      const lines = matches
+        .map((p, i) => `${i + 1}. ${p.name} — ${formatUsd(p.price)}`)
+        .join('\n');
       return {
-        text: `¡Hola${name !== 'cliente' ? `, ${name}` : ''}! Soy Don Aiker 🤖 ¿En qué te ayudo hoy? Toca abajo para ver tu deuda, tus pedidos, las promos activas, la tasa del día o agregar un producto.`
+        text: `Encontré varias opciones:\n${lines}\n¿Cuál te agrego?`,
+        action: matches.map((p) => ({
+          kind: 'product',
+          product: p,
+          label: p.name.split(' ').slice(0, 2).join(' '),
+          icon: 'plus'
+        })),
+        followUps: [...(cartCount > 0 ? ['Ver mi carrito'] : []), 'Ver promos activas']
       };
     }
-    // Deuda / saldo / fiado
-    if (/deuda|debo|adeudo|saldo|fiado|cr[eé]dito|c[uú]anto pag|deber|pendiente/.test(t)) {
+    if (isProductIntent && products && products.length > 0 && /(agregar|hay |busca)/.test(t)) {
+      return {
+        text: 'Todavía no encuentro ese producto por nombre. Probá con otro nombre o decime la categoría (ej. "gaseosas", "galletas"). También podés ver todo el catálogo arriba 🔍.',
+        followUps: ['Ver promos activas', '¿Qué venden?']
+      };
+    }
+
+    // ---- Saludo ----
+    if (/^(hola|buenas|saludos|hey|que tal|buen dia|buenas tardes|buenas noches|hi|hello)/.test(t)) {
+      return {
+        text: `¡Hola${name !== 'cliente' ? `, ${name}` : ''}! Soy Don Aiker 🤖 ¿En qué te ayudo hoy? Tocá abajo tu deuda, tus pedidos, las promos, la tasa o un producto.`,
+        followUps: quickReplies.slice(0, 4)
+      };
+    }
+
+    // ---- Deuda / saldo / fiado (atención por pasos para fiado) ----
+    const debtIntent = /(deud|debo|adeudo|adeudar|saldo|fiado|credito|cuanto pag|deber|pendiente|abon)/.test(t);
+    if (debtIntent) {
       if (!customer) {
-        return { text: 'Aún no estás identificado. Identifícate con tu número para ver tu deuda y saldo a favor.' };
-      }
-      if (balance > 0) {
         return {
-          text: `Tienes ${formatUsd(balance)} de deuda pendiente.${
-            rate?.rate > 0 ? ` Equivale a ${formatBs(usdToBs(balance, rate.rate))} a la tasa del día (Bs ${Number(rate.rate).toFixed(2)}).` : ''
-          }\nPuedes abonar desde tu cuenta.`,
-          action: { kind: 'debt', label: 'Ver mi deuda', icon: 'creditCard' }
+          text: 'Aún no estás identificado. Identifícate con tu número en la tienda para ver tu deuda, tu saldo y tu fiado.',
+          followUps: ['Mis pedidos', 'Promos activas']
+        };
+      }
+      const isBenefited = Boolean(customer.isBenefited);
+      const creditLimit = Number(customer.creditLimit) || 0;
+      const creditInUse = isBenefited && creditLimit > 0 ? Math.min(100, (Math.max(0, balance) / creditLimit) * 100) : 0;
+
+      if (balance > 0) {
+        const detail = balanceDetail();
+        const head = `Tienes ${formatUsd(balance)} de deuda pendiente.${rate?.rate > 0 ? ` Son ${formatBs(usdToBs(balance, rate.rate))} a la tasa de hoy (Bs ${Number(rate.rate).toFixed(2)}).` : ''}`;
+        const text = isBenefited && creditLimit > 0
+          ? `${head}\n\nComo beneficiado tienes fiado disponible: usaste ${Math.round(creditInUse)}% de tu tope (${formatUsd(creditLimit)}).\n\nPasos para estar al día:\n1️⃣ Tocá "Abonar ahora" y sube tu comprobante.\n2️⃣ O pásate al kiosko a saldar en efectivo.\n\n${detail}`
+          : `${head}\n\nPasos para estar al día:\n1️⃣ Tocá "Abonar ahora" y sube tu comprobante.\n2️⃣ O pásate al kiosko a saldar en efectivo.\n\n${detail}`;
+        return {
+          text,
+          action: [
+            { kind: 'debt', label: 'Ver mi deuda desglosada', icon: 'creditCard' },
+            { kind: 'debt-whatsapp', label: 'Enviar cuenta por WhatsApp', icon: 'whatsapp' }
+          ],
+          followUps: [
+            ...(isBenefited && creditLimit > 0 ? [`Uso del fiado ${Math.round(creditInUse)}%`] : []),
+            'Mis pedidos',
+            'Promos activas'
+          ]
         };
       }
       if (balance < 0) {
         return {
-          text: `Tienes ${formatUsd(Math.abs(balance))} a tu favor en tu cartera 🎉. Al pagar tu próximo pedido elige "Mi Cartera" para usarlo.`,
-          action: { kind: 'debt', label: 'Ver mi saldo', icon: 'wallet' }
+          text: `Tienes ${formatUsd(Math.abs(balance))} a tu favor en tu cartera 🎉. Al pagar tu próximo pedido elegí "Mi Cartera" para usarlo.`,
+          action: { kind: 'debt', label: 'Ver mi saldo', icon: 'wallet' },
+          followUps: ['Ver promos activas', '¿Dónde está mi pedido?']
         };
       }
-      return { text: '¡Estás al día! No tienes deudas pendientes ni saldo a favor.' };
+      if (isBenefited && creditLimit > 0) {
+        return {
+          text: `¡Estás al día! ✅ Como beneficiado tienes ${formatUsd(creditLimit)} de fiado disponible (usaste ${Math.round(creditInUse)}%). Podés pedir a cuenta desde el carrito eligiendo "Sumar a mi cuenta".`,
+          followUps: ['Ver promos activas', '¿Qué venden?']
+        };
+      }
+      return {
+        text: '¡Estás al día! No tienes deudas pendientes ni saldo a favor.',
+        followUps: ['Ver promos activas', '¿Cuál es la tasa?']
+      };
     }
-    // Pedidos / rastreo
-    if (/pedido|orden|rastr|d[oó]nde est[aá]|en camino|entrega|estado/.test(t)) {
+
+    // ---- Pedidos / rastreo (progreso en vivo) ----
+    if (/pedido|orden|rastr|donde esta|en camino|entrega|estado|lleg|seguir|seguimiento|d[oó]nde/.test(t)) {
       if (myOrders.length === 0) {
-        return { text: 'Aún no tienes pedidos registrados con tu número. ¡Haz tu primer pedido en la tienda!' };
+        return {
+          text: 'Aún no tienes pedidos registrados con tu número. ¡Haz tu primer pedido en la tienda!',
+          followUps: ['¿Qué venden?', 'Promos activas']
+        };
       }
       const pending = myOrders.find((o) => !['entregado', 'cancelado'].includes(o.status));
       if (pending) {
+        const label =
+          pending.status === 'pendiente' ? 'pendiente de confirmar'
+            : pending.status === 'en_preparacion' ? 'en preparación'
+              : pending.status === 'listo' ? 'listo para retirar'
+                : pending.status === 'en_camino' ? 'en camino 🛵' : pending.status;
         return {
-          text: `Tu último pedido ${pending.id} está ${
-            pending.status === 'pendiente' ? 'pendiente de confirmar' : pending.status === 'preparando' ? 'en preparación' : pending.status === 'en_camino' ? 'en camino 🛵' : pending.status
-          }.\nSeguilo en vivo o revisalo en "Mis Pedidos".`,
+          text: `Tu pedido ${pending.id} está ${label} (${STATUS_LABELS[pending.status] || pending.status}).\nTe muestro el avance en vivo acá abajo.`,
           action:
             pending.type === 'delivery' && pending.status === 'en_camino'
-              ? { kind: 'track', order: pending, label: 'Seguir mi pedido', icon: 'navigation' }
-              : { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' }
+              ? { kind: 'track', order: pending, label: 'Abrir seguimiento completo', icon: 'navigation' }
+              : { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' },
+          liveOrder: pending,
+          followUps: ['Repetir mi último pedido', 'Promos activas']
         };
       }
       const latest = myOrders[0];
       return {
-        text: `Tu último pedido ${latest.id} fue entregado ✅.`,
-        action: { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' }
+        text: `Tu último pedido ${latest.id} fue entregado ✅. ¿Quieres repetirlo?`,
+        action: { kind: 'repeat', label: 'Repetir último pedido', icon: 'refresh' },
+        followUps: ['Ver promos activas', 'Mis pedidos']
       };
     }
-    // Repetir último pedido
-    if (/repetir|repite|de nuevo/.test(t)) {
+
+    // ---- Repetir último pedido ----
+    if (/repetir|repite|de nuevo|otra vez|de nuevo el pedido/.test(t)) {
       if (myOrders.length === 0) {
-        return { text: 'No encontré pedidos anteriores para repetir. ¡Haz tu primer pedido en la tienda!' };
+        return {
+          text: 'No encontré pedidos anteriores para repetir. ¡Haz tu primer pedido en la tienda!',
+          followUps: ['¿Qué venden?']
+        };
       }
       return {
         text: 'Voy a cargar los artículos de tu último pedido en el carrito 🛒.',
-        action: { kind: 'repeat', label: 'Repetir último pedido', icon: 'refresh' }
+        action: { kind: 'repeat', label: 'Repetir último pedido', icon: 'refresh' },
+        followUps: [...(cartCount > 0 ? ['Ver mi carrito', 'Ir a pagar'] : [])]
       };
     }
-    // Promos / ofertas
-    if (/promo|oferta|descuento|rebaja|especial|combos|barato/.test(t)) {
+
+    // ---- Promos / ofertas ----
+    if (/promo|oferta|descuento|rebaja|especial|combos|2x1|barato/.test(t)) {
       if (activePromos.length === 0) {
-        return { text: 'Hoy no hay promos activas, pero te recomiendo revisar el Radar de Novedades por los productos nuevos.' };
+        return {
+          text: 'Hoy no hay promos activas, pero te recomiendo revisar el catálogo por los productos nuevos.',
+          followUps: ['¿Qué venden?', '¿Cuál es la tasa?']
+        };
       }
       const lines = activePromos.map((p, i) => `${i + 1}. ${p.title}${p.subtitle ? ` — ${p.subtitle}` : ''}`).join('\n');
-      return { text: `¡Hay ${activePromos.length} promo${activePromos.length > 1 ? 's' : ''} activa${activePromos.length > 1 ? 's' : ''}! 🎉\n${lines}` };
-    }
-    // Tasa / dólar / bolívar
-    if (/tasa|d[oó]lar|dolar|bol[ií]var|bs|bcv|divisa|cambio/.test(t)) {
-      if (rate?.rate > 0) {
-        return { text: `La tasa del día es Bs ${Number(rate.rate).toFixed(2)} por dólar. Por ejemplo, $10 serían ${formatBs(usdToBs(10, rate.rate))}.` };
-      }
-      return { text: 'Aún no tenemos la tasa del día disponible. Intenta de nuevo en unos minutos.' };
-    }
-    // Producto específico (por nombre completo o primera palabra). Se evalúa
-    // ANTES del catálogo genérico para que "agregar milka" o "hay cocacola"
-    // aterricen en el producto con acción "Agregar al carrito".
-    const prodList = Array.isArray(products) ? products : [];
-    const product =
-      prodList.find((p) => p.name && t.includes(p.name.toLowerCase())) ||
-      prodList.find((p) => p.name && t.includes(p.name.toLowerCase().split(' ')[0]));
-    if (product) {
-      const avail = Math.max(0, Number(product.stock) - Number(product.reserved || 0));
       return {
-        text: `"${product.name}" está disponible a ${formatUsd(product.price)}${
-          avail > 0 ? ` con ${avail} ${avail === 1 ? 'unidad' : 'unidades'} en stock` : ', agotado por ahora'
-        }.`,
-        action: avail > 0 ? { kind: 'product', product, label: 'Agregar al carrito', icon: 'plus' } : null
+        text: `¡Hay ${activePromos.length} promo${activePromos.length > 1 ? 's' : ''} activa${activePromos.length > 1 ? 's' : ''}! 🎉\n${lines}`,
+        followUps: ['¿Qué venden?', ...(myOrders.length ? ['Repetir mi último pedido'] : [])]
       };
     }
-    // Productos / catálogo
-    if (/qu[eé] venden|producto|c[aá]talogo|tienes|disponible|vendes|hay de|agregar/.test(t)) {
-      if (!Array.isArray(products) || products.length === 0) return { text: 'Ahora mismo el catálogo está cargando. Intenta en un momento.' };
+
+    // ---- Tasa / dólar / bolívar ----
+    if (/tasa|dolar|bolivar|bs |bcv|divisa|cambio|cuanto esta el/.test(t)) {
+      if (rate?.rate > 0) {
+        return {
+          text: `La tasa del día es Bs ${Number(rate.rate).toFixed(2)} por dólar. Por ejemplo, $10 serían ${formatBs(usdToBs(10, rate.rate))} y $50 serían ${formatBs(usdToBs(50, rate.rate))}.`,
+          followUps: ['Promos activas', 'Ver promos activas']
+        };
+      }
+      return {
+        text: 'Aún no tenemos la tasa del día disponible. Volvé a preguntar en unos minutos o revisa la barra de la tienda.',
+        followUps: ['Promos activas', '¿Qué venden?']
+      };
+    }
+
+    // ---- Productos / catálogo ----
+    if (/qu[eé] venden|producto|catalogo|tienes|disponible|vendes|hay de|que hay/.test(t)) {
+      if (!Array.isArray(products) || products.length === 0) {
+        return {
+          text: 'Ahora mismo el catálogo está cargando. Intenta en un momento o mira la barra superior 🔍.',
+          followUps: ['Promos activas']
+        };
+      }
       const cats = [...new Set(products.map((p) => p.category || 'Otros'))];
-      return { text: `Tenemos ${products.length} productos disponibles en ${cats.length} categoría${cats.length > 1 ? 's' : ''}: ${cats.slice(0, 6).join(', ')}. Busca en la barra superior o navega por categorías.` };
+      return {
+        text: `Tenemos ${products.length} productos disponibles en ${cats.length} categoría${cats.length > 1 ? 's' : ''}: ${cats.slice(0, 6).join(', ')}.\nBuscá en la barra superior o navegá por categorías.`,
+        followUps: ['Promos activas', ...(myOrders.length ? ['Repetir mi último pedido'] : [])]
+      };
     }
-    // Horario / abierto
-    if (/horario|abierto|hora|cu[aá]ndo|abren|cierran/.test(t)) {
-      return { text: 'Estamos abiertos ahora mismo ⏰ con atención rápida. Puedes pedir para retirar en el kiosko o para entrega.' };
+
+    // ---- Horario / abierto ----
+    if (/horario|abierto|hora|cuando|abren|cierran|atienden/.test(t)) {
+      return {
+        text: 'Atendemos de corrido con entrega y retiro en el kiosko 📍. Podés dejar tu pedido a cualquier hora y te lo confirmamos al instante.',
+        followUps: ['¿Qué venden?', 'Promos activas']
+      };
     }
-    // Agradecimiento
+
+    // ---- Carrito / pagar (chat transaccional de un toque) ----
+    if (/carrito|ir a pagar|pagar ahora|finalizar|quitar/.test(t)) {
+      if (cartCount === 0) {
+        return {
+          text: 'Tu carrito está vacío. ¿Qué te gustaría agregar?',
+          followUps: ['¿Qué venden?', 'Promos activas']
+        };
+      }
+      return {
+        text: `Tienes ${cartCount} ${cartCount === 1 ? 'artículo' : 'artículos'} en tu carrito. Podés revisarlo o ir directamente a pagar.`,
+        action: [
+          { kind: 'cart', label: 'Ver mi carrito', icon: 'shoppingBag' },
+          { kind: 'checkout', label: 'Ir a pagar ahora', icon: 'arrowRight' }
+        ],
+        followUps: ['¿Cuál es la tasa?']
+      };
+    }
+
+    // ---- Agradecimiento ----
     if (/gracias|genial|perfecto|excelente|muchas gracias/.test(t)) {
-      return { text: `¡Con gusto${name !== 'cliente' ? `, ${name}` : ''}! Recuerda que puedes pedir con voz tocando el micrófono del buscador 🎤.` };
+      return {
+        text: `¡Con gusto${name !== 'cliente' ? `, ${name}` : ''}! Recuerda que podés pedir con voz tocando el micrófono 🎤 y que estoy para lo que necesites.`,
+        followUps: ['¿Qué venden?', 'Promos activas']
+      };
     }
-    // Fallback
-    return { text: 'Todavía estoy aprendiendo. Tocá una pregunta rápida abajo o probá con: tu deuda, tus pedidos, las promos, la tasa del día o un producto del catálogo.' };
+
+    // ---- Pedir ayuda humana / escalar ----
+    if (/humano|persona real|ayuda|problema|no enti|representante|hablar con alguien|atend[ií]eme|queja|reclamo/.test(t)) {
+      const notifyAdmins = async () => {
+        if (escalated) return;
+        setEscalated(true);
+        try {
+          await api.assistantEscalate({ text: raw, customerName: customer?.customerName || savedCustomer?.customerName || '', phone: customer?.phone || savedCustomer?.phoneNumber || '' });
+        } catch {
+          /* sin red: no bloquea */
+        }
+      };
+      notifyAdmins();
+      return {
+        text: `Entiendo, ${name !== 'cliente' ? name : ''}, avisé al equipo del kiosko para que te atienda personalmente 🙌. Sin dudas te ayudarán enseguida. Mientras tanto puedo seguir ayudándote con tu deuda, pedidos o el catálogo.`,
+        followUps: ['¿Cuánto debo?', '¿Dónde está mi pedido?', '¿Qué venden?']
+      };
+    }
+
+    // ---- Fallback con disculpa + herramientas reales ----
+    return {
+      text: `Perdón, aun estoy aprendiendo y no entendí bien eso. 😅 Dijiste: "${raw}"\n\nProbá con estas opciones y enseguida te ayudo.`,
+      action: [
+        { kind: 'orders', label: 'Mis pedidos', icon: 'package' },
+        { kind: 'debt', label: 'Mi deuda', icon: 'creditCard' },
+        { kind: 'catalog', label: 'Ver catálogo', icon: 'search' }
+      ],
+      followUps: ['Promos activas', '¿Cuál es la tasa?', '¿Qué venden?']
+    };
+  };
+
+  // Desglose de la deuda en pedidos adeudados (para transparencia).
+  const balanceDetail = () => {
+    const key = normalizePhoneDigits(customer?.phone || '');
+    const debtOrders = myOrders
+      .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
+      .slice(-3);
+    if (debtOrders.length === 0) return '';
+    const lines = debtOrders.map(
+      (o) => `· ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}): ${formatUsd(Number(o.total) || 0)}`
+    );
+    return `Últimos pedidos adeudados:\n${lines.join('\n')}`;
+  };
+
+  const replyWith = (res) => {
+    setAction(Array.isArray(res.action) ? res.action : res.action ? [res.action] : null);
+    setFollowUps(Array.isArray(res.followUps) ? res.followUps : []);
+    setLiveOrder(res.liveOrder || null);
+    appendAi(res.text);
+    if (speechOn) sayAi(res.text);
+    setThinking(false);
   };
 
   const send = (text) => {
@@ -17150,23 +17454,92 @@ function AikerAssistant({
     if (!q || thinking) return;
     setMessages((m) => [...m, { from: 'user', text: q }]);
     setAction(null);
+    setFollowUps([]);
+    setLiveOrder(null);
     setThinking(true);
-    setTimeout(() => {
+    const delay = 420 + Math.random() * 380;
+    replyTimerRef.current = setTimeout(() => {
       const res = respond(q);
-      setMessages((m) => [...m, { from: 'ai', text: res.text }]);
-      setAction(res.action || null);
-      setThinking(false);
-    }, 650);
+      if (res) replyWith(res);
+      else setThinking(false);
+    }, delay);
+  };
+
+  const cancelReply = () => {
+    clearTimeout(replyTimerRef.current);
+    replyTimerRef.current = null;
+    setThinking(false);
+    setAction(null);
+    setFollowUps([]);
+    appendAi('Bueno, la cancelé 😉. Decime en qué te ayudo.');
+  };
+
+  // Voz: dictado de la pregunta y lectura de respuestas.
+  const toggleListening = () => {
+    if (listening) {
+      recRef.current?.stop?.();
+      recRef.current = null;
+      setListening(false);
+      return;
+    }
+    if (!speechRecognitionAvailable()) {
+      appendAi('Tu navegador no soporta voz 🎤. Probá escribir tu pregunta.');
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = 'es-ES';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    setListening(true);
+    rec.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript || '';
+      setListening(false);
+      if (transcript.trim()) send(transcript);
+    };
+    rec.onerror = () => {
+      recRef.current = null;
+      setListening(false);
+    };
+    rec.onend = () => {
+      recRef.current = null;
+      setListening(false);
+    };
+    rec.start();
   };
 
   const runAction = (a) => {
     if (!a) return;
     if (a.kind === 'debt') onOpenDebt?.();
-    else if (a.kind === 'orders') onOpenOrders?.();
+    else if (a.kind === 'debt-whatsapp') {
+      // Envía la cuenta desglosada por WhatsApp (transparencia ante discrepancias).
+      const wa = formatPhoneWhatsApp(customer?.phone);
+      if (wa) {
+        const msg = buildAccountMessage(customer, myOrders);
+        window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+      }
+      onClose();
+    } else if (a.kind === 'orders') onOpenOrders?.();
     else if (a.kind === 'track') onTrackOrder?.(a.order);
     else if (a.kind === 'repeat') onRepeatLastOrder?.();
-    else if (a.kind === 'product') onAddToCart?.(a.product);
-    onClose();
+    else if (a.kind === 'product') {
+      onAddToCart?.(a.product);
+      setAction([{ kind: 'cart', label: 'Abrir carrito', icon: 'shoppingBag' }]);
+      setFollowUps(['Ir a pagar']);
+      setLiveOrder(null);
+      appendAi(`Listo, agregué "${a.product.name}" a tu carrito 🛒.`);
+    } else if (a.kind === 'cart') onOpenCart?.();
+    else if (a.kind === 'checkout') {
+      if (cartCount === 0) {
+        appendAi('Tu carrito está vacío. Agreguemos algo primero 😉.');
+        return;
+      }
+      onOpenCheckout?.();
+    } else if (a.kind === 'catalog') {
+      onClose();
+    }
+    if (a.kind !== 'product') onClose();
   };
 
   return (
@@ -17185,9 +17558,22 @@ function AikerAssistant({
                 <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold uppercase tracking-wider border border-emerald-500/30">
                   asistente
                 </span>
+                {listening && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[9px] font-bold uppercase tracking-wider border border-rose-500/30 animate-pulse">
+                    escuchando 🎤
+                  </span>
+                )}
               </h3>
-              <p className="text-[11px] text-slate-400 truncate">Toca una pregunta o pide un producto</p>
+              <p className="text-[11px] text-slate-400 truncate">Toca una pregunta, pide un producto o dicta con voz</p>
             </div>
+            <button
+              onClick={() => setSpeechOn((v) => !v)}
+              aria-label={speechOn ? 'Activar lectura de respuestas' : 'Desactivar lectura de respuestas'}
+              title="Leer respuestas en voz"
+              className={`p-2 rounded-xl transition-all ${speechOn ? 'bg-teal-500/25 text-teal-300' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Icon name="volume2" className="w-5 h-5" />
+            </button>
             <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl" aria-label="Cerrar asistente">
               <Icon name="x" className="w-5 h-5" />
             </button>
@@ -17212,20 +17598,56 @@ function AikerAssistant({
                 </div>
               </div>
             ))}
-            {action && (
+
+            {/* Rastreo con progreso en vivo dentro del chat */}
+            {liveOrder && !thinking && (
               <div className="flex justify-start pl-9 animate-fade-in">
-                <button
-                  onClick={() => runAction(action)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-slate-950 text-xs font-bold shadow-lg shadow-indigo-500/25 transition-all active:scale-95 hover:from-indigo-400 hover:to-cyan-400"
-                >
-                  <Icon name={action.icon || 'check'} className="w-3.5 h-3.5" />
-                  {action.label}
-                </button>
+                <div className="w-full max-w-[80%] rounded-2xl bg-slate-900 border border-slate-700 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                      Pedido <span className="text-teal-300">{liveOrder.id}</span>
+                    </span>
+                    <span className={`text-[10px] font-bold ${liveOrder.status === 'en_camino' ? 'text-emerald-300' : 'text-slate-300'}`}>
+                      {STATUS_LABELS[liveOrder.status] || liveOrder.status}
+                    </span>
+                  </div>
+                  <OrderStepsTimeline order={liveOrder} />
+                  {liveOrder.type === 'delivery' && (
+                    <DeliveryMap order={liveOrder} storeLocation={storeLocation} />
+                  )}
+                  {liveOrder.estimatedMinutes != null && (
+                    <p className="text-[10px] text-slate-400 font-semibold">
+                      ⏱ Estimado: ~{liveOrder.estimatedMinutes} min
+                    </p>
+                  )}
+                  {liveOrder.type === 'delivery' && liveOrder.courier_lat != null && (
+                    <p className="text-[10px] text-teal-300 font-semibold">
+                      🛵 Tu repartidor está en movimiento ({Number(liveOrder.courier_lat).toFixed(4)}, {Number(liveOrder.courier_lng).toFixed(4)})
+                    </p>
+                  )}
+                </div>
               </div>
             )}
+
+            {/* Acciones profundas (botones bajo el mensaje; puede haber varias) */}
+            {Array.isArray(action) && action.length > 0 && (
+              <div className="flex flex-wrap justify-start pl-9 gap-2 animate-fade-in">
+                {action.map((a, i) => (
+                  <button
+                    key={i}
+                    onClick={() => runAction(a)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-slate-950 text-xs font-bold shadow-lg shadow-indigo-500/25 transition-all active:scale-95 hover:from-indigo-400 hover:to-cyan-400"
+                  >
+                    <Icon name={a.icon || 'check'} className="w-3.5 h-3.5" />
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {thinking && (
-              <div className="flex justify-start animate-fade-in">
-                <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
+              <div className="flex justify-start items-center gap-2 animate-fade-in">
+                <span className="shrink-0 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
                   <Icon name="chat" className="w-3.5 h-3.5" />
                 </span>
                 <div className="px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-sm rounded-bl-md flex items-center gap-1.5">
@@ -17233,17 +17655,44 @@ function AikerAssistant({
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '120ms' }} />
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '240ms' }} />
                 </div>
+                <button
+                  onClick={cancelReply}
+                  aria-label="Cancelar pregunta"
+                  className="shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-rose-500/50 hover:text-rose-300 transition-all active:scale-95"
+                >
+                  Cancelar ✕
+                </button>
               </div>
             )}
           </div>
 
-          <div className="p-3 border-t border-slate-800 shrink-0 bg-slate-900">
+          <div className="p-3 border-t border-slate-800 shrink-0 bg-slate-900 relative">
+            {/* Sugerencias de autocompletado mientras se escribe */}
+            {suggestions.length > 0 && (
+              <div className="mb-2 rounded-2xl bg-slate-800 border border-slate-700 overflow-hidden animate-fade-in">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={`${s}-${i}`}
+                    onClick={() => {
+                      send(s);
+                      setDraft('');
+                      setSuggestions([]);
+                    }}
+                    className="block w-full text-left px-3.5 py-2.5 text-xs text-slate-200 hover:bg-slate-700/60 hover:text-teal-300 transition-colors border-b border-slate-700/60 last:border-b-0"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!draft.trim() || thinking) return;
                 send(draft);
                 setDraft('');
+                setSuggestions([]);
               }}
               className="mb-3 flex items-center gap-2"
             >
@@ -17251,12 +17700,38 @@ function AikerAssistant({
                 ref={inputRef}
                 type="text"
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Escribe tu pregunta o pide un producto…"
-                disabled={thinking}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  const q = normalizeAiText(e.target.value);
+                  if (q.length >= 2) {
+                    const opts = [
+                      ...(products || []).map((p) => p.name).filter((n) => normalizeAiText(n).includes(q)),
+                      ...quickReplies.filter((r) => normalizeAiText(r).includes(q))
+                    ];
+                    setSuggestions([...new Set(opts)].slice(0, 4));
+                  } else {
+                    setSuggestions([]);
+                  }
+                }}
+                placeholder={listening ? 'Escuchando… 🎤' : 'Escribe, dicta o pide un producto…'}
+                disabled={thinking || listening}
                 enterKeyHint="send"
                 className="flex-1 min-w-0 px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/70 focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
               />
+              <button
+                type="button"
+                onClick={toggleListening}
+                disabled={thinking}
+                aria-label={listening ? 'Detener dictado' : 'Dictar por voz'}
+                title="Hablar"
+                className={`shrink-0 p-2.5 rounded-2xl transition-all active:scale-95 ${
+                  listening
+                    ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/40 animate-pulse'
+                    : 'bg-slate-800 border border-slate-700 text-slate-300 hover:border-teal-500/50 hover:text-teal-300 disabled:opacity-40'
+                }`}
+              >
+                <Icon name="mic" className="w-5 h-5" />
+              </button>
               <button
                 type="submit"
                 disabled={!draft.trim() || thinking}
@@ -17266,6 +17741,21 @@ function AikerAssistant({
                 <Icon name="arrowRight" className="w-5 h-5" />
               </button>
             </form>
+
+            {cartCount > 0 && (
+              <div className="mb-2.5">
+                <button
+                  onClick={() => {
+                    onClose();
+                    onOpenCart?.();
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-teal-500/15 border border-teal-500/40 text-[11px] font-bold text-teal-300 hover:bg-teal-500/25 transition-all active:scale-95"
+                >
+                  <Icon name="shoppingBag" className="w-3.5 h-3.5" />
+                  Ver mi carrito ({cartCount}) o ir a pagar
+                </button>
+              </div>
+            )}
             {popular.length > 0 && (
               <div className="mb-2.5">
                 <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 px-1">
@@ -17287,10 +17777,10 @@ function AikerAssistant({
               </div>
             )}
             <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 px-1">
-              ¿Qué quieres saber?
+              {followUps.length > 0 ? 'Sigue con…' : '¿Qué quieres saber?'}
             </span>
             <div className="flex flex-wrap gap-2">
-              {quickReplies.map((r) => (
+              {(followUps.length > 0 ? followUps : quickReplies).map((r) => (
                 <button
                   key={r}
                   onClick={() => send(r)}

@@ -4,6 +4,7 @@ import { startRegistration, startAuthentication, browserSupportsWebAuthn, platfo
 import { api, getToken, setToken, clearToken } from './api.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import LoadingScreen from './components/LoadingScreen.jsx';
 
 // ---------------------------------------------------------------------------
 // Mecanismo compartido de overlay: bloquea el scroll del body mientras hay una
@@ -1464,7 +1465,10 @@ export default function App() {
   // Identificación obligatoria: se abre al entrar como cliente sin datos guardados.
   // identityMode: 'login' (formulario) | 'confirm' (solo biometría para volver/salir).
   // identityConfirmKind: 'switchback' | 'logout'.
-  const [isIdentityOpen, setIsIdentityOpen] = useState(() => !loadSavedCustomer());
+  // Invitados: el login NO se abre automáticamente. Navegan la tienda libremente
+  // (catálogo, recorrido horizontal, más pedidos) y solo se identifican al pulsar
+  // "Iniciar sesión" en la barra inferior o al comprar (el checkout pide los datos).
+  const [isIdentityOpen, setIsIdentityOpen] = useState(false);
   const [identityMode, setIdentityMode] = useState('login');
   const [identityConfirmKind, setIdentityConfirmKind] = useState('switchback');
 
@@ -1481,14 +1485,6 @@ export default function App() {
     setIdentityConfirmKind('logout');
     setIsIdentityOpen(true);
   };
-
-  // Reabrir la identificación si el usuario entra a la tienda sin estar identificado
-  useEffect(() => {
-    if (activeView === 'customer' && !savedCustomer) {
-      setIdentityMode('login');
-      setIsIdentityOpen(true);
-    }
-  }, [activeView, savedCustomer]);
 
   // Perfil del cliente desde el servidor (direcciones guardadas, balance, etc.)
   // Se recarga también cuando cambia orders (polling) para que el saldo de Mi
@@ -3526,6 +3522,7 @@ export default function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onCustomerLogout={openIdentityLogout}
+        onOpenLogin={openIdentityLogin}
         adminTab={adminTab}
         onAdminTab={handleAdminTabChange}
         pendingOrders={orders.filter((o) => !['entregado', 'cancelado'].includes(o.status)).length}
@@ -4141,47 +4138,6 @@ function OrderSuccessOverlay({ order, onClose, onTrack, onShare }) {
         >
           Seguir comprando
         </button>
-      </div>
-    </div>
-  );
-}
-
-function LoadingScreen() {
-  return (
-    <div className="space-y-6 sm:space-y-8 animate-fade-in" aria-busy="true" aria-label="Cargando la tienda">
-      {/* Hero skeleton */}
-      <div className="rounded-2xl sm:rounded-3xl p-4 sm:p-8 bg-slate-800/40 border border-slate-700/40">
-        <div className="skeleton-block w-32 h-5 mb-3" />
-        <div className="skeleton-block w-56 h-8 mb-2" />
-        <div className="skeleton-block w-40 h-4" />
-      </div>
-
-      {/* Buscador + pills skeleton */}
-      <div className="space-y-3">
-        <div className="skeleton-block h-12 rounded-2xl w-full" />
-        <div className="flex gap-2 overflow-hidden">
-          <div className="skeleton-block h-9 w-20 shrink-0" />
-          <div className="skeleton-block h-9 w-24 shrink-0" />
-          <div className="skeleton-block h-9 w-28 shrink-0" />
-          <div className="skeleton-block h-9 w-20 shrink-0" />
-        </div>
-      </div>
-
-      {/* Grid de tarjetas skeleton */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="rounded-2xl sm:rounded-3xl bg-slate-800/40 border border-slate-700/40 overflow-hidden">
-            <div className="skeleton-block aspect-square w-full rounded-none" />
-            <div className="p-3 sm:p-4 space-y-2">
-              <div className="skeleton-block h-4 w-3/4" />
-              <div className="skeleton-block h-3 w-1/2" />
-              <div className="flex justify-between items-center pt-2">
-                <div className="skeleton-block h-5 w-14" />
-                <div className="skeleton-block h-9 w-9 rounded-xl" />
-              </div>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -5312,7 +5268,7 @@ function CustomerView({
         <div className="space-y-2.5">
           {/* Category Pills: cada categoría tiene su color e icono de identidad */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {['Todas', 'Favoritos', ...categories].map((cat) => {
+            {['Todas', ...(savedCustomer ? ['Favoritos'] : []), ...categories].map((cat) => {
               const isFav = cat === 'Favoritos';
               const id = isFav ? null : categoryIdentity(cat);
               const active = selectedCategory === cat;
@@ -7546,6 +7502,7 @@ function BottomTabBar({
   onOpenCart,
   onGoAdmin,
   onGoStore,
+  onOpenLogin,
   onCustomerLogout,
   adminTab,
   onAdminTab,
@@ -7577,39 +7534,31 @@ function BottomTabBar({
       onClick: onToggleCalc,
       badge: null
     },
-    {
-      key: 'cart',
-      label: 'Carrito',
-      icon: 'bag',
-      onClick: onOpenCart,
-      badge: cartCount > 0 ? cartCount : null
-    },
-    {
-      key: 'orders',
-      label: 'Mis Pedidos',
-      icon: 'list',
-      onClick: () => {
-        if (!hasCustomer) {
-          onOpenCart(); // el checkout/identidad obliga a identificarse
-          return;
-        }
-        onCustomerTab('orders');
-      },
-      badge: null
-    },
-    {
-      key: 'account',
-      label: 'Mi Cuenta',
-      icon: 'user',
-      onClick: () => {
-        if (!hasCustomer) {
-          onOpenCart();
-          return;
-        }
-        onCustomerTab('account');
-      },
-      badge: null
-    }
+    ...(hasCustomer
+      ? [
+          {
+            key: 'cart',
+            label: 'Carrito',
+            icon: 'bag',
+            onClick: onOpenCart,
+            badge: cartCount > 0 ? cartCount : null
+          },
+          {
+            key: 'orders',
+            label: 'Mis Pedidos',
+            icon: 'list',
+            onClick: () => onCustomerTab('orders'),
+            badge: null
+          },
+          {
+            key: 'account',
+            label: 'Mi Cuenta',
+            icon: 'user',
+            onClick: () => onCustomerTab('account'),
+            badge: null
+          }
+        ]
+      : [])
   ];
 
   const adminTabs = [
@@ -7663,6 +7612,16 @@ function BottomTabBar({
           <span className="text-[10px] font-bold leading-none truncate">{t.label}</span>
         </button>
       ))}
+      {activeView === 'customer' && !hasCustomer && (
+        <button
+          onClick={onOpenLogin}
+          className={`${base} text-teal-400 hover:text-teal-300 ${idleTab}`}
+          aria-label="Iniciar sesión"
+        >
+          <Icon name="userPlus" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Iniciar sesión</span>
+        </button>
+      )}
       {activeView === 'customer' && isAdmin && (
         <button
           onClick={onGoAdmin}

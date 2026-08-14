@@ -963,7 +963,7 @@ async function applyPgMigrations() {
 // en staging. Cada ambiente mantiene sus propias credenciales biométricas.
 const MIRROR_SOURCE_SCHEMA = process.env.MIRROR_SOURCE_SCHEMA || 'public';
 const MIRROR_TARGET_SCHEMA = process.env.MIRROR_TARGET_SCHEMA || 'staging';
-const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers'];
+const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers', 'admin_credentials'];
 
 // Refresca el espejo: copia el estado completo desde un schema fuente (producción)
 // hasta un schema destino (calidad), reemplazando su contenido por completo.

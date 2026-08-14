@@ -9,6 +9,7 @@ import * as webauthn from './webauthn.js';
 import * as push from './push.js';
 import { getBcvRate } from './rate.js';
 import { isStorageConfigured, uploadProof } from './storage.js';
+import { ADMIN_PHONES as FALLBACK_ADMIN_PHONES } from '../src/data.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -42,12 +43,17 @@ let adminPassword = process.env.ADMIN_PASSWORD || config.adminPassword;
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || config.pexelsApiKey;
 
 // Teléfonos de administradores (normalizados a 11 dígitos). Se combinan env
-// (ADMIN_PHONES, separados por coma) y config para no romper si falta uno.
-const ADMIN_PHONES = String(process.env.ADMIN_PHONES || '')
-  .split(',')
-  .map((p) => p.trim())
-  .filter(Boolean)
-  .concat(config.adminPhones || [])
+// (ADMIN_PHONES, separados por coma), config y el fallback compartido con el
+// cliente (src/data.js) para que calidad y producción reconozcan siempre a los
+// admins fijos aunque falte configuración en el ambiente.
+const ADMIN_PHONES = [
+  ...String(process.env.ADMIN_PHONES || '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean),
+  ...(config.adminPhones || []),
+  ...FALLBACK_ADMIN_PHONES
+]
   .map((p) => String(p).replace(/\D/g, '').slice(-11));
 
 // Teléfonos del super administrador: tiene control total (empleados, sesiones).

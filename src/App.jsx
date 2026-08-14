@@ -3235,6 +3235,7 @@ export default function App() {
             onBiometricLogin={handleAdminBiometricLogin}
             onBiometricRegister={handleAdminBiometricRegister}
             onBack={() => setActiveView('customer')}
+            initialPhone={savedCustomer && isCurrentAdmin ? { code: savedCustomer.phoneCode || '0412', number: savedCustomer.phoneNumber || '' } : null}
           />
         )}
       </main>
@@ -4213,13 +4214,16 @@ function LoadErrorScreen({ error, onRetry }) {
   );
 }
 
-function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack }) {
+function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack, initialPhone = null }) {
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   // Login state
-  const [loginPhone, setLoginPhone] = useState({ code: '0412', number: '' });
+  const [loginPhone, setLoginPhone] = useState(() => ({
+    code: initialPhone?.code || '0412',
+    number: initialPhone?.number || ''
+  }));
 
   // Biometric login state
   const [bioStatus, setBioStatus] = useState('idle'); // 'idle' | 'working' | 'register'

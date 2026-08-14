@@ -3029,7 +3029,7 @@ export default function App() {
       )}
 
       {/* Modern Glassmorphic Top Navbar */}
-      <header ref={headerRef} className="sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
+      <header ref={headerRef} style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top, 0px))' }} className="sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">

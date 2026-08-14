@@ -70,16 +70,24 @@ export const holdStock = async (clientId, items, ttlMs = HOLD_CART_MS) => {
   const now = Date.now();
   if (list.length === 0) {
     holds.delete(clientId);
+    if (pgPool) await pgDeleteHolds(clientId);
   } else {
     const mine = new Map();
     for (const it of list) mine.set(it.id, { qty: it.qty, expiresAt: now + ttlMs });
     holds.set(clientId, mine);
+    if (pgPool) {
+      await pgReplaceHolds(clientId, mine);
+      await pgPurgeHolds().catch(() => {});
+    }
   }
   return { ok: true, available, expiresAt: now + ttlMs, state: await store.getPublicState(clientId) };
 };
 
 export const releaseStock = async (clientId) => {
-  if (clientId) holds.delete(clientId);
+  if (clientId) {
+    holds.delete(clientId);
+    if (pgPool) await pgDeleteHolds(clientId);
+  }
   return { ok: true, state: await store.getPublicState(clientId) };
 };
 
@@ -132,21 +140,27 @@ const getSharePublic = async (code) => {
 
 export const createShare = async ({ clientId, ownerName, items }) => {
   purgeExpiredShares();
+  if (pgPool) await pgPurgeShares().catch(() => {});
   if (!clientId) return { error: 'Sesión de cliente inválida' };
   for (const [code, s] of shares) {
-    if (s.ownerClientId === clientId) shares.delete(code);
+    if (s.ownerClientId === clientId) {
+      shares.delete(code);
+      if (pgPool) await pgDeleteShare(code);
+    }
   }
   const list = (Array.isArray(items) ? items : []).filter((it) => it && it.id && it.qty > 0);
   const now = Date.now();
   const code = generateShareCode();
-  shares.set(code, {
+  const share = {
     code,
     ownerClientId: clientId,
     ownerName: String(ownerName || '').slice(0, 60),
     items: new Map(list.map((it) => [it.id, Number(it.qty)])),
     expiresAt: now + SHARE_TTL_MS,
     updatedAt: now
-  });
+  };
+  shares.set(code, share);
+  if (pgPool) await pgSaveShare(share);
   return { ok: true, share: await getSharePublic(code) };
 };
 
@@ -173,6 +187,7 @@ export const addToShare = async ({ code, items }) => {
     s.items.set(it.id, Math.min(cur + qty, Math.max(avail, cur)));
   }
   s.updatedAt = Date.now();
+  if (pgPool) await pgSaveShare(s);
   return { ok: true, share: await getSharePublic(String(code).toUpperCase()) };
 };
 
@@ -184,8 +199,86 @@ export const deleteShare = async ({ code, clientId }) => {
     return { error: 'Solo el dueño puede cerrar el carrito compartido' };
   }
   shares.delete(String(code).toUpperCase());
+  if (pgPool) await pgDeleteShare(String(code).toUpperCase());
   return { ok: true };
 };
+
+// ---------------------------------------------------------------------------
+// Persistencia de holds/shares en Postgres. Los Maps quedan como cache de
+// lectura (reservedByProduct, getSharePublic…), pero cada escritura se refleja
+// en tablas (stock_holds/shares) y al arrancar se recargan. Así sobreviven a
+// los redeploys de Render (antes: se perdían, y un carrito reservado que el
+// cliente ya pagó seguía contando como reserva hasta expirar).
+// ---------------------------------------------------------------------------
+const pgReplaceHolds = async (clientId, mine) => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('stock_holds')} WHERE client_id = $1`, [clientId]);
+  for (const [pid, h] of mine) {
+    await retryingQuery(
+      pgPool,
+      `INSERT INTO ${q('stock_holds')} (client_id, product_id, qty, expires_at) VALUES ($1,$2,$3,$4)`,
+      [clientId, pid, h.qty, h.expiresAt]
+    );
+  }
+};
+
+const pgDeleteHolds = async (clientId) => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('stock_holds')} WHERE client_id = $1`, [clientId]);
+};
+
+const pgPurgeHolds = async () => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('stock_holds')} WHERE expires_at <= $1`, [Date.now()]);
+};
+
+const pgSaveShare = async (s) => {
+  await retryingQuery(
+    pgPool,
+    `INSERT INTO ${q('shares')} (code, owner_client_id, owner_name, items, expires_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (code) DO UPDATE SET
+       owner_client_id = EXCLUDED.owner_client_id,
+       owner_name = EXCLUDED.owner_name,
+       items = EXCLUDED.items,
+       expires_at = EXCLUDED.expires_at,
+       updated_at = EXCLUDED.updated_at`,
+    [s.code, s.ownerClientId, s.ownerName || '', JSON.stringify(Array.from(s.items.entries()).map(([id, qty]) => ({ id, qty }))), s.expiresAt, s.updatedAt]
+  );
+};
+
+const pgDeleteShare = async (code) => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('shares')} WHERE code = $1`, [code]);
+};
+
+const pgPurgeShares = async () => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('shares')} WHERE expires_at <= $1`, [Date.now()]);
+};
+
+// Recarga holds/shares desde Postgres al arrancar (initStore).
+async function loadVolatileFromPg() {
+  try {
+    await pgPurgeHolds();
+    await pgPurgeShares();
+    const hrows = await retryingQuery(pgPool, `SELECT client_id, product_id, qty, expires_at FROM ${q('stock_holds')}`);
+    holds.clear();
+    for (const r of hrows.rows) {
+      if (!holds.has(r.client_id)) holds.set(r.client_id, new Map());
+      holds.get(r.client_id).set(r.product_id, { qty: r.qty, expiresAt: Number(r.expires_at) });
+    }
+    const srows = await retryingQuery(pgPool, `SELECT * FROM ${q('shares')}`);
+    shares.clear();
+    for (const r of srows.rows) {
+      shares.set(r.code, {
+        code: r.code,
+        ownerClientId: r.owner_client_id,
+        ownerName: r.owner_name || '',
+        items: new Map(Array.isArray(r.items) ? r.items.map((i) => [i.id, Number(i.qty)]) : []),
+        expiresAt: Number(r.expires_at),
+        updatedAt: Number(r.updated_at)
+      });
+    }
+  } catch (err) {
+    console.warn('[kiosko] No se pudieron cargar holds/shares desde Postgres:', err.message);
+  }
+}
 
 const generateProductId = () => `p-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -268,6 +361,37 @@ const fileStore = {
     } catch (err) {
       console.warn('[kiosko] No se pudo persistir data.json. Cambios solo en memoria.', err.message);
     }
+  },
+
+  listPushSubs() {
+    return Array.isArray(this.state.settings?.pushSubs) ? this.state.settings.pushSubs : [];
+  },
+
+  async savePushSubscription(phone, sub) {
+    if (!sub || !sub.endpoint) return;
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const subs = this.listPushSubs().filter((s) => s.endpoint !== sub.endpoint);
+    subs.push({ phone: key, endpoint: sub.endpoint, keys: sub.keys, at: new Date().toISOString() });
+    this.state.settings = { ...this.state.settings, pushSubs: subs };
+    this.persist();
+  },
+
+  async getPushSubscriptions(phone) {
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    return this.listPushSubs()
+      .filter((s) => s.phone === key)
+      .map((s) => ({ endpoint: s.endpoint, keys: s.keys }));
+  },
+
+  async getAllPushSubscriptions() {
+    return this.listPushSubs().map((s) => ({ phone: s.phone, endpoint: s.endpoint, keys: s.keys }));
+  },
+
+  async removePushSubscription(endpoint) {
+    if (!endpoint) return;
+    const subs = this.listPushSubs().filter((s) => s.endpoint !== endpoint);
+    this.state.settings = { ...this.state.settings, pushSubs: subs };
+    this.persist();
   },
 
   async getState(clientId) {
@@ -781,6 +905,55 @@ async function retryingQuery(pool, sql, params, attempts = 2) {
   throw new Error('retryingQuery: sin reintentos disponibles');
 };
 
+// Migraciones versionadas: cada archivo .sql en server/migrations se aplica una
+// sola vez, en orden, dentro de una transacción. La tabla schema_migrations
+// registra cuáles ya corrieron. Los archivos usan @SCHEMA@ como marcador del
+// schema de la app (vacio en public, "staging." en calidad).
+const SCHEMA_PREFIX = DB_SCHEMA === 'public' ? '' : `${DB_SCHEMA}.`;
+
+async function applyPgMigrations() {
+  try {
+    await retryingQuery(
+      pgPool,
+      `CREATE TABLE IF NOT EXISTS ${SCHEMA_PREFIX}schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT)`
+    );
+    const { rows } = await retryingQuery(pgPool, `SELECT id FROM ${SCHEMA_PREFIX}schema_migrations`);
+    const applied = new Set(rows.map((r) => r.id));
+    const dir = path.join(__dirname, 'migrations');
+    let files = [];
+    try {
+      files = fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith('.sql'))
+        .sort();
+    } catch {
+      files = [];
+    }
+    for (const name of files) {
+      if (applied.has(name)) continue;
+      const sql = fs.readFileSync(path.join(dir, name), 'utf8').replaceAll('@SCHEMA@', SCHEMA_PREFIX);
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(sql);
+        await client.query(
+          `INSERT INTO ${SCHEMA_PREFIX}schema_migrations (id, applied_at) VALUES ($1, $2)`,
+          [name, new Date().toISOString()]
+        );
+        await client.query('COMMIT');
+        console.log(`[kiosko] Migración aplicada: ${name}`);
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+  } catch (err) {
+    console.error('[kiosko] Error aplicando migraciones:', err.message);
+  }
+}
+
 // Tablas que se copian en el espejo. Fuente = producción (public), destino = schema
 // aislado de calidad (staging). Reemplazo total por tabla (no hace merge).
 // NOTA: webauthn_credentials NO se copia: WebAuthn ata la llave del dispositivo al
@@ -1076,6 +1249,37 @@ const pgStore = {
         [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes]
       );
     }
+  },
+
+  async savePushSubscription(phone, sub) {
+    const endpoint = sub.endpoint;
+    if (!endpoint) return;
+    await retryingQuery(
+      this.pool,
+      `INSERT INTO ${q('push_subscriptions')} (endpoint, phone, keys, created_at)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (endpoint) DO UPDATE SET phone = EXCLUDED.phone, keys = EXCLUDED.keys`,
+      [endpoint, phone, JSON.stringify(sub.keys || {}), new Date().toISOString()]
+    );
+  },
+
+  async getPushSubscriptions(phone) {
+    const { rows } = await retryingQuery(
+      this.pool,
+      `SELECT endpoint, keys FROM ${q('push_subscriptions')} WHERE phone = $1`,
+      [phone]
+    );
+    return rows.map((r) => ({ endpoint: r.endpoint, keys: r.keys }));
+  },
+
+  async getAllPushSubscriptions() {
+    const { rows } = await retryingQuery(this.pool, `SELECT phone, endpoint, keys FROM ${q('push_subscriptions')}`);
+    return rows.map((r) => ({ phone: r.phone, endpoint: r.endpoint, keys: r.keys }));
+  },
+
+  async removePushSubscription(endpoint) {
+    if (!endpoint) return;
+    await retryingQuery(this.pool, `DELETE FROM ${q('push_subscriptions')} WHERE endpoint = $1`, [endpoint]);
   },
 
   async getState(clientId) {
@@ -1727,7 +1931,10 @@ const pgStore = {
       }
 
       await client.query('COMMIT');
-      if (orderData.clientId) holds.delete(orderData.clientId);
+      if (orderData.clientId) {
+        holds.delete(orderData.clientId);
+        await pgDeleteHolds(orderData.clientId).catch(() => {});
+      }
       return { state: await this.getPublicState(orderData.clientId), order };
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -1977,6 +2184,8 @@ export async function initStore() {
   if (pgPool) {
     await pgStore.ensureSchema();
     await pgStore.seedIfEmpty();
+    await applyPgMigrations();
+    await loadVolatileFromPg();
   }
 }
 
@@ -1995,6 +2204,14 @@ export const saveSettings = (settings) => store.saveSettings(settings);
 export const getSetting = (key) => store.getSetting(key);
 
 export const setSetting = (key, value) => store.setSetting(key, value);
+
+export const savePushSubscription = (phone, sub) => store.savePushSubscription(phone, sub);
+
+export const getPushSubscriptions = (phone) => store.getPushSubscriptions(phone);
+
+export const getAllPushSubscriptions = () => store.getAllPushSubscriptions();
+
+export const removePushSubscription = (endpoint) => store.removePushSubscription(endpoint);
 
 export const getCustomerByPhone = (phone) => store.getCustomerByPhone(phone);
 
@@ -2432,7 +2649,7 @@ export async function pingDb() {
 export async function getMetrics() {
   const counts = {};
   if (pgPool) {
-    for (const t of ['products', 'categories', 'orders', 'customers', 'payments', 'admin_credentials', 'webauthn_credentials']) {
+    for (const t of ['products', 'categories', 'orders', 'customers', 'payments', 'admin_credentials', 'webauthn_credentials', 'push_subscriptions', 'stock_holds', 'shares', 'schema_migrations']) {
       try {
         const { rows } = await retryingQuery(pgPool, `SELECT count(*)::int AS n FROM ${q(t)}`);
         counts[t] = rows[0]?.n ?? 0;

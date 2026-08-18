@@ -1021,6 +1021,15 @@ app.post('/api/push/reminder', requireAdmin, async (req, res) => {
   }
 });
 
+// Costos de productos para el panel financiero (solo admin; no viajan en /api/state).
+app.get('/api/admin/products-cost', requireAdmin, async (req, res) => {
+  try {
+    res.json({ costs: await store.listProductCosts() });
+  } catch (err) {
+    fail(res, err, 'No se pudieron cargar los costos.');
+  }
+});
+
 // Admin
 app.post('/api/products', requireAdmin, async (req, res) => {
   try {

@@ -413,7 +413,7 @@ const fileStore = {
   // convierte las imágenes base64 de productos en URLs servidas bajo demanda.
   async getPublicState(clientId) {
     const state = await this.getState(clientId);
-    state.products = state.products.map((p) => ({ ...p, image: productImageUrl(p.id, p.image) }));
+    state.products = state.products.map(({ cost, ...p }) => ({ ...p, image: productImageUrl(p.id, p.image) }));
     state.orders = state.orders.map((o) => {
       const { paymentProof, ...rest } = o;
       return { ...rest, hasProof: Boolean(paymentProof) };
@@ -427,6 +427,17 @@ const fileStore = {
   async getProductById(id) {
     const state = await this.getState();
     return state.products.find((p) => p.id === id) || null;
+  },
+
+  async listProductCosts() {
+    const state = await this.getState();
+    return state.products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      category: p.category,
+      price: Number(p.price) || 0,
+      cost: Number(p.cost) || 0
+    }));
   },
 
   async saveProducts(products) {
@@ -1125,6 +1136,7 @@ const pgStore = {
         brand TEXT,
         description TEXT,
         price NUMERIC,
+        cost NUMERIC,
         category TEXT,
         stock INTEGER,
         "sizeValue" TEXT,
@@ -1133,6 +1145,7 @@ const pgStore = {
         "createdAt" TEXT
       );
       ALTER TABLE ${q('products')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      ALTER TABLE ${q('products')} ADD COLUMN IF NOT EXISTS "cost" NUMERIC;
       CREATE TABLE IF NOT EXISTS ${q('categories')} (
         name TEXT PRIMARY KEY
       );
@@ -1234,9 +1247,9 @@ const pgStore = {
     if (rows[0].n > 0) return;
     for (const p of defaultState().products) {
       await retryingQuery(this.pool,
-        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
-        [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
+        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, cost, category, stock, "sizeValue", "sizeUnit", image)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
+        [p.id, p.code, p.name, p.brand, p.description, p.price, p.cost ?? 0, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
       );
     }
     for (const c of defaultState().categories) {
@@ -1305,6 +1318,7 @@ const pgStore = {
         brand: r.brand,
         description: r.description,
         price: Number(r.price),
+        cost: r.cost == null ? 0 : Number(r.cost),
         category: r.category,
         stock: r.stock,
         reserved: reserved.get(r.id) || 0,
@@ -1338,7 +1352,7 @@ const pgStore = {
   // Vista pública del estado (ver fileStore.getPublicState).
   async getPublicState(clientId) {
     const state = await this.getState(clientId);
-    state.products = state.products.map((p) => ({ ...p, image: productImageUrl(p.id, p.image) }));
+    state.products = state.products.map(({ cost, ...p }) => ({ ...p, image: productImageUrl(p.id, p.image) }));
     state.orders = state.orders.map((o) => {
       const { paymentProof, ...rest } = o;
       return { ...rest, hasProof: Boolean(paymentProof) };
@@ -2145,9 +2159,9 @@ const pgStore = {
       createdAt: data.createdAt || new Date().toISOString()
     };
     await retryingQuery(this.pool,
-      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-      [product.id, product.code, product.name, product.brand, product.description, product.price, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '', product.createdAt]
+      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, cost, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [product.id, product.code, product.name, product.brand, product.description, product.price, product.cost ?? 0, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '', product.createdAt]
     );
     if (product.category) {
       await retryingQuery(this.pool,`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [product.category]);
@@ -2166,8 +2180,8 @@ const pgStore = {
     }
     const p = { ...rows[0], ...payload, id };
     await retryingQuery(this.pool,
-      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11, "createdAt"=$12 WHERE id=$1`,
-      [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || rows[0].createdAt || null]
+      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, cost=$7, category=$8, stock=$9, "sizeValue"=$10, "sizeUnit"=$11, image=$12, "createdAt"=$13 WHERE id=$1`,
+      [id, p.code, p.name, p.brand, p.description, p.price, p.cost ?? 0, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || rows[0].createdAt || null]
     );
     if (p.category) {
       await retryingQuery(this.pool,`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [p.category]);
@@ -2190,6 +2204,18 @@ const pgStore = {
   async atomicAddCategory(name) {
     await retryingQuery(this.pool,`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
     return { state: await this.getPublicState() };
+  },
+
+  // Costos de los productos (solo admin: no viajan en el estado público).
+  async listProductCosts() {
+    const { rows } = await retryingQuery(this.pool,`SELECT id, name, category, price, cost FROM ${q('products')}`);
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      category: r.category,
+      price: Number(r.price) || 0,
+      cost: Number(r.cost) || 0
+    }));
   }
 };
 

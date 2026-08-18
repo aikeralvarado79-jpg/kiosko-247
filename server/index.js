@@ -645,6 +645,21 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
+// Venta en mostrador: ruta exclusiva de admin. El admin registra una venta
+// física desde el panel ("Ventas"). Se crea un pedido tipo pickup ya entregado
+// y pagado, así alimenta Finanzas y descuenta stock sin aparecer como pendiente.
+app.post('/api/admin/sales', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await store.createCounterSale(body);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+    // Sin notifyAdminsNewOrder: la venta la está registrando el propio admin.
+  } catch (err) {
+    fail(res, err, 'No se pudo registrar la venta. Intenta de nuevo.');
+  }
+});
+
 // Reserva de stock en tiempo real: sincroniza el carrito del cliente (clientId)
 // con el servidor. El stock reservado por otros clientes se descuenta del stock
 // visible; las reservas expiran (5 min carrito / 7 min checkout).

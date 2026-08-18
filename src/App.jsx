@@ -10987,11 +10987,10 @@ function AdminView({
                       : 'Filtrar por stock: bajo / agotados'
                   }
                 >
-                  <Icon name="layers" className="w-4 h-4" />
-                  <span className="hidden md:inline">
+                  <Icon name="layers" className="w-4 h-4 shrink-0" />
+                  <span>
                     {invStockFilter === 'todas' ? 'Stock' : invStockFilter === 'bajo' ? 'Solo bajo' : 'Agotados'}
                   </span>
-                  <Icon name={invStockFilter === 'agotado' ? 'check' : invStockFilter === 'bajo' ? 'alertTriangle' : 'x'} className="w-3.5 h-3.5 md:hidden" />
                 </button>
                 <button
                   onClick={() => setInvSortStock((v) => (v === false ? 'asc' : v === 'asc' ? 'desc' : false))}
@@ -11002,11 +11001,10 @@ function AdminView({
                   }`}
                   title="Ordenar por stock (menor primero para reponer)"
                 >
-                  <Icon name={invSortStock === 'asc' ? 'chevronUp' : invSortStock === 'desc' ? 'chevronDown' : 'list'} className="w-4 h-4" />
-                  <span className="hidden md:inline">
-                    {invSortStock === 'asc' ? 'Stock ↑' : invSortStock === 'desc' ? 'Stock ↓' : 'Stock'}
+                  <Icon name={invSortStock === 'asc' ? 'chevronUp' : invSortStock === 'desc' ? 'chevronDown' : 'list'} className="w-4 h-4 shrink-0" />
+                  <span>
+                    {invSortStock === 'asc' ? 'Stock ↑' : invSortStock === 'desc' ? 'Stock ↓' : 'Ordenar'}
                   </span>
-                  <Icon name={invSortStock ? 'check' : 'x'} className="w-3.5 h-3.5 md:hidden" />
                 </button>
                 <button
                   onClick={() => setInvGroupByBrand((v) => !v)}
@@ -11017,9 +11015,8 @@ function AdminView({
                   }`}
                   title="Agrupar la lista por marca"
                 >
-                  <Icon name="layers" className="w-4 h-4" />
-                  <span className="hidden md:inline">{invGroupByBrand ? 'Agrupado por marca' : 'Agrupar por marca'}</span>
-                  <Icon name={invGroupByBrand ? 'check' : 'x'} className="w-3.5 h-3.5 md:hidden" />
+                  <Icon name="layers" className="w-4 h-4 shrink-0" />
+                  <span>{invGroupByBrand ? 'Por marca ✓' : 'Agrupar por marca'}</span>
                 </button>
                 <button
                   onClick={() => setInvView((v) => (v === 'lista' ? 'recorrido' : 'lista'))}
@@ -11030,8 +11027,8 @@ function AdminView({
                   }`}
                   title="Alternar entre lista y recorrido estilo tienda"
                 >
-                  <Icon name={invView === 'recorrido' ? 'list' : 'store'} className="w-4 h-4" />
-                  <span className="hidden md:inline">{invView === 'recorrido' ? 'Ver lista' : 'Recorrido tienda'}</span>
+                  <Icon name={invView === 'recorrido' ? 'list' : 'store'} className="w-4 h-4 shrink-0" />
+                  <span>{invView === 'recorrido' ? 'Ver lista' : 'Recorrido'}</span>
                 </button>
               </div>
             </div>
@@ -11596,7 +11593,7 @@ function AdminView({
                             {o.routeNumber}
                           </span>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
+<div className="flex flex-wrap items-center gap-2">
                               <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
                               <span className="text-xs font-bold text-white truncate">{o.customerName}</span>
                               {isTracking && (

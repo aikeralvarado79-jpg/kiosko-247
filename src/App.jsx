@@ -2715,6 +2715,23 @@ export default function App() {
     loadProductCosts();
   };
 
+  const handleReceiveStock = async (product, qty) => {
+    const addQty = Math.round(Number(qty) || 0);
+    if (addQty <= 0) return false;
+    const res = await api.updateProduct(product.id, {
+      stock: (Number(product.stock) || 0) + addQty
+    });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el stock', 'error');
+      return false;
+    }
+    setProducts(res.data.state.products || []);
+    setCategories(res.data.state.categories || []);
+    loadProductCosts();
+    addToast(`Stock recibido: ${product.name} (+${addQty})`, 'success');
+    return true;
+  };
+
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
     const res = await api.updateOrderStatus(orderId, newStatus);
     if (!res.ok) {
@@ -3204,6 +3221,7 @@ export default function App() {
             onOpenVoice={openVoiceOrder}
             guestShare={guestShare}
             guestAdded={guestAdded}
+            addToast={addToast}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -3227,6 +3245,7 @@ onEditProduct={(product) => {
         setIsAddEditModalOpen(true);
       }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
+            onReceiveStock={handleReceiveStock}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onUpdateOrderPayment={handleUpdateOrderPayment}
             onUpdateCourierLocation={handleUpdateCourierLocation}
@@ -4786,12 +4805,27 @@ function CustomerView({
   onOpenMyKiosko,
   onOpenVoice,
   guestShare,
-  guestAdded
+  guestAdded,
+  addToast
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [promoIdx, setPromoIdx] = useState(0);
   // Recorrido Horizontal: apagado por defecto; el usuario lo enciende con el switch.
   const [shelvesEnabled, setShelvesEnabled] = useState(false);
+  // Escáner de código de barras en la vitrina: agrega el producto al carrito
+  // sin buscar (venta en mostrador).
+  const [scanCartOpen, setScanCartOpen] = useState(false);
+
+  const handleScanCartCode = (code) => {
+    const found = (allProducts || []).find(
+      (p) => String(p.code || '').trim() === String(code).trim()
+    );
+    if (!found) {
+      if (addToast) addToast(`No hay productos con el código ${code}`, 'error');
+      return;
+    }
+    onAddToCart(found);
+  };
 
   // Carrusel de promos con autoplay (solo cuando hay más de una activa)
   const activePromos = promos.filter((p) => p.active);
@@ -5315,16 +5349,26 @@ function CustomerView({
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
             placeholder="Buscar productos, marcas..."
-            className="w-full pl-12 pr-24 py-3.5 bg-slate-800/80 border border-slate-700/80 rounded-2xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all text-sm backdrop-blur-md"
+            className="w-full pl-12 pr-36 py-3.5 bg-slate-800/80 border border-slate-700/80 rounded-2xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all text-sm backdrop-blur-md"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-16 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              className="absolute right-28 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
             >
               <Icon name="x" className="w-4 h-4" />
             </button>
           )}
+          <Btn
+            onClick={() => setScanCartOpen(true)}
+            variant="tonal"
+            size="sm"
+            icon="scan"
+            className="!absolute right-14 top-1/2 -translate-y-1/2 !p-2.5 !rounded-xl"
+            style={{ width: 'auto', height: 'auto' }}
+            title="Escanear código de barras para agregar al carrito"
+            aria-label="Escanear código de barras"
+          ></Btn>
           <Btn
             onClick={onOpenVoice}
             variant="tonal"
@@ -5647,6 +5691,15 @@ function CustomerView({
             </RevealOnScroll>
           ))}
         </div>
+      )}
+      {scanCartOpen && (
+        <BarcodeScannerModal
+          onScan={(code) => {
+            setScanCartOpen(false);
+            handleScanCartCode(code);
+          }}
+          onClose={() => setScanCartOpen(false)}
+        />
       )}
     </div>
   );
@@ -9395,6 +9448,7 @@ function AdminView({
   onOpenAddModal,
   onEditProduct,
   onDeleteProduct,
+  onReceiveStock,
   onUpdateOrderStatus,
   onUpdateOrderPayment,
   onUpdateCourierLocation,
@@ -9446,6 +9500,8 @@ function AdminView({
   const [initialOrderPrefs] = useState(loadOrderPrefs);
   const [confirmRefresh, setConfirmRefresh] = useState(false);
   const [confirmCancelOrder, setConfirmCancelOrder] = useState(null);
+  const [receiveStockOpen, setReceiveStockOpen] = useState(false);
+  const [pickingOrder, setPickingOrder] = useState(null);
   const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
   const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
@@ -10641,6 +10697,15 @@ function AdminView({
           ) : (
           <>
           <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
+          {['pendiente', 'en_preparacion'].includes(order.status) && (
+            <button
+              onClick={() => setPickingOrder(order)}
+              className="w-full py-2 rounded-xl text-xs font-bold bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-1.5"
+            >
+              <Icon name="scan" className="w-3.5 h-3.5" />
+              Preparar con escáner
+            </button>
+          )}
           <div className="grid grid-cols-2 gap-2">
             {[
               { key: 'pendiente', label: 'Pendiente' },
@@ -10859,6 +10924,22 @@ function AdminView({
               onUpdateOrderStatus(o.id, 'cancelado');
             }}
             onClose={() => setConfirmCancelOrder(null)}
+          />
+        )}
+
+        {receiveStockOpen && (
+          <ReceiveStockModal
+            products={products}
+            onReceiveStock={onReceiveStock}
+            onClose={() => setReceiveStockOpen(false)}
+          />
+        )}
+
+        {pickingOrder && (
+          <OrderPickingModal
+            order={pickingOrder}
+            products={products}
+            onClose={() => setPickingOrder(null)}
           />
         )}
       </div>
@@ -11104,6 +11185,14 @@ function AdminView({
                 >
                   <Icon name={invView === 'recorrido' ? 'list' : 'store'} className="w-4 h-4 shrink-0" />
                   <span>{invView === 'recorrido' ? 'Ver lista' : 'Recorrido'}</span>
+                </button>
+                <button
+                  onClick={() => setReceiveStockOpen(true)}
+                  className="shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25 shadow-lg shadow-emerald-500/10"
+                  title="Escanear productos y sumar stock al recibir mercadería"
+                >
+                  <Icon name="scan" className="w-4 h-4 shrink-0" />
+                  <span>Recibir</span>
                 </button>
               </div>
             </div>
@@ -15440,7 +15529,7 @@ function CreditLimitInput({ customer, onSetCreditLimit }) {
 // nativa BarcodeDetector (Chrome/Edge) cuando está disponible y, si no, decodifica
 // por software con ZXing (Safari, Firefox, iPhone). Siempre permite ingresar el
 // código manualmente como respaldo.
-function BarcodeScannerModal({ onScan, onClose }) {
+function BarcodeScannerModal({ onScan, onClose, keepOpen = false, overlay = null }) {
   useOverlay(true, onClose);
   const videoRef = useRef(null);
   const [cameraError, setCameraError] = useState('');
@@ -15454,6 +15543,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
     let cancelled = false;
     let last = 0;
     let decoding = false;
+    let flashTimer = 0;
     const reader =
       typeof window !== 'undefined' && 'BarcodeDetector' in window
         ? null
@@ -15463,6 +15553,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
       if (cancelled) return;
       cancelled = true;
       cancelAnimationFrame(raf);
+      clearTimeout(flashTimer);
       if (zxControls && typeof zxControls.stop === 'function') {
         try { zxControls.stop(); } catch {}
       }
@@ -15474,6 +15565,14 @@ function BarcodeScannerModal({ onScan, onClose }) {
       const v = String(value || '').trim();
       if (!v) return;
       setFlash(true);
+      if (keepOpen) {
+        onScan(v);
+        clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => {
+          if (!cancelled) setFlash(false);
+        }, 260);
+        return;
+      }
       stop();
       onScan(v);
     };
@@ -15489,7 +15588,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
             zxControls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
               if (!cancelled && result && result.getText) handleResult(result.getText());
             });
-          } catch (zxErr) {
+          } catch {
             zxControls = await reader.decodeFromConstraints(
               { video: true },
               videoRef.current,
@@ -15566,7 +15665,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
     })();
 
     return stop;
-  }, [onScan]);
+  }, [onScan, keepOpen]);
 
   const applyManualCode = () => {
     const v = manual.trim();
@@ -15605,6 +15704,8 @@ function BarcodeScannerModal({ onScan, onClose }) {
               </p>
             </div>
           )}
+
+          {overlay}
 
           <div className="flex gap-2">
             <input
@@ -15650,6 +15751,54 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
 
   const [newCatInput, setNewCatInput] = useState('');
   const [scannerOpen, setScannerOpen] = useState(false);
+
+  // Autocompletado de datos del producto por código de barras (Nivel 2): al
+  // escanear o buscar un código, se consulta Open Food Facts / Open Beauty Facts
+  // y se rellenan los campos vacíos (nombre, marca, descripción, imagen).
+  const [lookupState, setLookupState] = useState('idle'); // idle | loading | found | notfound | error
+  const [lookupError, setLookupError] = useState('');
+  const [lookupInfo, setLookupInfo] = useState(null);
+
+  const DEFAULT_IMG =
+    'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=500&auto=format&fit=crop&q=80';
+
+  const lookupProductInfo = async (rawCode) => {
+    const code = String(rawCode || '').trim();
+    if (!code) return;
+    setLookupState('loading');
+    setLookupError('');
+    setLookupInfo(null);
+    try {
+      const res = await api.productInfo(code);
+      if (!res.ok) {
+        setLookupState('error');
+        setLookupError(res.data?.error || 'No se pudo consultar el código.');
+        return;
+      }
+      const info = res.data;
+      if (!info || !info.found) {
+        setLookupState('notfound');
+        return;
+      }
+      setLookupState('found');
+      setLookupInfo(info);
+      setFormData((prev) => {
+        const keepImage =
+          prev.image && prev.image !== DEFAULT_IMG && !prev.image.startsWith('/api/products/');
+        return {
+          ...prev,
+          name: prev.name || info.name || prev.name,
+          brand: prev.brand || info.brand || prev.brand,
+          description: prev.description || info.description || prev.description,
+          image: keepImage ? prev.image : info.image || prev.image,
+          category: categories.includes(info.category) ? info.category : prev.category
+        };
+      });
+    } catch {
+      setLookupState('error');
+      setLookupError('Sin conexión para consultar el código. Verificá tu internet.');
+    }
+  };
 
   // Si otro producto (distinto id) ya usa ese código de barras, se avisa en el
   // formulario y se bloquea el guardado para no duplicar códigos.
@@ -15850,9 +15999,46 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
                 Escanear
               </button>
             </div>
-            <p className="text-[10px] text-slate-500 mt-1">
-              {formData.code ? 'Este código reemplaza al generado automáticamente.' : 'Si no lo cargás, se genera uno automático (PROD-XXX).'}
-            </p>
+            <div className="flex items-center justify-between gap-2 mt-1">
+              <p className="text-[10px] text-slate-500">
+                {formData.code ? 'Este código reemplaza al generado automáticamente.' : 'Si no lo cargás, se genera uno automático (PROD-XXX).'}
+              </p>
+              {formData.code.trim() && (
+                <button
+                  type="button"
+                  onClick={() => lookupProductInfo(formData.code)}
+                  disabled={lookupState === 'loading'}
+                  className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold hover:bg-cyan-500/25 transition-all disabled:opacity-50"
+                  title="Buscar nombre, marca, imagen y más datos de este código"
+                >
+                  <Icon name={lookupState === 'loading' ? 'clock' : 'search'} className="w-3 h-3" />
+                  {lookupState === 'loading' ? 'Buscando…' : 'Buscar datos'}
+                </button>
+              )}
+            </div>
+            {lookupState === 'loading' && (
+              <p className="text-[10px] text-cyan-300 font-semibold mt-1 flex items-center gap-1">
+                <Icon name="clock" className="w-3 h-3" />
+                Consultando base de códigos…
+              </p>
+            )}
+            {lookupState === 'found' && lookupInfo && (
+              <p className="text-[10px] text-emerald-400 font-semibold mt-1 flex items-center gap-1">
+                <Icon name="check" className="w-3 h-3" />
+                Datos encontrados en {lookupInfo.source}. Se rellenaron los campos vacíos.
+              </p>
+            )}
+            {lookupState === 'notfound' && (
+              <p className="text-[10px] text-slate-400 mt-1">
+                No encontramos datos para este código. Cargá el producto a mano.
+              </p>
+            )}
+            {lookupState === 'error' && (
+              <p className="text-[10px] text-rose-400 font-semibold mt-1 flex items-center gap-1">
+                <Icon name="alertTriangle" className="w-3 h-3" />
+                {lookupError}
+              </p>
+            )}
             {codeConflict && (
               <p className="text-[10px] text-rose-400 font-semibold mt-1 flex items-center gap-1">
                 <Icon name="alertTriangle" className="w-3 h-3" />
@@ -16141,8 +16327,365 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
           onScan={(code) => {
             setFormData((prev) => ({ ...prev, code }));
             setScannerOpen(false);
+            lookupProductInfo(code);
           }}
           onClose={() => setScannerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Recibir mercadería: escanear (o tipear) el código de barras de un producto,
+// ver su stock actual y sumar las unidades recibidas de una. Reutiliza el
+// BarcodeScannerModal como overlay superior.
+function ReceiveStockModal({ products = [], onReceiveStock, onClose }) {
+  useOverlay(true, onClose);
+  const [scannerOpen, setScannerOpen] = useState(true);
+  const [found, setFound] = useState(null);
+  const [qty, setQty] = useState('');
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleCode = (code) => {
+    const p = (products || []).find((x) => String(x.code || '').trim() === String(code).trim());
+    if (!p) {
+      setMsg(`No hay ningún producto con el código ${code}.`);
+      setScannerOpen(false);
+      return;
+    }
+    setMsg('');
+    setFound(p);
+    setQty('');
+    setScannerOpen(false);
+  };
+
+  const confirmReceiving = async () => {
+    const n = Number(qty);
+    if (!n || n <= 0) {
+      setMsg('Ingresá una cantidad mayor a 0.');
+      return;
+    }
+    if (!found) return;
+    setSaving(true);
+    const ok = await onReceiveStock(found, n);
+    setSaving(false);
+    if (ok) {
+      setFound(null);
+      setQty('');
+      setMsg('');
+      setScannerOpen(true);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-screen-up max-h-[92vh] flex flex-col">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-white text-sm flex items-center gap-2">
+            <Icon name="package" className="w-4 h-4 text-teal-400" />
+            Recibir mercadería
+          </h3>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
+          {!found && (
+            <div className="rounded-2xl bg-slate-800/60 border border-slate-700 p-4 text-center space-y-2">
+              <Icon name="scan" className="w-8 h-8 mx-auto text-teal-400" />
+              <p className="text-xs text-slate-300 font-semibold">
+                Escaneá el código de barras del producto que llegó
+              </p>
+              <p className="text-[11px] text-slate-500">También podés tipearlo en el escáner.</p>
+              {!scannerOpen && (
+                <button
+                  onClick={() => setScannerOpen(true)}
+                  className="w-full py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 font-bold text-xs hover:bg-teal-500/25 transition-all"
+                >
+                  Reintentar lectura
+                </button>
+              )}
+            </div>
+          )}
+
+          {msg && !found && (
+            <p className="text-[12px] text-rose-400 font-semibold flex items-center gap-1">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+              {msg}
+            </p>
+          )}
+
+          {found && (
+            <>
+              <div className="flex items-center gap-3 rounded-2xl bg-slate-800/80 border border-slate-700 p-3">
+                <ProductImg product={found} alt={found.name} className="w-14 h-14 rounded-xl object-cover bg-slate-900 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-white text-sm truncate">{found.name}</h4>
+                  <p className="text-[11px] text-slate-400">Código: {found.code}</p>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    Stock actual: <span className="text-teal-300 font-bold">{found.stock}</span>
+                    {found.price ? <> · {formatUsd(found.price)}</> : null}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setFound(null); setScannerOpen(true); setMsg(''); }}
+                  className="shrink-0 text-[11px] font-semibold text-slate-400 hover:text-white"
+                >
+                  Cambiar
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Cantidad recibida</label>
+                <input
+                  type="number"
+                  min="1"
+                  autoFocus
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && confirmReceiving()}
+                  placeholder="Ej: 12"
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
+                />
+                <p className="text-[11px] text-teal-300 font-semibold mt-1">
+                  Quedaría en {Number(found.stock) + (Number(qty) || 0)} unidades
+                </p>
+              </div>
+
+              {msg && (
+                <p className="text-[12px] text-rose-400 font-semibold flex items-center gap-1">
+                  <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+                  {msg}
+                </p>
+              )}
+
+              <button
+                onClick={confirmReceiving}
+                disabled={saving || !qty}
+                className="w-full py-3 rounded-2xl bg-teal-500 text-slate-950 font-bold text-xs hover:bg-teal-400 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-teal-500/20"
+              >
+                <Icon name={saving ? 'clock' : 'download'} className="w-4 h-4" />
+                {saving ? 'Guardando…' : 'Recibir stock'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {scannerOpen && (
+        <BarcodeScannerModal onScan={handleCode} onClose={() => setScannerOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+// Preparar un pedido con escáner (picking): el admin escanea cada código de
+// barras y el artículo correspondiente queda marcado como verificado. El
+// escáner queda abierto (keepOpen) con un overlay que muestra el avance y los
+// ítems que faltan.
+function OrderPickingModal({ order, products = [], onClose }) {
+  useOverlay(true, onClose);
+  const items = order?.items || [];
+  const [checked, setChecked] = useState(() => new Set());
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const totalUnits = items.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
+  const doneUnits = items.reduce((s, i) => (checked.has(i.id) ? s + (Number(i.quantity) || 0) : s), 0);
+  const doneCount = items.filter((i) => checked.has(i.id)).length;
+  const pct = totalUnits ? Math.round((doneUnits / totalUnits) * 100) : 0;
+
+  const resolveCode = (code) => {
+    const p = (products || []).find((x) => String(x.code || '').trim() === String(code).trim());
+    if (!p) return { error: `Ningún producto tiene el código ${code}` };
+    const item = items.find((i) => String(i.id) === String(p.id));
+    if (!item) return { error: `${p.name} no está en este pedido` };
+    return { item, product: p };
+  };
+
+  const handleCode = (code) => {
+    const r = resolveCode(code);
+    if (r.error) {
+      setMsg(r.error);
+      return;
+    }
+    if (checked.has(r.item.id)) {
+      setMsg(`${r.item.name} ya estaba registrado.`);
+      return;
+    }
+    setChecked((prev) => new Set(prev).add(r.item.id));
+    setMsg('');
+  };
+
+  const toggleItem = (id) => {
+    setChecked((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  };
+
+  const applyManual = () => {
+    const v = manualCode.trim();
+    if (v) {
+      handleCode(v);
+      setManualCode('');
+    }
+  };
+
+  const scannerOverlay = (
+    <div className="rounded-2xl bg-slate-800/80 border border-slate-700 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold text-white">
+          Pedido <span className="text-cyan-300 font-mono">{order?.id}</span>
+        </span>
+        <span className="text-[11px] font-black text-cyan-300">
+          {doneCount}/{items.length} ítems · {pct}%
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-slate-700/70 overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-cyan-400 to-teal-400 transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+        {items.map((it) => {
+          const done = checked.has(it.id);
+          return (
+            <span
+              key={it.id}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold ${
+                done
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                  : 'bg-slate-800/80 border-slate-700 text-slate-400'
+              }`}
+            >
+              <Icon name={done ? 'check' : 'layers'} className="w-3 h-3" />
+              {it.name}
+            </span>
+          );
+        })}
+      </div>
+      <button
+        onClick={() => setScannerOpen(false)}
+        className="w-full py-2 rounded-xl bg-teal-500 text-slate-950 text-xs font-bold hover:bg-teal-400 transition-all"
+      >
+        Terminar escaneo
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-screen-up max-h-[92vh] flex flex-col">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-white text-sm flex items-center gap-2">
+            <Icon name="scan" className="w-4 h-4 text-cyan-400" />
+            Preparar pedido {order?.id}
+          </h3>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] text-slate-400 font-semibold">Verificación</span>
+              <span className="text-[11px] font-black text-cyan-300">
+                {doneUnits}/{totalUnits} un.
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-slate-700/70 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-400 to-teal-400 transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            {items.map((it) => {
+              const done = checked.has(it.id);
+              return (
+                <button
+                  key={it.id}
+                  onClick={() => toggleItem(it.id)}
+                  className={`w-full flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all ${
+                    done
+                      ? 'bg-emerald-500/15 border-emerald-500/40'
+                      : 'bg-slate-800/60 border-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
+                      done ? 'bg-emerald-500 border-emerald-400 text-slate-950' : 'border-slate-600'
+                    }`}
+                  >
+                    {done && <Icon name="check" className="w-3 h-3" />}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-xs font-bold truncate ${done ? 'text-emerald-200' : 'text-white'}`}>
+                      {it.name}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      x{it.quantity}
+                      {it.price ? ` · ${formatUsd(it.price)}` : ''}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {msg && (
+            <p className="text-[11px] text-rose-400 font-semibold flex items-center gap-1">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+              {msg}
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={manualCode}
+              onChange={(e) => setManualCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && applyManual()}
+              placeholder="O escribí un código…"
+              className="flex-1 min-w-0 px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
+            />
+            <button
+              onClick={applyManual}
+              disabled={!manualCode.trim()}
+              className="shrink-0 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-xs hover:text-white transition-all disabled:opacity-40"
+            >
+              Marcar
+            </button>
+          </div>
+
+          <button
+            onClick={() => setScannerOpen(true)}
+            className="w-full py-3 rounded-2xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 font-bold text-xs hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-2"
+          >
+            <Icon name="camera" className="w-4 h-4" />
+            Escanear códigos de barras
+          </button>
+        </div>
+      </div>
+
+      {scannerOpen && (
+        <BarcodeScannerModal
+          keepOpen
+          onScan={handleCode}
+          onClose={() => setScannerOpen(false)}
+          overlay={scannerOverlay}
         />
       )}
     </div>

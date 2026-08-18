@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
-import { api, getToken, setToken, clearToken } from './api.js';
+import { api, getToken, setToken, clearToken, setRememberSession, getRememberSession } from './api.js';
 import { ADMIN_PHONES } from './data.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -4177,6 +4177,8 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // "Recordar sesión": mantiene el login al cerrar/reabrir la pestaña.
+  const [remember, setRemember] = useState(() => getRememberSession());
 
   // Login state
   const [loginPhone, setLoginPhone] = useState(() => ({
@@ -4618,6 +4620,19 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               </button>
             </div>
           </div>
+
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => {
+                setRemember(e.target.checked);
+                setRememberSession(e.target.checked);
+              }}
+              className="w-4 h-4 rounded accent-cyan-500"
+            />
+            <span className="text-xs text-slate-300 font-semibold">Recordar sesión en este dispositivo</span>
+          </label>
 
           <button
             type="submit"
@@ -9572,6 +9587,10 @@ function AdminView({
   const [invSearch, setInvSearch] = useState('');
   const [invCategory, setInvCategory] = useState('todas');
   const [invGroupByBrand, setInvGroupByBrand] = useState(false);
+  // Stock: filtro (todas | bajo | agotado) y ordenación (stock asc | desc | sin orden).
+  const [invStockFilter, setInvStockFilter] = useState('todas');
+  const [invSortStock, setInvSortStock] = useState(false);
+  const availOf = (p) => Math.max(0, (Number(p.stock) || 0) - (Number(p.reserved) || 0));
   const inventoryProducts = useMemo(() => products || [], [products]);
   const searchOnly = useMemo(() => {
     const q = invSearch.trim().toLowerCase();
@@ -9591,10 +9610,25 @@ function AdminView({
     (c) => (c === 'todas' ? searchOnly.length : searchOnly.filter((p) => p.category === c).length),
     [searchOnly]
   );
-  const filteredProducts = useMemo(
-    () => (invCategory === 'todas' ? searchOnly : searchOnly.filter((p) => p.category === invCategory)),
-    [searchOnly, invCategory]
-  );
+  const filteredProducts = useMemo(() => {
+    let list = invCategory === 'todas' ? searchOnly : searchOnly.filter((p) => p.category === invCategory);
+    if (invStockFilter === 'agotado') {
+      list = list.filter((p) => availOf(p) <= 0);
+    } else if (invStockFilter === 'bajo') {
+      list = list.filter((p) => {
+        const a = availOf(p);
+        return a > 0 && a <= 5;
+      });
+    }
+    if (invSortStock) {
+      list = [...list].sort((a, b) => {
+        const d = availOf(a) - availOf(b);
+        if (d !== 0) return invSortStock === 'asc' ? d : -d;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+    }
+    return list;
+  }, [searchOnly, invCategory, invStockFilter, invSortStock]);
   const groupedByBrand = useMemo(() => {
     if (!invGroupByBrand) return [];
     const map = {};
@@ -9622,6 +9656,8 @@ function AdminView({
   const clearInvFilters = () => {
     setInvSearch('');
     setInvCategory('todas');
+    setInvStockFilter('todas');
+    setInvSortStock(false);
   };
 
   const renderMobileCard = (p) => {
@@ -9903,9 +9939,17 @@ function AdminView({
     knownOrderIdsRef.current = new Set(orders.map((o) => o.id));
     if (fresh.length === 0) return;
     setUnviewedCount((c) => c + fresh.length);
+    const label = `${fresh.length} pedido${fresh.length !== 1 ? 's' : ''} nuevo${fresh.length !== 1 ? 's' : ''}: ${fresh.map((o) => o.id).join(', ')}`;
+    playChime();
+    haptic(160);
     if (document.visibilityState === 'visible') {
-      playChime();
-      addToastRef.current(`${fresh.length} pedido${fresh.length !== 1 ? 's' : ''} nuevo${fresh.length !== 1 ? 's' : ''}: ${fresh.map((o) => o.id).join(', ')}`, 'info');
+      addToastRef.current(label, 'info');
+    } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try {
+        const n = new Notification('Nuevo pedido', { body: label, tag: 'kiosko-new-order', renotify: true });
+        n.onclick = () => window.focus();
+        setTimeout(() => n.close(), 8000);
+      } catch {}
     }
   }, [orders]);
 
@@ -10928,6 +10972,42 @@ function AdminView({
                 )}
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setInvStockFilter((v) => (v === 'todas' ? 'bajo' : v === 'bajo' ? 'agotado' : 'todas'))}
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                    invStockFilter !== 'todas'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-lg shadow-emerald-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title={
+                    invStockFilter === 'bajo'
+                      ? 'Mostrando solo productos con stock bajo (≤5)'
+                      : invStockFilter === 'agotado'
+                      ? 'Mostrando solo productos agotados'
+                      : 'Filtrar por stock: bajo / agotados'
+                  }
+                >
+                  <Icon name="layers" className="w-4 h-4" />
+                  <span className="hidden md:inline">
+                    {invStockFilter === 'todas' ? 'Stock' : invStockFilter === 'bajo' ? 'Solo bajo' : 'Agotados'}
+                  </span>
+                  <Icon name={invStockFilter === 'agotado' ? 'check' : invStockFilter === 'bajo' ? 'alertTriangle' : 'x'} className="w-3.5 h-3.5 md:hidden" />
+                </button>
+                <button
+                  onClick={() => setInvSortStock((v) => (v === false ? 'asc' : v === 'asc' ? 'desc' : false))}
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                    invSortStock
+                      ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 shadow-lg shadow-sky-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title="Ordenar por stock (menor primero para reponer)"
+                >
+                  <Icon name={invSortStock === 'asc' ? 'chevronUp' : invSortStock === 'desc' ? 'chevronDown' : 'list'} className="w-4 h-4" />
+                  <span className="hidden md:inline">
+                    {invSortStock === 'asc' ? 'Stock ↑' : invSortStock === 'desc' ? 'Stock ↓' : 'Stock'}
+                  </span>
+                  <Icon name={invSortStock ? 'check' : 'x'} className="w-3.5 h-3.5 md:hidden" />
+                </button>
                 <button
                   onClick={() => setInvGroupByBrand((v) => !v)}
                   className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
@@ -13169,8 +13249,8 @@ function OrderChat({ order }) {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages]);
 
-  const send = async () => {
-    const value = text.trim();
+  const send = async (valueOverride) => {
+    const value = String(valueOverride ?? text).trim();
     if (!value || sending) return;
     setSending(true);
     const res = await api.sendOrderMessage(order.id, order.phone, value);
@@ -13180,6 +13260,13 @@ function OrderChat({ order }) {
       load();
     }
   };
+
+  const TEMPLATES = [
+    { label: 'Listo 👍', text: (n, id) => `Hola ${n}, tu pedido ${id} está listo para retirar en Kiosko 24/7. ¡Te esperamos! 😊` },
+    { label: 'En camino 🛵', text: (n, id) => `Hola ${n}, tu pedido ${id} ya va en camino. ¡Pronto llega! 🙌` },
+    { label: 'En preparación', text: (n, id) => `Hola ${n}, estamos preparando tu pedido ${id}. Cualquier cambio te avisamos ✋` },
+    { label: 'Confirmar pago', text: (n, id) => `Hola ${n}, sobre el pago de tu pedido ${id}. ¿Necesitas ayuda? 🙏` }
+  ];
 
   return (
     <div className="rounded-2xl bg-slate-900/60 border border-slate-700 overflow-hidden">
@@ -13196,6 +13283,19 @@ function OrderChat({ order }) {
         )}
         {messages.map((m, idx) => (
           <ChatBubble key={m.id || idx} m={m} order={order} perspective="admin" />
+        ))}
+      </div>
+      <div className="px-2.5 pt-2.5 flex flex-wrap gap-1.5">
+        {TEMPLATES.map((t) => (
+          <button
+            key={t.label}
+            onClick={() => send(t.text(order.customerName, order.id))}
+            disabled={sending}
+            className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 text-[10px] font-bold hover:bg-emerald-500/20 transition-all disabled:opacity-50 active:scale-95"
+            title="Envía la plantilla al cliente en 1 tap"
+          >
+            {t.label}
+          </button>
         ))}
       </div>
       <div className="p-2.5 border-t border-slate-700/70 flex gap-2">

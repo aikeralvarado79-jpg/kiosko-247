@@ -20,9 +20,49 @@ const persistEtags = () => {
   }
 };
 
-export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
-export const setToken = (token) => sessionStorage.setItem(TOKEN_KEY, token);
-export const clearToken = () => sessionStorage.removeItem(TOKEN_KEY);
+// Preferencia "Recordar sesión" del admin: si está activa, el token se guarda
+// también en localStorage para que la sesión sobreviva al cerrar la pestaña.
+const REMEMBER_KEY = 'kiosko_admin_remember';
+export const setRememberSession = (value) => {
+  try {
+    localStorage.setItem(REMEMBER_KEY, value ? '1' : '0');
+  } catch {
+    // almacenamiento no disponible: se ignora
+  }
+};
+export const getRememberSession = () => {
+  try {
+    return localStorage.getItem(REMEMBER_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const getToken = () => {
+  try {
+    const s = sessionStorage.getItem(TOKEN_KEY);
+    if (s) return s;
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+};
+export const setToken = (token) => {
+  sessionStorage.setItem(TOKEN_KEY, token);
+  if (getRememberSession()) {
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch {
+      // se ignora: la sesión se mantiene solo en sessionStorage
+    }
+  }
+};
+export const clearToken = () => {
+  sessionStorage.removeItem(TOKEN_KEY);
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {}
+};
 
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };

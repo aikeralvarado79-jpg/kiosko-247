@@ -15450,18 +15450,22 @@ function BarcodeScannerModal({ onScan, onClose }) {
   useEffect(() => {
     let stream = null;
     let raf = 0;
+    let zxControls = null;
     let cancelled = false;
     let last = 0;
     let decoding = false;
     const reader =
       typeof window !== 'undefined' && 'BarcodeDetector' in window
         ? null
-        : new BrowserMultiFormatReader();
+        : new BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 150 });
 
     const stop = () => {
       if (cancelled) return;
       cancelled = true;
       cancelAnimationFrame(raf);
+      if (zxControls && typeof zxControls.stop === 'function') {
+        try { zxControls.stop(); } catch {}
+      }
       if (stream) stream.getTracks().forEach((t) => t.stop());
     };
 
@@ -15476,10 +15480,30 @@ function BarcodeScannerModal({ onScan, onClose }) {
 
     (async () => {
       try {
-        // Un solo getUserMedia propio (más confiable que la enumeración de
-        // dispositivos de ZXing, que falla en Safari/iOS por el prompt de
-        // permiso). Intenta con cámara trasera y, si el navegador no la soporta,
-        // reintenta con cualquier cámara.
+        if (reader) {
+          // Decodificación por software (ZXing): sin deviceId pide cámara trasera
+          // (facingMode environment) con su propio getUserMedia y corre un loop
+          // continuo de decodificación. Evita la enumeración de dispositivos,
+          // que fallaba en Safari/iOS.
+          try {
+            zxControls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+              if (!cancelled && result && result.getText) handleResult(result.getText());
+            });
+          } catch (zxErr) {
+            zxControls = await reader.decodeFromConstraints(
+              { video: true },
+              videoRef.current,
+              (result) => {
+                if (!cancelled && result && result.getText) handleResult(result.getText());
+              }
+            );
+          }
+          return;
+        }
+
+        // Un solo getUserMedia propio para BarcodeDetector nativo. Intenta con
+        // cámara trasera y, si el navegador no la soporta, reintenta con
+        // cualquier cámara.
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: false,
@@ -15499,31 +15523,14 @@ function BarcodeScannerModal({ onScan, onClose }) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
 
-        let detector = null;
-        if (!reader) {
-          try {
-            detector = new window.BarcodeDetector({
-              formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'codabar', 'itf', 'qr_code']
-            });
-          } catch {
-            detector = new window.BarcodeDetector();
-          }
+        let detector;
+        try {
+          detector = new window.BarcodeDetector({
+            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'codabar', 'itf', 'qr_code']
+          });
+        } catch {
+          detector = new window.BarcodeDetector();
         }
-
-        // Decodifica un frame: con BarcodeDetector nativo o, si no está, por
-        // software con ZXing sobre el mismo <video> (soporta EAN/UPC/Code128/QR).
-        const decodeOne = (v) => {
-          if (detector) {
-            return detector
-              .detect(v)
-              .then((codes) => (codes && codes.length ? String(codes[0].rawValue || '').trim() : null))
-              .catch(() => null);
-          }
-          return reader
-            .decodeFromVideoElement(v)
-            .then((r) => (r && r.getText ? String(r.getText()).trim() : null))
-            .catch(() => null);
-        };
 
         const step = () => {
           if (cancelled) return;
@@ -15532,10 +15539,14 @@ function BarcodeScannerModal({ onScan, onClose }) {
           if (v && v.readyState >= 2 && now - last > 150 && !decoding) {
             last = now;
             decoding = true;
-            decodeOne(v).then((value) => {
-              decoding = false;
-              if (!cancelled && value) handleResult(value);
-            });
+            detector
+              .detect(v)
+              .then((codes) => (codes && codes.length ? String(codes[0].rawValue || '').trim() : null))
+              .catch(() => null)
+              .then((value) => {
+                decoding = false;
+                if (!cancelled && value) handleResult(value);
+              });
           }
           raf = requestAnimationFrame(step);
         };

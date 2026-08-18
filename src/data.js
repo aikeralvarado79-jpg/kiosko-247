@@ -146,6 +146,10 @@ export const INITIAL_ORDERS = [
 
 export const STATUS_FLOW = ['pendiente', 'en_preparacion', 'listo', 'entregado'];
 
+// Teléfonos admin fijos (fallback compartido cliente/servidor). El servidor
+// además suma los que vienen de env (ADMIN_PHONES), config o empleados añadidos.
+export const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'];
+
 export const STATUS_LABELS = {
   pendiente: 'Pendiente',
   en_preparacion: 'En Preparación',

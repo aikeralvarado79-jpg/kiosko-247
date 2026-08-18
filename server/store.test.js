@@ -109,6 +109,38 @@ describe('fileStore', () => {
     expect(cancelado.state.products.find((p) => p.id === 'p1').stock).toBe(product.stock);
   });
 
+  it('updateOrderStatus a cancelado devuelve el stock de los items', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    const created = await store.createOrder({
+      customerName: 'Cliente W',
+      phone: '41155556666',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 3 }],
+      total: product.price * 3
+    });
+
+    const cancelado = await store.updateOrderStatus(created.order.id, 'cancelado');
+    expect(cancelado.state.orders.find((o) => o.id === created.order.id).status).toBe('cancelado');
+    expect(cancelado.state.products.find((p) => p.id === 'p1').stock).toBe(product.stock);
+  });
+
+  it('updateOrderStatus a cancelado no devuelve stock si ya estaba entregado', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    const created = await store.createOrder({
+      customerName: 'Cliente V',
+      phone: '41177778888',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 3 }],
+      total: product.price * 3
+    });
+    await store.updateOrderStatus(created.order.id, 'entregado');
+    const entregadoStock = (await store.getState()).products.find((p) => p.id === 'p1').stock;
+    const cancelado = await store.updateOrderStatus(created.order.id, 'cancelado');
+    expect(cancelado.state.products.find((p) => p.id === 'p1').stock).toBe(entregadoStock);
+  });
+
   it('no permite cancelar un pedido de otro teléfono', async () => {
     const store = await freshStore();
     const state = await store.getState();
@@ -416,10 +448,10 @@ describe('fileStore', () => {
   it('las reservas expiran tras su TTL y el stock vuelve a estar disponible', async () => {
     const store = await freshStore();
 
-    await store.holdStock('cliente-a', [{ id: 'p1', qty: 3 }], 50); // TTL 50 ms
+    await store.holdStock('cliente-a', [{ id: 'p1', qty: 3 }], 500); // TTL 500 ms
     expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(3);
 
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 1100));
 
     // getState purga las reservas vencidas.
     expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(0);
@@ -636,5 +668,64 @@ describe('fileStore', () => {
       walletApplied: 50
     });
     expect(result.error).toBe('Tu cartera solo cubre $10.00. Ajusta el monto o usa otro método.');
+  });
+
+  it('crea una venta de mostrador como pedido pickup entregado y pagado', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    const stockAntes = product.stock;
+
+    const result = await store.createCounterSale({
+      customerName: 'Juan Compras',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 3 }],
+      total: product.price * 3
+    });
+
+    expect(result.order).toBeDefined();
+    expect(result.order.status).toBe('entregado');
+    expect(result.order.type).toBe('pickup');
+    expect(result.order.paymentStatus).toBe('confirmado');
+    expect(result.order.paymentMethod).toBe('efectivo');
+    expect(result.order.customerName).toBe('Juan Compras');
+    const nuevo = result.state.products.find((p) => p.id === 'p1');
+    expect(nuevo.stock).toBe(stockAntes - 3);
+  });
+
+  it('venta de mostrador sin teléfono no intenta Mi Cartera ni exige cliente', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+
+    const result = await store.createCounterSale({
+      items: [{ id: 'p1', name: p1.name, price: p1.price, quantity: 1 }],
+      total: p1.price
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.order.walletApplied).toBe(0);
+    expect(result.order.status).toBe('entregado');
+  });
+
+  it('venta de mostrador respeta el método de pago elegido y descuenta stock', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+    const stockAntes = p1.stock;
+
+    const result = await store.createCounterSale({
+      customerName: 'Mostrador',
+      items: [{ id: 'p1', name: p1.name, price: p1.price, quantity: 2 }],
+      total: p1.price * 2,
+      paymentMethod: 'pago_movil'
+    });
+    expect(result.order.paymentMethod).toBe('pago_movil');
+    expect(result.order.paymentStatus).toBe('confirmado');
+    expect(result.state.products.find((p) => p.id === 'p1').stock).toBe(stockAntes - 2);
+  });
+
+  it('venta de mostrador rechaza pedido sin productos', async () => {
+    const store = await freshStore();
+    const result = await store.createCounterSale({ items: [] });
+    expect(result.error).toContain('no tiene productos');
   });
 });

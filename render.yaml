@@ -74,3 +74,51 @@ services:
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
         sync: false
+
+  # Ambiente de desarrollo: arena aislada para refactors grandes (p.ej. dividir
+  # App.jsx) SIN riesgo para calidad ni producción. Comparte la misma Neon pero
+  # usa schema propio "dev" (KIOSKO_DB_SCHEMA) y espejo automático public -> dev.
+  # URL esperada: https://kiosko-247-dev.onrender.com
+  # Inicia desplegando develop; para validar el refactor, en el dashboard de
+  # Render cambiale la rama del servicio a la rama del PR (Render usa el último
+  # commit de esa rama). Apagá el servicio cuando no lo uses: comparte las horas
+  # del plan free con producción y staging.
+  - type: web
+    name: kiosko-247-dev
+    runtime: node
+    plan: free
+    branch: develop
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: ADMIN_PASSWORD
+        sync: false
+        # Contraseña distinta (no usar la de producción ni la de staging).
+        # Ej: dev247Aa
+      - key: ADMIN_PHONES
+        sync: false
+        # Teléfonos admin (mismos que producción si querés probar biometría;
+        # cada ambiente registra sus propias credenciales WebAuthn).
+      - key: DATABASE_URL
+        sync: false
+        # Connection string de Neon (misma BD pero schema "dev").
+        # No apuntar a la BD en schema public: los datos llegan SOLO vía espejo.
+      - key: KIOSKO_DB_SCHEMA
+        value: dev
+      - key: MIRROR_SOURCE_SCHEMA
+        value: public
+      - key: MIRROR_TARGET_SCHEMA
+        value: dev
+      - key: KIOSKO_REFRESH_INTERVAL_MS
+        value: 3600000
+        # Espejo automático public -> dev cada hora (mismo mecanismo que staging).
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        sync: false

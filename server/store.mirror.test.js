@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // Probar refreshMirror() sin tocar una base real: mockeamos pg.Pool con un client fake.
 // vi.mock se hoistea; por eso las variables compartidas se crean con vi.hoisted.
 
-const fakeTables = ['products', 'categories', 'orders', 'settings', 'customers'];
+const fakeTables = ['products', 'categories', 'orders', 'settings', 'customers', 'admin_credentials'];
 
 const h = vi.hoisted(() => ({
   currentClient: null,

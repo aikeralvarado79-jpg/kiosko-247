@@ -64,28 +64,20 @@ export async function getVapidPublicKey() {
   return stored?.publicKey || null;
 }
 
-const listSubs = async () => {
-  const subs = await store.getSetting('pushSubs');
-  return Array.isArray(subs) ? subs : [];
-};
-
-const saveSubs = async (subs) => {
-  await store.setSetting('pushSubs', subs);
-};
+// Las suscripciones viven en el store: con Postgres en su propia tabla
+// (push_subscriptions), en dev/archivo en settings.pushSubs de data.json.
+// No se lee/reescribe un blob JSON gigante en cada alta (cuello de botella al
+// crecer) y sobreviven a los redeploys de Render.
 
 export async function subscribe(phone, subscription) {
   if (!subscription || !subscription.endpoint) return false;
   const key = String(phone || '').replace(/\D/g, '').slice(-11);
-  const subs = await listSubs();
-  const next = subs.filter((s) => s.endpoint !== subscription.endpoint);
-  next.push({ phone: key, endpoint: subscription.endpoint, keys: subscription.keys, at: new Date().toISOString() });
-  await saveSubs(next);
+  await store.savePushSubscription(key, subscription);
   return true;
 }
 
 export async function unsubscribe(endpoint) {
-  const subs = await listSubs();
-  await saveSubs(subs.filter((s) => s.endpoint !== endpoint));
+  await store.removePushSubscription(endpoint);
   return true;
 }
 
@@ -111,7 +103,11 @@ async function sendMany(subs, payload) {
     );
     if (!res.dead) live.push(sub);
   }
-  await saveSubs(live);
+  // Limpieza de suscripciones muertas (404/410) para no reenviarles nunca más.
+  const dead = subs.filter((s) => !live.includes(s));
+  for (const sub of dead) {
+    await store.removePushSubscription(sub.endpoint);
+  }
   return live.length;
 }
 
@@ -120,20 +116,24 @@ async function sendMany(subs, payload) {
 export async function sendToPhone(phones, payload) {
   await ensureVapid();
   const targets = Array.isArray(phones) ? phones : [phones];
-  const keys = targets.map((p) => String(p || '').replace(/\D/g, '').slice(-11)).filter(Boolean);
-  const subs = await listSubs();
-  const matching = subs.filter((s) => keys.includes(s.phone));
-  return sendMany(matching, payload);
+  const keys = [...new Set(targets.map((p) => String(p || '').replace(/\D/g, '').slice(-11)).filter(Boolean))];
+  const all = keys.length > 1
+    ? (await Promise.all(keys.map((k) => store.getPushSubscriptions(k)))).flat()
+    : keys.length === 1
+      ? await store.getPushSubscriptions(keys[0])
+      : [];
+  return sendMany(all, payload);
 }
 
 export async function sendToAll(payload, exceptPhones = []) {
   await ensureVapid();
   const except = exceptPhones.map((p) => String(p).replace(/\D/g, '').slice(-11));
-  const subs = await listSubs();
-  const matching = subs.filter((s) => !except.includes(s.phone));
+  const subs = await store.getAllPushSubscriptions();
+  const matching = subs.filter((s) => !except.includes(s.phone || ''));
   return sendMany(matching, payload);
 }
 
 export async function subscribedCount() {
-  return (await listSubs()).length;
+  const subs = await store.getAllPushSubscriptions();
+  return subs.length;
 }

@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
-import { api, getToken, setToken, clearToken } from './api.js';
+import { api, getToken, setToken, clearToken, setRememberSession, getRememberSession } from './api.js';
+import { ADMIN_PHONES } from './data.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { BrowserMultiFormatReader } from '@zxing/browser';
+import LoadingScreen from './components/LoadingScreen.jsx';
 
 // ---------------------------------------------------------------------------
 // Mecanismo compartido de overlay: bloquea el scroll del body mientras hay una
@@ -110,6 +113,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     lock: <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 8v8M8 8h8" />,
     filter: <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />,
     eye: <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+    eyeOff: <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12A3 3 0 1 1 9.88 9.88M1 1l22 22" /></>,
     dollarSign: <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
     layers: <path d="m12 2 10 5-10 5L2 7zm0 10 10 5-10 5-10-5zm0 10 10 5-10 5-10-5z" />,
     refresh: <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />,
@@ -147,6 +151,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
        </>
       ),
       mic: <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />,
+      volume2: <path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6" />,
       share2: <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" />,
       barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
       star: <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />,
@@ -395,6 +400,10 @@ const IS_IOS =
 const IS_ANDROID =
   typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
 
+// Nombre del método biométrico según plataforma para textos al usuario:
+// iOS → Face ID; otros → huella (o biometría genérica cuando no hay sensor).
+const BIO_METHOD_LABEL = IS_IOS ? 'Face ID' : IS_ANDROID ? 'huella' : 'biometría';
+
 // ¿La app ya está instalada y abierta como app (fuera del navegador)?
 const isInstalledPWA = () =>
   (typeof navigator !== 'undefined' && navigator.standalone) ||
@@ -486,9 +495,6 @@ const formatAmountBsInput = (raw) => {
 const usdToBs = (usd, rate) => Number(usd || 0) * (rate || 0);
 
 const PHONE_CODES = ['0412', '0414', '0416', '0422', '0424', '0426'];
-
-// Administradores reconocidos por teléfono (formato 11 dígitos, sin espacios).
-const ADMIN_PHONES = ['04129862577', '04141823718', '04242980404', '04242963490'];
 
 const CUSTOMER_KEY = 'kiosko_customer';
 
@@ -1277,10 +1283,34 @@ export default function App() {
     if (res.data.settings?.storeLocation) setStoreLocation(res.data.settings.storeLocation);
     if (res.data.settings?.paymentConfig) setPaymentConfig(res.data.settings.paymentConfig);
     if (res.data.rate) setRate(res.data.rate);
-    if (Array.isArray(res.data.adminPhones)) setAdminPhones(res.data.adminPhones);
+    // Unión de teléfonos admin: los fijos del cliente + los que envía el servidor
+    // (env, config o empleados añadidos). El servidor puede devolver lista vacía
+    // si no tiene ADMIN_PHONES configurado; no debe borrarse el fallback local.
+    if (Array.isArray(res.data.adminPhones)) {
+      setAdminPhones([...new Set([...ADMIN_PHONES, ...res.data.adminPhones])]);
+    }
     hasDataRef.current = true;
     setIsLoading(false);
   }, [clientId, isAdminAuthed]);
+
+  // Costos de productos: solo para el admin (no viajan en /api/state público).
+  const loadProductCosts = useCallback(async () => {
+    try {
+      const res = await api.getProductCosts();
+      if (res.ok && Array.isArray(res.data.costs)) {
+        const map = {};
+        res.data.costs.forEach((c) => { map[c.id] = Number(c.cost) || 0; });
+        setCostMap(map);
+      }
+    } catch {
+      // silencioso: los costos son secundarios para la navegación
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isAdminAuthed) return;
+    loadProductCosts();
+  }, [isAdminAuthed, loadProductCosts]);
 
   useEffect(() => {
     loadState();
@@ -1463,7 +1493,10 @@ export default function App() {
   // Identificación obligatoria: se abre al entrar como cliente sin datos guardados.
   // identityMode: 'login' (formulario) | 'confirm' (solo biometría para volver/salir).
   // identityConfirmKind: 'switchback' | 'logout'.
-  const [isIdentityOpen, setIsIdentityOpen] = useState(() => !loadSavedCustomer());
+  // Invitados: el login NO se abre automáticamente. Navegan la tienda libremente
+  // (catálogo, recorrido horizontal, más pedidos) y solo se identifican al pulsar
+  // "Iniciar sesión" en la barra inferior o al comprar (el checkout pide los datos).
+  const [isIdentityOpen, setIsIdentityOpen] = useState(false);
   const [identityMode, setIdentityMode] = useState('login');
   const [identityConfirmKind, setIdentityConfirmKind] = useState('switchback');
 
@@ -1480,14 +1513,6 @@ export default function App() {
     setIdentityConfirmKind('logout');
     setIsIdentityOpen(true);
   };
-
-  // Reabrir la identificación si el usuario entra a la tienda sin estar identificado
-  useEffect(() => {
-    if (activeView === 'customer' && !savedCustomer) {
-      setIdentityMode('login');
-      setIsIdentityOpen(true);
-    }
-  }, [activeView, savedCustomer]);
 
   // Perfil del cliente desde el servidor (direcciones guardadas, balance, etc.)
   // Se recarga también cuando cambia orders (polling) para que el saldo de Mi
@@ -1606,6 +1631,7 @@ export default function App() {
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState(null);
   const [deleteConfirmProduct, setDeleteConfirmProduct] = useState(null);
+  const [costMap, setCostMap] = useState({});
   const [orderDetailOrder, setOrderDetailOrder] = useState(null);
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState(null);
   const [deleteOrderTarget, setDeleteOrderTarget] = useState(null);
@@ -1856,7 +1882,7 @@ export default function App() {
     try {
       const res = await api.adminBiometricLogin(phone, response);
       if (!res.ok) {
-        addToast(res.data.error || 'La biometría no coincidió', 'error');
+        addToast(res.data.error || (IS_IOS ? 'Face ID no coincidió' : 'La biometría no coincidió'), 'error');
         return false;
       }
       setToken(res.data.token);
@@ -2659,6 +2685,7 @@ export default function App() {
       setProducts(res.data.state.products || []);
       setCategories(res.data.state.categories || []);
       addToast(`Producto "${productData.name}" actualizado`);
+      loadProductCosts();
     } else {
       // Create new (id y code los genera el servidor)
       const res = await api.createProduct(productData);
@@ -2669,6 +2696,7 @@ export default function App() {
       setProducts(res.data.state.products || []);
       setCategories(res.data.state.categories || []);
       addToast(`Producto "${productData.name}" creado con éxito`);
+      loadProductCosts();
     }
 
     setIsAddEditModalOpen(false);
@@ -2684,6 +2712,60 @@ export default function App() {
     setProducts(res.data.state.products || []);
     addToast('Producto eliminado del inventario', 'info');
     setDeleteConfirmProduct(null);
+    loadProductCosts();
+  };
+
+  const handleReceiveStock = async (product, qty) => {
+    const addQty = Math.round(Number(qty) || 0);
+    if (addQty <= 0) return false;
+    const res = await api.updateProduct(product.id, {
+      stock: (Number(product.stock) || 0) + addQty
+    });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo actualizar el stock', 'error');
+      return false;
+    }
+    setProducts(res.data.state.products || []);
+    setCategories(res.data.state.categories || []);
+    loadProductCosts();
+    addToast(`Stock recibido: ${product.name} (+${addQty})`, 'success');
+    return true;
+  };
+
+  // Venta en mostrador: el admin registra una venta física desde el panel
+  // ("Ventas"). Se crea un pedido tipo pickup ya entregado y pagado, así se
+  // contabiliza en Finanzas, descuenta stock y queda en el historial.
+  const handleCounterSale = async ({ items, customerName, customerPhone, paymentMethod }) => {
+    const cleanItems = (items || []).map((it) => ({
+      id: it.id,
+      name: it.name,
+      price: Number(it.price) || 0,
+      quantity: Math.max(1, Math.round(Number(it.quantity) || 1))
+    }));
+    if (cleanItems.length === 0) {
+      addToast('Agregá al menos un producto para registrar la venta', 'error');
+      return { ok: false };
+    }
+    const total = cleanItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+    const res = await api.createCounterSale({
+      items: cleanItems,
+      customerName: (customerName || '').trim() || 'Venta en mostrador',
+      phone: (customerPhone || '').trim(),
+      paymentMethod: paymentMethod || 'efectivo',
+      total,
+      subtotal: total,
+      notes: 'Venta en mostrador'
+    });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo registrar la venta', 'error');
+      return { ok: false };
+    }
+    setProducts(res.data.state.products || []);
+    setOrders(res.data.state.orders || []);
+    if (res.data.state.customers) setAllCustomers(res.data.state.customers);
+    await loadState({ silent: true });
+    addToast(`Venta registrada: ${formatUsd(total)}`, 'success');
+    return { ok: true, order: res.data.order };
   };
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
@@ -2856,7 +2938,7 @@ export default function App() {
   }, [customerOrders, currentOrderTracking]);
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950 overflow-x-clip">
       {/* Toast Notification Container */}
       <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
         {toasts.map((toast) => {
@@ -3028,7 +3110,7 @@ export default function App() {
       )}
 
       {/* Modern Glassmorphic Top Navbar */}
-      <header ref={headerRef} className="sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
+      <header ref={headerRef} style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top, 0px))' }} className="sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -3179,6 +3261,7 @@ export default function App() {
         ) : isAdminAuthed ? (
           <AdminView
             products={products}
+            costById={costMap}
             orders={orders}
             rate={rate}
             promos={promos}
@@ -3192,11 +3275,13 @@ export default function App() {
               setProductToEdit(null);
               setIsAddEditModalOpen(true);
             }}
-            onEditProduct={(product) => {
-              setProductToEdit(product);
-              setIsAddEditModalOpen(true);
-            }}
+onEditProduct={(product) => {
+        setProductToEdit({ ...product, cost: costMap[product.id] ?? product.cost ?? '' });
+        setIsAddEditModalOpen(true);
+      }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
+            onReceiveStock={handleReceiveStock}
+            onCounterSale={handleCounterSale}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onUpdateOrderPayment={handleUpdateOrderPayment}
             onUpdateCourierLocation={handleUpdateCourierLocation}
@@ -3234,6 +3319,7 @@ export default function App() {
             onBiometricLogin={handleAdminBiometricLogin}
             onBiometricRegister={handleAdminBiometricRegister}
             onBack={() => setActiveView('customer')}
+            initialPhone={savedCustomer && isCurrentAdmin ? { code: savedCustomer.phoneCode || '0412', number: savedCustomer.phoneNumber || '' } : null}
           />
         )}
       </main>
@@ -3380,6 +3466,7 @@ export default function App() {
         <ProductFormModal
           productToEdit={productToEdit}
           categories={categories}
+          products={products}
           onClose={() => setIsAddEditModalOpen(false)}
           onSave={handleSaveProduct}
         />
@@ -3470,12 +3557,6 @@ export default function App() {
           onConfirm={handleIdentifyCustomer}
           onConfirmBiometric={handleIdentityConfirmBiometric}
           onClose={() => setIsIdentityOpen(false)}
-          isCurrentAdmin={isCurrentAdmin}
-          onGoToAdmin={() => {
-            setIsIdentityOpen(false);
-            setActiveView('admin');
-          }}
-          adminPhones={adminPhones}
         />
       )}
 
@@ -3530,6 +3611,7 @@ export default function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onCustomerLogout={openIdentityLogout}
+        onOpenLogin={openIdentityLogin}
         adminTab={adminTab}
         onAdminTab={handleAdminTabChange}
         pendingOrders={orders.filter((o) => !['entregado', 'cancelado'].includes(o.status)).length}
@@ -3636,6 +3718,8 @@ export default function App() {
           promos={promos}
           rate={rate}
           savedCustomer={savedCustomer}
+          storeLocation={storeLocation}
+          cartCount={cartCount}
           headerHeight={headerHeight}
           onClose={() => setIsAikerOpen(false)}
           onOpenDebt={() => {
@@ -3655,6 +3739,14 @@ export default function App() {
           onRepeatLastOrder={() => {
             setIsAikerOpen(false);
             handleRepeatLastOrder();
+          }}
+          onOpenCart={() => {
+            setIsAikerOpen(false);
+            setIsCartOpen(true);
+          }}
+          onOpenCheckout={() => {
+            setIsAikerOpen(false);
+            setIsCheckoutOpen(true);
           }}
         />
       )}
@@ -4140,47 +4232,6 @@ function OrderSuccessOverlay({ order, onClose, onTrack, onShare }) {
   );
 }
 
-function LoadingScreen() {
-  return (
-    <div className="space-y-6 sm:space-y-8 animate-fade-in" aria-busy="true" aria-label="Cargando la tienda">
-      {/* Hero skeleton */}
-      <div className="rounded-2xl sm:rounded-3xl p-4 sm:p-8 bg-slate-800/40 border border-slate-700/40">
-        <div className="skeleton-block w-32 h-5 mb-3" />
-        <div className="skeleton-block w-56 h-8 mb-2" />
-        <div className="skeleton-block w-40 h-4" />
-      </div>
-
-      {/* Buscador + pills skeleton */}
-      <div className="space-y-3">
-        <div className="skeleton-block h-12 rounded-2xl w-full" />
-        <div className="flex gap-2 overflow-hidden">
-          <div className="skeleton-block h-9 w-20 shrink-0" />
-          <div className="skeleton-block h-9 w-24 shrink-0" />
-          <div className="skeleton-block h-9 w-28 shrink-0" />
-          <div className="skeleton-block h-9 w-20 shrink-0" />
-        </div>
-      </div>
-
-      {/* Grid de tarjetas skeleton */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="rounded-2xl sm:rounded-3xl bg-slate-800/40 border border-slate-700/40 overflow-hidden">
-            <div className="skeleton-block aspect-square w-full rounded-none" />
-            <div className="p-3 sm:p-4 space-y-2">
-              <div className="skeleton-block h-4 w-3/4" />
-              <div className="skeleton-block h-3 w-1/2" />
-              <div className="flex justify-between items-center pt-2">
-                <div className="skeleton-block h-5 w-14" />
-                <div className="skeleton-block h-9 w-9 rounded-xl" />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function LoadErrorScreen({ error, onRetry }) {
   return (
     <div className="py-24 flex flex-col items-center justify-center text-center space-y-5 max-w-md mx-auto">
@@ -4202,13 +4253,19 @@ function LoadErrorScreen({ error, onRetry }) {
   );
 }
 
-function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack }) {
+function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack, initialPhone = null }) {
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // "Recordar sesión": mantiene el login al cerrar/reabrir la pestaña.
+  const [remember, setRemember] = useState(() => getRememberSession());
 
   // Login state
-  const [loginPhone, setLoginPhone] = useState({ code: '0412', number: '' });
+  const [loginPhone, setLoginPhone] = useState(() => ({
+    code: initialPhone?.code || '0412',
+    number: initialPhone?.number || ''
+  }));
 
   // Biometric login state
   const [bioStatus, setBioStatus] = useState('idle'); // 'idle' | 'working' | 'register'
@@ -4242,6 +4299,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
   const [recoverOptions, setRecoverOptions] = useState(null);
   const [biometricResponse, setBiometricResponse] = useState(null);
   const [newPassword, setNewPassword] = useState({ a: '', b: '' });
+  const [showNewPassword, setShowNewPassword] = useState({ a: false, b: false });
   const [recoverError, setRecoverError] = useState('');
 
   // Pre-carga los options de WebAuthn al completar el teléfono para que
@@ -4349,7 +4407,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
           setBioNeedsRegister(true);
           setBioOptions(null);
         } else {
-          setBioError('No se pudo iniciar la verificación con biometría. Intenta de nuevo.');
+          setBioError(`No se pudo iniciar la verificación con ${BIO_METHOD_LABEL}. Intenta de nuevo.`);
           return;
         }
       } catch {
@@ -4366,13 +4424,13 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
         if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el registro');
         const regResponse = await startRegistration({ optionsJSON: rres.data.options });
         const ok = await onBiometricRegister(phoneKey, regResponse);
-        if (!ok) setBioError('No se pudo guardar tu biometría. Intenta de nuevo.');
+        if (!ok) setBioError(`No se pudo guardar tu ${BIO_METHOD_LABEL}. Intenta de nuevo.`);
         setBioNeedsRegister(false);
         return;
       }
       const authResponse = await startAuthentication({ optionsJSON: bioOptions });
       const ok = await onBiometricLogin(phoneKey, authResponse);
-      if (!ok) setBioError('La biometría no coincidió. Verifica que tu número sea de administrador.');
+      if (!ok) setBioError((IS_IOS ? 'Face ID no coincidió' : `La ${BIO_METHOD_LABEL} no coincidió`) + '. Verifica que tu número sea de administrador.');
     } catch (err) {
       // Si la credencial se registró bajo un rpID anterior (dominio distinto),
       // el navegador la rechaza con NotAllowedError. Re-registramos en el rpID
@@ -4389,7 +4447,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
         if (!rres.ok) throw new Error(rres.data.error || 'No se pudo iniciar el re-registro');
         const regResponse = await startRegistration({ optionsJSON: rres.data.options });
         const ok = await onBiometricRegister(phoneKey, regResponse);
-        if (!ok) setBioError('No se pudo guardar tu biometría. Intenta de nuevo.');
+        if (!ok) setBioError(`No se pudo guardar tu ${BIO_METHOD_LABEL}. Intenta de nuevo.`);
       } catch (regErr) {
         setBioError(friendlyAuthError(regErr));
       }
@@ -4405,12 +4463,23 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
     }
     const phoneKey = `${recoverPhone.code}${recoverPhone.number}`.replace(/\D/g, '').slice(-11);
     setRecoverError('');
+    // Sin biometría (dispositivo sin Face ID/huella): se recupera solo con el
+    // teléfono admin, sin verificación biométrica (el server acepta response null).
+    if (!webauthnSupported) {
+      setBiometricResponse(null);
+      setRecoverStep('newpass');
+      return;
+    }
     // Si el prefetch no terminó, pedimos las options ahora en vez de fallar.
     if (recoveryFetchKeyRef.current !== phoneKey || !recoverOptions) {
       try {
         const res = await api.webauthnLoginOptions({ phone: phoneKey });
         if (!res.ok) {
-          setRecoverError('Este número no tiene biometría registrada para verificar.');
+          // Sin biometría registrada para ese teléfono en este dominio (p.ej.
+          // staging): se recupera igual con solo el teléfono admin.
+          recoveryFetchKeyRef.current = phoneKey;
+          setBiometricResponse(null);
+          setRecoverStep('newpass');
           return;
         }
         recoveryFetchKeyRef.current = phoneKey;
@@ -4427,8 +4496,11 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
       setRecoverStep('newpass');
       setRecoverError('');
     } catch {
-      setRecoverError('No se pudo verificar la biometría. Si la cancelaste o no coincidió, intenta de nuevo.');
-      setRecoverStep('phone');
+      // Si la verificación biométrica falla o se cancela, permitimos continuar
+      // igual: el server acepta response null y valida solo el teléfono admin.
+      setBiometricResponse(null);
+      setRecoverStep('newpass');
+      setRecoverError('');
     }
   };
 
@@ -4467,7 +4539,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
               <Icon name="key" className="w-7 h-7" />
             </span>
             <h2 className="text-xl font-black text-white">Recuperar Contraseña</h2>
-            <p className="text-xs text-slate-400">Verifica con biometría y crea una nueva contraseña.</p>
+            <p className="text-xs text-slate-400">Ingresa tu teléfono de administrador y crea una nueva contraseña.</p>
           </div>
 
           {recoverStep === 'phone' && (
@@ -4498,14 +4570,14 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
                 onClick={startRecovery}
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-bold text-sm hover:from-amber-400 hover:to-rose-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
               >
-                Verificar con biometría
+                Continuar
               </button>
             </div>
           )}
 
           {recoverStep === 'biometric' && (
             <div className="text-center space-y-3">
-              <p className="text-xs text-slate-400">Esperando verificación biométrica...</p>
+              <p className="text-xs text-slate-400">Esperando {IS_IOS ? 'tu Face ID' : IS_ANDROID ? 'tu huella' : 'la verificación biométrica'}...</p>
             </div>
           )}
 
@@ -4513,23 +4585,43 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Nueva contraseña</label>
-                <input
-                  type="password"
-                  value={newPassword.a}
-                  onChange={(e) => setNewPassword({ ...newPassword, a: e.target.value })}
-                  placeholder="Mínimo 6 caracteres"
-                  className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword.a ? 'text' : 'password'}
+                    value={newPassword.a}
+                    onChange={(e) => setNewPassword({ ...newPassword, a: e.target.value })}
+                    placeholder="Mínimo 6 caracteres"
+                    className="w-full px-4 py-3 pr-11 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((s) => ({ ...s, a: !s.a }))}
+                    aria-label={showNewPassword.a ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-100 transition-colors"
+                  >
+                    <Icon name={showNewPassword.a ? 'eyeOff' : 'eye'} className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Repetir contraseña</label>
-                <input
-                  type="password"
-                  value={newPassword.b}
-                  onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
-                  placeholder="Repite la contraseña"
-                  className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword.b ? 'text' : 'password'}
+                    value={newPassword.b}
+                    onChange={(e) => setNewPassword({ ...newPassword, b: e.target.value })}
+                    placeholder="Repite la contraseña"
+                    className="w-full px-4 py-3 pr-11 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((s) => ({ ...s, b: !s.b }))}
+                    aria-label={showNewPassword.b ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-100 transition-colors"
+                  >
+                    <Icon name={showNewPassword.b ? 'eyeOff' : 'eye'} className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
               {recoverError && <p className="text-xs text-rose-400 mt-2">{recoverError}</p>}
               <button
@@ -4561,7 +4653,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             <Icon name="layers" className="w-7 h-7" />
           </span>
           <h2 className="text-xl font-black text-white">Acceso al Panel Admin</h2>
-          <p className="text-xs text-slate-400">Inicia sesión con tu contraseña o biometría para gestionar inventario y pedidos.</p>
+          <p className="text-xs text-slate-400">Inicia sesión con tu contraseña o {BIO_METHOD_LABEL} para gestionar inventario y pedidos.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -4591,14 +4683,37 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">Contraseña</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full px-4 py-3 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-3 pr-11 glass-strong bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:border-cyan-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-100 transition-colors"
+              >
+                <Icon name={showPassword ? 'eyeOff' : 'eye'} className="w-5 h-5" />
+              </button>
+            </div>
           </div>
+
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => {
+                setRemember(e.target.checked);
+                setRememberSession(e.target.checked);
+              }}
+              className="w-4 h-4 rounded accent-cyan-500"
+            />
+            <span className="text-xs text-slate-300 font-semibold">Recordar sesión en este dispositivo</span>
+          </label>
 
           <button
             type="submit"
@@ -4645,7 +4760,7 @@ function AdminLoginView({ onLogin, onBiometricLogin, onBiometricRegister, onBack
             className="w-full py-2 text-xs text-amber-300 hover:text-amber-200 hover:bg-slate-800/60 rounded-xl transition-all flex items-center justify-center gap-1.5"
           >
             <Icon name="key" className="w-3.5 h-3.5" />
-            ¿Olvidaste tu contraseña? Recuperar con biometría
+            ¿Olvidaste tu contraseña? Recuperar con {BIO_METHOD_LABEL}
           </button>
           <button
             type="button"
@@ -4732,7 +4847,6 @@ function CustomerView({
   const [promoIdx, setPromoIdx] = useState(0);
   // Recorrido Horizontal: apagado por defecto; el usuario lo enciende con el switch.
   const [shelvesEnabled, setShelvesEnabled] = useState(false);
-
   // Carrusel de promos con autoplay (solo cuando hay más de una activa)
   const activePromos = promos.filter((p) => p.active);
   useEffect(() => {
@@ -5303,7 +5417,7 @@ function CustomerView({
         <div className="space-y-2.5">
           {/* Category Pills: cada categoría tiene su color e icono de identidad */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {['Todas', 'Favoritos', ...categories].map((cat) => {
+            {['Todas', ...(savedCustomer ? ['Favoritos'] : []), ...categories].map((cat) => {
               const isFav = cat === 'Favoritos';
               const id = isFav ? null : categoryIdentity(cat);
               const active = selectedCategory === cat;
@@ -6579,7 +6693,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   );
 }
 
-function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm, onConfirmBiometric, onGoToAdmin, isCurrentAdmin, adminPhones, mode = 'login', confirmKind = 'switchback', onClose }) {
+function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm, onConfirmBiometric, mode = 'login', confirmKind = 'switchback', onClose }) {
   useOverlay(true, onClose);
   const [customerName, setCustomerName] = useState('');
   const [phoneCode, setPhoneCode] = useState('0412');
@@ -6690,7 +6804,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
     if (!res.ok) throw new Error(res.data.error || 'No se pudo iniciar el registro');
     const regResponse = await startRegistration({ optionsJSON: res.data.options });
     const verifyRes = await api.webauthnRegisterVerify({ phone: phoneKey, response: regResponse });
-    if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'No se pudo guardar tu biometría');
+    if (!verifyRes.ok) throw new Error(verifyRes.data.error || `No se pudo guardar tu ${BIO_METHOD_LABEL}`);
   };
 
   // Login o registro con biometría. Si no hay credencial previa, la registra en
@@ -6704,7 +6818,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
       try {
         const authResponse = await startAuthentication({ optionsJSON: res.data.options });
         const verifyRes = await api.webauthnLoginVerify({ phone: phoneKey, response: authResponse });
-        if (!verifyRes.ok) throw new Error(verifyRes.data.error || 'La biometría no coincidió');
+        if (!verifyRes.ok) throw new Error(verifyRes.data.error || (IS_IOS ? 'Face ID no coincidió' : 'La huella no coincidió'));
       } catch (authErr) {
         // rpID distinto (dominio anterior): re-registra en el dominio actual.
         const isRpidMismatch = authErr?.name === 'NotAllowedError';
@@ -6752,7 +6866,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
   // Botón de biometría del formulario: exige el número antes de continuar.
   const handleBiometricAction = () => {
     if (!/^\d{7}$/.test(phoneNumber)) {
-      setErrors((prev) => ({ ...prev, phone: 'Ingresa los 7 dígitos del número para verificar con biometría' }));
+      setErrors((prev) => ({ ...prev, phone: `Ingresa los 7 dígitos del número para verificar con ${BIO_METHOD_LABEL}` }));
       return;
     }
     runWebAuthn();
@@ -6835,10 +6949,10 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             {panel === 'confirm'
-              ? 'Confirma tu identidad con biometría para continuar.'
+              ? `Confirma tu identidad con ${BIO_METHOD_LABEL} para continuar.`
               : registerMode
-              ? 'Regístrate en segundos con tu teléfono y biometría. El nombre se autocompleta en tus próximos accesos.'
-              : 'Identifícate para pedir. Tu teléfono + biometría es tu tarjeta de cliente.'}
+              ? `Regístrate en segundos con tu teléfono y ${BIO_METHOD_LABEL}. El nombre se autocompleta en tus próximos accesos.`
+              : `Identifícate para pedir. Tu teléfono + ${BIO_METHOD_LABEL} es tu tarjeta de cliente.`}
           </p>
         </div>
 
@@ -6863,11 +6977,11 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
                 </span>
                 <span className="flex-1 text-left">
                   <span className="block text-[11px] font-bold text-teal-300">
-                    {webauthnSupported ? 'Confirmar con biometría' : 'Continuar sin biometría'}
+                    {webauthnSupported ? `Confirmar con ${BIO_METHOD_LABEL}` : 'Continuar sin biometría'}
                   </span>
                   <span className="block text-[11px] text-slate-400 leading-snug">
                     {!webauthnSupported
-                      ? 'Tu dispositivo no tiene biometría. Podés continuar igual.'
+                      ? `Tu dispositivo no tiene ${BIO_METHOD_LABEL}. Podés continuar igual.`
                       : IS_IOS
                       ? 'Usa tu Face ID'
                       : 'Usa tu huella'}
@@ -6902,7 +7016,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
               </div>
               <div>
                 <h3 className="text-base sm:text-lg font-bold text-white">
-                  {webAuthnStep === 'login' ? 'Confirma tu identidad' : 'Registra tu biometría'}
+                  {webAuthnStep === 'login' ? 'Confirma tu identidad' : `Registra tu ${BIO_METHOD_LABEL}`}
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                   {webAuthnStep === 'login'
@@ -7000,10 +7114,10 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
                 )}
               </span>
               <span className="flex-1 text-left">
-                <span className="block text-[11px] font-bold text-teal-300">Verificar con biometría</span>
+                <span className="block text-[11px] font-bold text-teal-300">Verificar con {BIO_METHOD_LABEL}</span>
                 <span className="block text-[11px] text-slate-400 leading-snug">
                   {!webauthnSupported
-                    ? 'Tu dispositivo no tiene biometría. Podés entrar con tu teléfono y nombre.'
+                    ? `Tu dispositivo no tiene ${BIO_METHOD_LABEL}. Podés entrar con tu teléfono y nombre.`
                     : IS_IOS
                     ? 'Usa tu Face ID'
                     : 'Usa tu huella'}
@@ -7052,16 +7166,6 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
                   Volver a {savedCustomer.customerName.split(' ')[0]}
                 </button>
               )}
-              {(isCurrentAdmin || adminPhones.includes(`${phoneCode}${phoneNumber}`.replace(/\D/g, '').slice(-11))) && (
-                <button
-                  type="button"
-                  onClick={onGoToAdmin}
-                  className="w-full py-2 text-[11px] text-slate-500 hover:text-teal-300 transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Icon name="layers" className="w-3.5 h-3.5" />
-                  ¿Eres el administrador? Ir al panel
-                </button>
-              )}
             </div>
           </form>
         ) : (
@@ -7080,7 +7184,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white">
-                {webAuthnStep === 'login' ? 'Confirma tu identidad' : 'Registra tu biometría'}
+                {webAuthnStep === 'login' ? 'Confirma tu identidad' : `Registra tu ${BIO_METHOD_LABEL}`}
               </h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 {webAuthnStep === 'login'
@@ -7547,6 +7651,7 @@ function BottomTabBar({
   onOpenCart,
   onGoAdmin,
   onGoStore,
+  onOpenLogin,
   onCustomerLogout,
   adminTab,
   onAdminTab,
@@ -7578,43 +7683,36 @@ function BottomTabBar({
       onClick: onToggleCalc,
       badge: null
     },
-    {
-      key: 'cart',
-      label: 'Carrito',
-      icon: 'bag',
-      onClick: onOpenCart,
-      badge: cartCount > 0 ? cartCount : null
-    },
-    {
-      key: 'orders',
-      label: 'Mis Pedidos',
-      icon: 'list',
-      onClick: () => {
-        if (!hasCustomer) {
-          onOpenCart(); // el checkout/identidad obliga a identificarse
-          return;
-        }
-        onCustomerTab('orders');
-      },
-      badge: null
-    },
-    {
-      key: 'account',
-      label: 'Mi Cuenta',
-      icon: 'user',
-      onClick: () => {
-        if (!hasCustomer) {
-          onOpenCart();
-          return;
-        }
-        onCustomerTab('account');
-      },
-      badge: null
-    }
+    ...(hasCustomer
+      ? [
+          {
+            key: 'cart',
+            label: 'Carrito',
+            icon: 'bag',
+            onClick: onOpenCart,
+            badge: cartCount > 0 ? cartCount : null
+          },
+          {
+            key: 'orders',
+            label: 'Mis Pedidos',
+            icon: 'list',
+            onClick: () => onCustomerTab('orders'),
+            badge: null
+          },
+          {
+            key: 'account',
+            label: 'Mi Cuenta',
+            icon: 'user',
+            onClick: () => onCustomerTab('account'),
+            badge: null
+          }
+        ]
+      : [])
   ];
 
   const adminTabs = [
     { key: 'inventory', label: 'Inventario', icon: 'package', onClick: () => onAdminTab('inventory'), badge: null },
+    { key: 'ventas', label: 'Ventas', icon: 'shoppingBag', onClick: () => onAdminTab('ventas'), badge: null },
     { key: 'orders', label: 'Pedidos', icon: 'clock', onClick: () => onAdminTab('orders'), badge: pendingOrders > 0 ? pendingOrders : null },
     { key: 'benefited', label: 'Beneficiados', icon: 'users', onClick: () => onAdminTab('benefited'), badge: null },
     { key: 'blacklist', label: 'Lista Negra', icon: 'alertTriangle', onClick: () => onAdminTab('blacklist'), badge: null },
@@ -7664,6 +7762,16 @@ function BottomTabBar({
           <span className="text-[10px] font-bold leading-none truncate">{t.label}</span>
         </button>
       ))}
+      {activeView === 'customer' && !hasCustomer && (
+        <button
+          onClick={onOpenLogin}
+          className={`${base} text-teal-400 hover:text-teal-300 ${idleTab}`}
+          aria-label="Iniciar sesión"
+        >
+          <Icon name="userPlus" className="w-5 h-5" />
+          <span className="text-[10px] font-bold leading-none">Iniciar sesión</span>
+        </button>
+      )}
       {activeView === 'customer' && isAdmin && (
         <button
           onClick={onGoAdmin}
@@ -9329,6 +9437,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
 
 function AdminView({
   products,
+  costById = {},
   orders,
   rate,
   promos,
@@ -9341,6 +9450,8 @@ function AdminView({
   onOpenAddModal,
   onEditProduct,
   onDeleteProduct,
+  onReceiveStock,
+  onCounterSale,
   onUpdateOrderStatus,
   onUpdateOrderPayment,
   onUpdateCourierLocation,
@@ -9391,6 +9502,8 @@ function AdminView({
   };
   const [initialOrderPrefs] = useState(loadOrderPrefs);
   const [confirmRefresh, setConfirmRefresh] = useState(false);
+  const [confirmCancelOrder, setConfirmCancelOrder] = useState(null);
+  const [receiveStockOpen, setReceiveStockOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
   const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
@@ -9560,6 +9673,10 @@ function AdminView({
   const [invSearch, setInvSearch] = useState('');
   const [invCategory, setInvCategory] = useState('todas');
   const [invGroupByBrand, setInvGroupByBrand] = useState(false);
+  // Stock: filtro (todas | bajo | agotado) y ordenación (stock asc | desc | sin orden).
+  const [invStockFilter, setInvStockFilter] = useState('todas');
+  const [invSortStock, setInvSortStock] = useState(false);
+  const availOf = (p) => Math.max(0, (Number(p.stock) || 0) - (Number(p.reserved) || 0));
   const inventoryProducts = useMemo(() => products || [], [products]);
   const searchOnly = useMemo(() => {
     const q = invSearch.trim().toLowerCase();
@@ -9579,10 +9696,25 @@ function AdminView({
     (c) => (c === 'todas' ? searchOnly.length : searchOnly.filter((p) => p.category === c).length),
     [searchOnly]
   );
-  const filteredProducts = useMemo(
-    () => (invCategory === 'todas' ? searchOnly : searchOnly.filter((p) => p.category === invCategory)),
-    [searchOnly, invCategory]
-  );
+  const filteredProducts = useMemo(() => {
+    let list = invCategory === 'todas' ? searchOnly : searchOnly.filter((p) => p.category === invCategory);
+    if (invStockFilter === 'agotado') {
+      list = list.filter((p) => availOf(p) <= 0);
+    } else if (invStockFilter === 'bajo') {
+      list = list.filter((p) => {
+        const a = availOf(p);
+        return a > 0 && a <= 5;
+      });
+    }
+    if (invSortStock) {
+      list = [...list].sort((a, b) => {
+        const d = availOf(a) - availOf(b);
+        if (d !== 0) return invSortStock === 'asc' ? d : -d;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+    }
+    return list;
+  }, [searchOnly, invCategory, invStockFilter, invSortStock]);
   const groupedByBrand = useMemo(() => {
     if (!invGroupByBrand) return [];
     const map = {};
@@ -9610,6 +9742,8 @@ function AdminView({
   const clearInvFilters = () => {
     setInvSearch('');
     setInvCategory('todas');
+    setInvStockFilter('todas');
+    setInvSortStock(false);
   };
 
   const renderMobileCard = (p) => {
@@ -9772,6 +9906,30 @@ function AdminView({
     }
   };
 
+  const handleAdminSubscribePush = async () => {
+    if (!('Notification' in window) || !('PushManager' in window)) {
+      addToast('Tu navegador no soporta notificaciones', 'error');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      addToast('Notificaciones bloqueadas. Actívalas en los ajustes del navegador', 'error');
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm !== 'granted') perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      addToast('Notificaciones no activadas', 'info');
+      return;
+    }
+    const ok = await subscribeToPush(adminPhone);
+    addToast(
+      ok
+        ? 'Activadas. Recibirás los pedidos nuevos aunque cierres la app.'
+        : 'No se pudo activar. Revisa que el teléfono del admin sea válido.',
+      ok ? 'success' : 'error'
+    );
+  };
+
   // Modo Repartidor: cuando un pedido a domicilio está en "En Camino", el admin
   // (que reparte) comparte su GPS en vivo para que el cliente lo rastree.
   const [courierActive, setCourierActive] = useState(false);
@@ -9891,9 +10049,17 @@ function AdminView({
     knownOrderIdsRef.current = new Set(orders.map((o) => o.id));
     if (fresh.length === 0) return;
     setUnviewedCount((c) => c + fresh.length);
+    const label = `${fresh.length} pedido${fresh.length !== 1 ? 's' : ''} nuevo${fresh.length !== 1 ? 's' : ''}: ${fresh.map((o) => o.id).join(', ')}`;
+    playChime();
+    haptic(160);
     if (document.visibilityState === 'visible') {
-      playChime();
-      addToastRef.current(`${fresh.length} pedido${fresh.length !== 1 ? 's' : ''} nuevo${fresh.length !== 1 ? 's' : ''}: ${fresh.map((o) => o.id).join(', ')}`, 'info');
+      addToastRef.current(label, 'info');
+    } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try {
+        const n = new Notification('Nuevo pedido', { body: label, tag: 'kiosko-new-order', renotify: true });
+        n.onclick = () => window.focus();
+        setTimeout(() => n.close(), 8000);
+      } catch {}
     }
   }, [orders]);
 
@@ -10184,7 +10350,7 @@ function AdminView({
   const finDash = useMemo(() => {
     const today = toYMD(new Date());
     const yesterday = toYMD(new Date(Date.now() - 86400000));
-    const byDay = { [today]: { orders: 0, revenue: 0, cash: 0, digital: 0, credit: 0, tickets: 0 }, [yesterday]: { orders: 0, revenue: 0, cash: 0, digital: 0, credit: 0, tickets: 0 } };
+    const byDay = { [today]: { orders: 0, revenue: 0, cost: 0, cash: 0, digital: 0, credit: 0, tickets: 0 }, [yesterday]: { orders: 0, revenue: 0, cost: 0, cash: 0, digital: 0, credit: 0, tickets: 0 } };
     const todayItems = {};
     orders.forEach((o) => {
       const day = toYMD(parseOrderDate(o));
@@ -10195,11 +10361,13 @@ function AdminView({
       const total = Number(o.total) || 0;
       byDay[day].orders += 1;
       byDay[day].revenue += total;
+      const items = Array.isArray(o.items) ? o.items : [];
+      byDay[day].cost += items.reduce((acc, it) => acc + (it.quantity || 0) * (Number(costById[it.id]) || 0), 0);
       if (o.credit) byDay[day].credit += total;
       else if (o.paymentMethod === 'efectivo') byDay[day].cash += total;
       else byDay[day].digital += total;
       if (day === today) {
-        o.items.forEach((it) => {
+        items.forEach((it) => {
           todayItems[it.id] = (todayItems[it.id] || 0) + it.quantity;
         });
       }
@@ -10209,20 +10377,26 @@ function AdminView({
     const topToday = Object.entries(todayItems)
       .map(([id, quantity]) => {
         const p = products.find((prod) => prod.id === id);
-        return p ? { ...p, quantity } : null;
+        const cost = Number(costById[id]) || 0;
+        const unitRevenue = p ? Number(p.price) || 0 : 0;
+        return p
+          ? { ...p, quantity, cost, unitRevenue, marginUnit: unitRevenue - cost, margin: quantity * (unitRevenue - cost) }
+          : null;
       })
       .filter(Boolean)
       .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 5);
+      .slice(0, 8);
     return {
       today: t,
       yesterday: y,
+      grossProfit: t.revenue - t.cost,
+      grossMarginPct: t.revenue > 0 ? ((t.revenue - t.cost) / t.revenue) * 100 : 0,
       ticketAvg: t.orders > 0 ? t.revenue / t.orders : 0,
       revenueDelta: y.revenue > 0 ? ((t.revenue - y.revenue) / y.revenue) * 100 : (t.revenue > 0 ? 100 : 0),
       ticketsDelta: y.tickets > 0 ? ((t.tickets - y.tickets) / y.tickets) * 100 : (t.tickets > 0 ? 100 : 0),
       topToday
     };
-  }, [orders, products]);
+  }, [orders, products, costById]);
 
   // Total fiado pendiente (deuda activa de todos los clientes).
   const totalFiado = useMemo(
@@ -10536,7 +10710,7 @@ function AdminView({
             ].map((stBtn) => (
               <button
                 key={stBtn.key}
-                onClick={() => onUpdateOrderStatus(order.id, stBtn.key)}
+                onClick={() => (stBtn.key === 'cancelado' ? setConfirmCancelOrder(order) : onUpdateOrderStatus(order.id, stBtn.key))}
                 className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
                   order.status === stBtn.key
                     ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
@@ -10730,6 +10904,29 @@ function AdminView({
             onClose={() => setConfirmRefresh(false)}
           />
         )}
+
+        {confirmCancelOrder && (
+          <ConfirmActionModal
+            title="¿Cancelar este pedido?"
+            message="El pedido se marcará como cancelado, se devolverá el stock de sus artículos y el cliente quedará notificado."
+            note="Esta acción no se puede deshacer."
+            confirmLabel="Cancelar pedido"
+            onConfirm={() => {
+              const o = confirmCancelOrder;
+              setConfirmCancelOrder(null);
+              onUpdateOrderStatus(o.id, 'cancelado');
+            }}
+            onClose={() => setConfirmCancelOrder(null)}
+          />
+        )}
+
+        {receiveStockOpen && (
+          <ReceiveStockModal
+            products={products}
+            onReceiveStock={onReceiveStock}
+            onClose={() => setReceiveStockOpen(false)}
+          />
+        )}
       </div>
 
       {/* Analytics Summary Bar */}
@@ -10798,6 +10995,7 @@ function AdminView({
         >
           {[
             { key: 'inventory', label: 'Inventario', full: 'Inventario de Productos', icon: 'package' },
+            { key: 'ventas', label: 'Ventas', full: 'Venta en Mostrador', icon: 'shoppingBag' },
             { key: 'orders', label: `Pedidos (${pendingOrders.length})`, full: `Pedidos en Vivo (${pendingOrders.length})`, icon: 'clock' },
             { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
             { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
@@ -10841,6 +11039,17 @@ function AdminView({
           <Icon name="chevronRight" className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Venta en mostrador: el admin escanea o toca productos y registra la
+          venta física como pedido pickup entregado y pagado. */}
+      {adminTab === 'ventas' && (
+        <CounterSalesPanel
+          products={products}
+          orders={orders}
+          onCounterSale={onCounterSale}
+          addToast={addToast}
+        />
+      )}
 
       {/* Tab 1: Inventory Management */}
       {adminTab === 'inventory' && (
@@ -10915,7 +11124,41 @@ function AdminView({
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                <button
+                  onClick={() => setInvStockFilter((v) => (v === 'todas' ? 'bajo' : v === 'bajo' ? 'agotado' : 'todas'))}
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                    invStockFilter !== 'todas'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-lg shadow-emerald-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title={
+                    invStockFilter === 'bajo'
+                      ? 'Mostrando solo productos con stock bajo (≤5)'
+                      : invStockFilter === 'agotado'
+                      ? 'Mostrando solo productos agotados'
+                      : 'Filtrar por stock: bajo / agotados'
+                  }
+                >
+                  <Icon name="layers" className="w-4 h-4 shrink-0" />
+                  <span>
+                    {invStockFilter === 'todas' ? 'Stock' : invStockFilter === 'bajo' ? 'Solo bajo' : 'Agotados'}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setInvSortStock((v) => (v === false ? 'asc' : v === 'asc' ? 'desc' : false))}
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                    invSortStock
+                      ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 shadow-lg shadow-sky-500/10'
+                      : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+                  }`}
+                  title="Ordenar por stock (menor primero para reponer)"
+                >
+                  <Icon name={invSortStock === 'asc' ? 'chevronUp' : invSortStock === 'desc' ? 'chevronDown' : 'list'} className="w-4 h-4 shrink-0" />
+                  <span>
+                    {invSortStock === 'asc' ? 'Stock ↑' : invSortStock === 'desc' ? 'Stock ↓' : 'Ordenar'}
+                  </span>
+                </button>
                 <button
                   onClick={() => setInvGroupByBrand((v) => !v)}
                   className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
@@ -10925,9 +11168,8 @@ function AdminView({
                   }`}
                   title="Agrupar la lista por marca"
                 >
-                  <Icon name="layers" className="w-4 h-4" />
-                  <span className="hidden md:inline">{invGroupByBrand ? 'Agrupado por marca' : 'Agrupar por marca'}</span>
-                  <Icon name={invGroupByBrand ? 'check' : 'x'} className="w-3.5 h-3.5 md:hidden" />
+                  <Icon name="layers" className="w-4 h-4 shrink-0" />
+                  <span>{invGroupByBrand ? 'Por marca ✓' : 'Agrupar por marca'}</span>
                 </button>
                 <button
                   onClick={() => setInvView((v) => (v === 'lista' ? 'recorrido' : 'lista'))}
@@ -10938,8 +11180,16 @@ function AdminView({
                   }`}
                   title="Alternar entre lista y recorrido estilo tienda"
                 >
-                  <Icon name={invView === 'recorrido' ? 'list' : 'store'} className="w-4 h-4" />
-                  <span className="hidden md:inline">{invView === 'recorrido' ? 'Ver lista' : 'Recorrido tienda'}</span>
+                  <Icon name={invView === 'recorrido' ? 'list' : 'store'} className="w-4 h-4 shrink-0" />
+                  <span>{invView === 'recorrido' ? 'Ver lista' : 'Recorrido'}</span>
+                </button>
+                <button
+                  onClick={() => setReceiveStockOpen(true)}
+                  className="shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25 shadow-lg shadow-emerald-500/10"
+                  title="Escanear productos y sumar stock al recibir mercadería"
+                >
+                  <Icon name="scan" className="w-4 h-4 shrink-0" />
+                  <span>Recibir</span>
                 </button>
               </div>
             </div>
@@ -11504,7 +11754,7 @@ function AdminView({
                             {o.routeNumber}
                           </span>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2">
                               <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
                               <span className="text-xs font-bold text-white truncate">{o.customerName}</span>
                               {isTracking && (
@@ -11908,10 +12158,22 @@ function AdminView({
               </div>
             </div>
 
+            <div className="p-4 rounded-2xl bg-teal-500/10 border border-teal-500/30 space-y-2.5">
+              <span className="text-xs font-bold text-teal-300 block">Avisos para vos (admin)</span>
+              <p className="text-[11px] text-slate-400 leading-snug">
+                Recibí un aviso real cuando llegue un pedido nuevo, aunque la app esté cerrada. Se registra este dispositivo con el teléfono del admin ({adminPhone}).
+              </p>
+              <button
+                onClick={() => handleAdminSubscribePush()}
+                className="w-full py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs hover:bg-teal-400 transition-all active:scale-95"
+              >
+                Activar notificaciones en este dispositivo
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2.5">
-                <span className="text-xs font-bold text-slate-200 block">Notificación a todos</span>
-                <input
+                <span className="text-xs font-bold text-slate-200 block">Notificación a todos</span>                <input
                   type="text"
                   value={broadcastTitle}
                   onChange={(e) => setBroadcastTitle(e.target.value)}
@@ -12267,6 +12529,40 @@ function AdminView({
             </div>
           </div>
 
+          {/* Ganancia neta y margen */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-emerald-500/40 space-y-4">
+            <div className="flex items-center gap-2">
+              <Icon name="dollarSign" className="w-4 h-4 text-emerald-400" />
+              <h4 className="font-bold text-slate-200 text-sm">Ganancia Neta de Hoy</h4>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-3.5">
+                <span className="text-slate-400 block text-[10px] font-semibold uppercase tracking-wider">Ganancia (ventas − costos)</span>
+                <span className="text-xl sm:text-2xl font-black text-emerald-300 block mt-1">
+                  {formatUsd(finDash.grossProfit)}
+                </span>
+              </div>
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-3.5">
+                <span className="text-slate-400 block text-[10px] font-semibold uppercase tracking-wider">Margen bruto</span>
+                <span className="text-xl sm:text-2xl font-black text-white block mt-1">
+                  {finDash.grossMarginPct.toFixed(0)}%
+                </span>
+                <span className="text-[10px] text-slate-500 mt-0.5 block">del total vendido</span>
+              </div>
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-3.5">
+                <span className="text-slate-400 block text-[10px] font-semibold uppercase tracking-wider">Costo de mercadería vendida</span>
+                <span className="text-xl sm:text-2xl font-black text-amber-300 block mt-1">
+                  {formatUsd(finDash.today.cost)}
+                </span>
+                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                  {finDash.today.cost > 0 && finDash.today.revenue > 0
+                    ? `= ${((finDash.today.cost / finDash.today.revenue) * 100).toFixed(0)}% de las ventas`
+                    : 'Define el "Costo" en cada producto'}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Kiosko Operator: resumen de jornada */}
           <div className="rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-indigo-500/15 via-slate-900/80 to-slate-900/80 overflow-hidden">
             <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
@@ -12416,8 +12712,13 @@ function AdminView({
                 <ul className="space-y-3">
                   {finDash.topToday.map((p, idx) => (
                     <li key={p.id} className="flex items-center justify-between text-xs gap-2">
-                      <span className="text-slate-300 font-medium truncate">#{idx + 1} {p.name}</span>
-                      <span className="text-teal-400 font-bold shrink-0">{p.quantity} un.</span>
+                      <span className="text-slate-300 font-medium truncate flex items-center gap-1.5">
+                        #{idx + 1} {p.name}
+                        {p.marginUnit > 0 && (
+                          <span className="text-[9px] font-bold text-emerald-400 shrink-0">+{formatUsd(p.marginUnit)}/un</span>
+                        )}
+                      </span>
+                      <span className="text-teal-400 font-bold shrink-0">{p.quantity} un. · {formatUsd(p.margin)}</span>
                     </li>
                   ))}
                 </ul>
@@ -13157,8 +13458,8 @@ function OrderChat({ order }) {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages]);
 
-  const send = async () => {
-    const value = text.trim();
+  const send = async (valueOverride) => {
+    const value = String(valueOverride ?? text).trim();
     if (!value || sending) return;
     setSending(true);
     const res = await api.sendOrderMessage(order.id, order.phone, value);
@@ -13168,6 +13469,14 @@ function OrderChat({ order }) {
       load();
     }
   };
+
+  const TEMPLATES = [
+    { label: 'Listo 👍', text: (n, id) => `Hola ${n}, tu pedido ${id} está listo para retirar en Kiosko 24/7. ¡Te esperamos! 😊` },
+    { label: 'En camino 🛵', text: (n, id) => `Hola ${n}, tu pedido ${id} ya va en camino. ¡Pronto llega! 🙌` },
+    { label: 'Llegó el repartidor 📦', text: (n, id) => `Hola ${n}, el repartidor llegó con tu pedido ${id}. ¡Que lo disfrutes! 🎉` },
+    { label: 'En preparación', text: (n, id) => `Hola ${n}, estamos preparando tu pedido ${id}. Cualquier cambio te avisamos ✋` },
+    { label: 'Confirmar pago', text: (n, id) => `Hola ${n}, sobre el pago de tu pedido ${id}. ¿Necesitas ayuda? 🙏` }
+  ];
 
   return (
     <div className="rounded-2xl bg-slate-900/60 border border-slate-700 overflow-hidden">
@@ -13184,6 +13493,19 @@ function OrderChat({ order }) {
         )}
         {messages.map((m, idx) => (
           <ChatBubble key={m.id || idx} m={m} order={order} perspective="admin" />
+        ))}
+      </div>
+      <div className="px-2.5 pt-2.5 flex flex-wrap gap-1.5">
+        {TEMPLATES.map((t) => (
+          <button
+            key={t.label}
+            onClick={() => send(t.text(order.customerName, order.id))}
+            disabled={sending}
+            className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 text-[10px] font-bold hover:bg-emerald-500/20 transition-all disabled:opacity-50 active:scale-95"
+            title="Envía la plantilla al cliente en 1 tap"
+          >
+            {t.label}
+          </button>
         ))}
       </div>
       <div className="p-2.5 border-t border-slate-700/70 flex gap-2">
@@ -15067,10 +15389,10 @@ const friendlyAuthError = (err) => {
   // del servidor o un fallback amigable, así que se muestran tal cual.
   if (name === 'Error' && err?.message) return err.message;
   if (name === 'NotAllowedError') {
-    return 'Verificación cancelada. Para continuar, acepta la huella o Face ID cuando tu teléfono lo pida.';
+    return `Verificación cancelada. Para continuar, acepta tu ${BIO_METHOD_LABEL} cuando tu teléfono lo pida.`;
   }
   if (name === 'NotFoundError' || name === 'NotSupportedError') {
-    return 'Tu dispositivo no tiene biometría configurada. Activa la huella o Face ID en los ajustes y prueba de nuevo.';
+    return `Tu dispositivo no tiene ${BIO_METHOD_LABEL} configurada. Activa tu ${BIO_METHOD_LABEL} en los ajustes y prueba de nuevo.`;
   }
   if (name === 'AbortError') {
     return 'La verificación tardó demasiado y se canceló. Intenta de nuevo.';
@@ -15200,7 +15522,536 @@ function CreditLimitInput({ customer, onSetCreditLimit }) {
   );
 }
 
-function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
+// Escáner de código de barras para el formulario de productos. Usa la API
+// nativa BarcodeDetector (Chrome/Edge) cuando está disponible y, si no, decodifica
+// por software con ZXing (Safari, Firefox, iPhone). Siempre permite ingresar el
+// código manualmente como respaldo.
+function BarcodeScannerModal({ onScan, onClose, keepOpen = false, overlay = null }) {
+  useOverlay(true, onClose);
+  const videoRef = useRef(null);
+  const [cameraError, setCameraError] = useState('');
+  const [manual, setManual] = useState('');
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => {
+    let stream = null;
+    let raf = 0;
+    let zxControls = null;
+    let cancelled = false;
+    let last = 0;
+    let decoding = false;
+    let flashTimer = 0;
+    const reader =
+      typeof window !== 'undefined' && 'BarcodeDetector' in window
+        ? null
+        : new BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 150 });
+
+    const stop = () => {
+      if (cancelled) return;
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(flashTimer);
+      if (zxControls && typeof zxControls.stop === 'function') {
+        try { zxControls.stop(); } catch {}
+      }
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+
+    const handleResult = (value) => {
+      if (cancelled) return;
+      const v = String(value || '').trim();
+      if (!v) return;
+      setFlash(true);
+      if (keepOpen) {
+        onScan(v);
+        clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => {
+          if (!cancelled) setFlash(false);
+        }, 260);
+        return;
+      }
+      stop();
+      onScan(v);
+    };
+
+    (async () => {
+      try {
+        if (reader) {
+          // Decodificación por software (ZXing): sin deviceId pide cámara trasera
+          // (facingMode environment) con su propio getUserMedia y corre un loop
+          // continuo de decodificación. Evita la enumeración de dispositivos,
+          // que fallaba en Safari/iOS.
+          try {
+            zxControls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+              if (!cancelled && result && result.getText) handleResult(result.getText());
+            });
+          } catch {
+            zxControls = await reader.decodeFromConstraints(
+              { video: true },
+              videoRef.current,
+              (result) => {
+                if (!cancelled && result && result.getText) handleResult(result.getText());
+              }
+            );
+          }
+          return;
+        }
+
+        // Un solo getUserMedia propio para BarcodeDetector nativo. Intenta con
+        // cámara trasera y, si el navegador no la soporta, reintenta con
+        // cualquier cámara.
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+          });
+        } catch (err) {
+          if (err && (err.name === 'OverconstrainedError' || err.name === 'NotReadableError')) {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+          } else {
+            throw err;
+          }
+        }
+        if (cancelled || !videoRef.current) {
+          if (stream) stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+
+        let detector;
+        try {
+          detector = new window.BarcodeDetector({
+            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'codabar', 'itf', 'qr_code']
+          });
+        } catch {
+          detector = new window.BarcodeDetector();
+        }
+
+        const step = () => {
+          if (cancelled) return;
+          const v = videoRef.current;
+          const now = performance.now();
+          if (v && v.readyState >= 2 && now - last > 150 && !decoding) {
+            last = now;
+            decoding = true;
+            detector
+              .detect(v)
+              .then((codes) => (codes && codes.length ? String(codes[0].rawValue || '').trim() : null))
+              .catch(() => null)
+              .then((value) => {
+                decoding = false;
+                if (!cancelled && value) handleResult(value);
+              });
+          }
+          raf = requestAnimationFrame(step);
+        };
+        raf = requestAnimationFrame(step);
+      } catch (err) {
+        const name = err && err.name;
+        let msg = 'No se pudo abrir la cámara. Ingresá el código manualmente.';
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          msg = 'Permiso de cámara denegado. Ingresá el código manualmente.';
+        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          msg = 'No se encontró una cámara en este dispositivo. Ingresá el código manualmente.';
+        } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+          msg = 'La cámara está en uso por otra aplicación. Ingresá el código manualmente.';
+        }
+        setCameraError(msg);
+      }
+    })();
+
+    return stop;
+  }, [onScan, keepOpen]);
+
+  const applyManualCode = () => {
+    const v = manual.trim();
+    if (v) onScan(v);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-screen-up">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          <h3 className="font-bold text-white text-sm flex items-center gap-2">
+            <Icon name="camera" className="w-4 h-4 text-teal-400" />
+            Escanear código de barras
+          </h3>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {!cameraError ? (
+            <div className="relative overflow-hidden rounded-2xl bg-black aspect-video">
+              <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
+              <div className={`absolute inset-0 pointer-events-none transition-all duration-150 ${flash ? 'bg-teal-400/30' : 'bg-transparent'}`} />
+              <div className="absolute pointer-events-none" style={{ inset: '18% 12%', border: '2px solid rgba(45,212,191,0.8)', borderRadius: '16px', boxShadow: '0 0 0 9999px rgba(0,0,0,0.28)' }} />
+              <p className="absolute bottom-3 left-0 right-0 text-center text-[11px] text-teal-300 font-semibold">
+                Apuntá al código de barras del producto
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-slate-800/60 border border-slate-700 p-4 text-center">
+              <Icon name="camera" className="w-8 h-8 mx-auto text-slate-500" />
+              <p className="text-xs text-slate-300 mt-2 font-semibold">
+                {cameraError || 'Tu navegador no soporta escaneo por cámara. Ingresá el código manualmente.'}
+              </p>
+            </div>
+          )}
+
+          {overlay}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              autoFocus={!!cameraError}
+              value={manual}
+              onChange={(e) => setManual(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && applyManualCode()}
+              placeholder="Escribí el código manualmente (ej: 7790070035394)"
+              className="flex-1 min-w-0 px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+            />
+            <button
+              onClick={applyManualCode}
+              disabled={!manual.trim()}
+              className="shrink-0 px-4 py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-40 disabled:pointer-events-none transition-all active:scale-95"
+            >
+              Usar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Venta en mostrador: panel del admin para registrar ventas físicas de manera
+// cómoda. Entrada por escáner de código de barras, por código tipeado o tocando
+// el producto en la lista. Al registrar crea un pedido pickup entregado y pagado.
+function CounterSalesPanel({ products = [], orders = [], onCounterSale, addToast }) {
+  const [saleCart, setSaleCart] = useState([]); // [{ product, qty }]
+  const [codeInput, setCodeInput] = useState('');
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('efectivo');
+  const [saving, setSaving] = useState(false);
+  const [saleSearch, setSaleSearch] = useState('');
+
+  const total = saleCart.reduce((acc, it) => acc + (Number(it.product.price) || 0) * it.qty, 0);
+  const totalUnits = saleCart.reduce((acc, it) => acc + it.qty, 0);
+
+  const addProduct = (product, qty = 1) => {
+    const n = Math.max(1, Math.round(Number(qty) || 1));
+    const available = Number(product.stock) || 0;
+    setSaleCart((prev) => {
+      const found = prev.find((it) => it.product.id === product.id);
+      const current = found ? found.qty : 0;
+      if (available < current + n) {
+        addToast?.(`Stock insuficiente para "${product.name}"`, 'error');
+        return prev;
+      }
+      if (found) {
+        return prev.map((it) => (it.product.id === product.id ? { ...it, qty: it.qty + n } : it));
+      }
+      return [...prev, { product, qty: n }];
+    });
+  };
+
+  const addByCode = (code) => {
+    const p = (products || []).find((x) => String(x.code || '').trim() === String(code || '').trim());
+    if (!p) {
+      addToast?.(`No hay productos con el código ${code}`, 'error');
+      return;
+    }
+    addProduct(p);
+  };
+
+  const changeQty = (id, delta) => {
+    setSaleCart((prev) =>
+      prev
+        .map((it) => {
+          if (it.product.id !== id) return it;
+          const next = it.qty + delta;
+          if (next < 1) return null;
+          if (next > (Number(it.product.stock) || 0) && delta > 0) return it;
+          return { ...it, qty: next };
+        })
+        .filter(Boolean)
+    );
+  };
+
+  const removeItem = (id) => setSaleCart((prev) => prev.filter((it) => it.product.id !== id));
+
+  const applyCode = () => {
+    const c = codeInput.trim();
+    if (!c) return;
+    addByCode(c);
+    setCodeInput('');
+  };
+
+  const registerSale = async () => {
+    if (saleCart.length === 0) {
+      addToast?.('Agregá al menos un producto para registrar la venta', 'error');
+      return;
+    }
+    setSaving(true);
+    const res = await onCounterSale({
+      items: saleCart.map((it) => ({
+        id: it.product.id,
+        name: it.product.name,
+        price: it.product.price,
+        quantity: it.qty
+      })),
+      customerName,
+      customerPhone,
+      paymentMethod
+    });
+    setSaving(false);
+    if (res && res.ok) {
+      setSaleCart([]);
+      setCodeInput('');
+      setCustomerName('');
+      setCustomerPhone('');
+      setPaymentMethod('efectivo');
+    }
+  };
+
+  const filteredProducts = useMemo(() => {
+    const q = saleSearch.trim().toLowerCase();
+    if (!q) return products || [];
+    return (products || []).filter(
+      (p) =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.brand || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        String(p.code || '').toLowerCase().includes(q)
+    );
+  }, [products, saleSearch]);
+
+  const recentCounterSales = useMemo(() => {
+    return (orders || [])
+      .filter((o) => o.status === 'entregado' && (o.notes || '').toLowerCase().includes('mostrador'))
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 6);
+  }, [orders]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-teal-500/30 bg-gradient-to-br from-teal-500/10 via-slate-900/80 to-slate-900/80 p-4 sm:p-5">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-teal-500/20 text-teal-300 shrink-0">
+            <Icon name="shoppingBag" className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="font-bold text-white text-sm">Registrar venta en mostrador</h2>
+            <p className="text-[11px] text-slate-400">
+              Escaneá el código, escribilo o tocá el producto de la lista.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 flex gap-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={codeInput}
+            onChange={(e) => setCodeInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && applyCode()}
+            placeholder="Código de barras (ej: 7790070035394)"
+            className="flex-1 min-w-0 px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+          />
+          <button
+            onClick={applyCode}
+            disabled={!codeInput.trim()}
+            className="shrink-0 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-xs hover:text-white transition-all disabled:opacity-40"
+          >
+            Agregar
+          </button>
+          <button
+            onClick={() => setScannerOpen(true)}
+            className="shrink-0 px-4 py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs hover:bg-teal-400 transition-all flex items-center gap-1.5"
+          >
+            <Icon name="scan" className="w-4 h-4" />
+            Escanear
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-slate-800/60 border border-slate-700 p-3 sm:p-4 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+            <Icon name="cart" className="w-4 h-4 text-teal-400" />
+            Venta actual · {totalUnits} un.
+          </h3>
+          <button
+            onClick={() => setSaleCart([])}
+            className="text-[11px] font-semibold text-slate-400 hover:text-rose-300 transition-colors"
+          >
+            Vaciar
+          </button>
+        </div>
+
+        {saleCart.length === 0 ? (
+          <p className="text-[11px] text-slate-500 text-center py-3">
+            Sin productos todavía. Escaneá o buscá arriba.
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+            {saleCart.map((it) => (
+              <div key={it.product.id} className="flex items-center gap-2 rounded-xl bg-slate-900/60 border border-slate-700/60 p-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-white truncate">{it.product.name}</p>
+                  <p className="text-[10px] text-slate-400">{formatUsd(it.product.price)} c/u</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => changeQty(it.product.id, -1)} className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center">
+                    <Icon name="minus" className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="w-7 text-center text-sm font-black text-white">{it.qty}</span>
+                  <button onClick={() => changeQty(it.product.id, 1)} className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center">
+                    <Icon name="plus" className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <span className="w-16 text-right text-xs font-bold text-white">{formatUsd((Number(it.product.price) || 0) * it.qty)}</span>
+                <button onClick={() => removeItem(it.product.id)} className="text-slate-500 hover:text-rose-300 transition-colors">
+                  <Icon name="trash2" className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between pt-1 border-t border-slate-700/60">
+          <span className="text-xs font-semibold text-slate-400">Total</span>
+          <span className="text-lg font-black text-teal-300">{formatUsd(total)}</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { key: 'efectivo', label: 'Efectivo' },
+            { key: 'qr', label: 'QR' },
+            { key: 'tarjeta', label: 'Tarjeta' },
+            { key: 'transferencia', label: 'Transferencia' }
+          ].map((pm) => (
+            <button
+              key={pm.key}
+              onClick={() => setPaymentMethod(pm.key)}
+              className={`px-2 py-2 rounded-xl text-[11px] font-bold border transition-all ${
+                paymentMethod === pm.key
+                  ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
+                  : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
+              }`}
+            >
+              {pm.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input
+            type="text"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Cliente (opcional)"
+            className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+          />
+          <input
+            type="tel"
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value)}
+            placeholder="WhatsApp (opcional)"
+            className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+          />
+        </div>
+
+        <button
+          onClick={registerSale}
+          disabled={saving || saleCart.length === 0}
+          className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-black text-sm hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          <Icon name={saving ? 'clock' : 'check'} className="w-4 h-4" />
+          {saving ? 'Registrando…' : `Registrar venta · ${formatUsd(total)}`}
+        </button>
+      </div>
+
+      <div className="rounded-2xl bg-slate-800/40 border border-slate-800 p-3 sm:p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+            <Icon name="package" className="w-4 h-4 text-teal-400" />
+            Productos (tocá para agregar)
+          </h3>
+          <input
+            type="text"
+            value={saleSearch}
+            onChange={(e) => setSaleSearch(e.target.value)}
+            placeholder="Buscar…"
+            className="w-36 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-80 overflow-y-auto pr-1">
+          {filteredProducts.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => addProduct(p)}
+              className="flex items-center gap-2 rounded-xl bg-slate-900/60 border border-slate-700/60 p-2 text-left hover:border-teal-500/50 transition-all"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-white truncate">{p.name}</p>
+                <p className="text-[10px] text-slate-400">
+                  {formatUsd(p.price)} · {p.stock} un.
+                </p>
+              </div>
+              <span className="shrink-0 w-7 h-7 rounded-lg bg-teal-500/15 border border-teal-500/30 text-teal-300 flex items-center justify-center">
+                <Icon name="plus" className="w-3.5 h-3.5" />
+              </span>
+            </button>
+          ))}
+          {filteredProducts.length === 0 && (
+            <p className="col-span-full text-[11px] text-slate-500 text-center py-3">
+              No hay productos que coincidan.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {recentCounterSales.length > 0 && (
+        <div className="rounded-2xl bg-slate-800/40 border border-slate-800 p-3 sm:p-4 space-y-1.5">
+          <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+            <Icon name="clock" className="w-4 h-4 text-teal-400" />
+            Últimas ventas de mostrador
+          </h3>
+          {recentCounterSales.map((o) => (
+            <div key={o.id} className="flex items-center gap-2 rounded-xl bg-slate-900/60 border border-slate-700/60 p-2">
+              <span className="font-mono text-[10px] font-bold text-teal-400 w-16 shrink-0">{o.id}</span>
+              <span className="flex-1 min-w-0 text-xs text-slate-300 truncate">{o.customerName}</span>
+              <span className="text-[10px] text-slate-500 shrink-0">
+                {new Date(o.createdAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+              <span className="text-xs font-bold text-white shrink-0">{formatUsd(o.total)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {scannerOpen && (
+        <BarcodeScannerModal
+          onScan={(code) => {
+            setScannerOpen(false);
+            addByCode(code);
+          }}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProductFormModal({ productToEdit, categories, products = [], onClose, onSave }) {
   useOverlay(true, onClose);
   const [formData, setFormData] = useState({
     id: productToEdit?.id || '',
@@ -15209,6 +16060,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     brand: productToEdit?.brand || '',
     description: productToEdit?.description || '',
     price: productToEdit?.price || '',
+    cost: productToEdit?.cost || '',
     stock: productToEdit?.stock || '',
     category: productToEdit?.category || categories[0] || 'Comida',
     image: productToEdit?.image || 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=500&auto=format&fit=crop&q=80',
@@ -15217,6 +16069,61 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
   });
 
   const [newCatInput, setNewCatInput] = useState('');
+  const [scannerOpen, setScannerOpen] = useState(false);
+
+  // Autocompletado de datos del producto por código de barras (Nivel 2): al
+  // escanear o buscar un código, se consulta Open Food Facts / Open Beauty Facts
+  // y se rellenan los campos vacíos (nombre, marca, descripción, imagen).
+  const [lookupState, setLookupState] = useState('idle'); // idle | loading | found | notfound | error
+  const [lookupError, setLookupError] = useState('');
+  const [lookupInfo, setLookupInfo] = useState(null);
+
+  const DEFAULT_IMG =
+    'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=500&auto=format&fit=crop&q=80';
+
+  const lookupProductInfo = async (rawCode) => {
+    const code = String(rawCode || '').trim();
+    if (!code) return;
+    setLookupState('loading');
+    setLookupError('');
+    setLookupInfo(null);
+    try {
+      const res = await api.productInfo(code);
+      if (!res.ok) {
+        setLookupState('error');
+        setLookupError(res.data?.error || 'No se pudo consultar el código.');
+        return;
+      }
+      const info = res.data;
+      if (!info || !info.found) {
+        setLookupState('notfound');
+        return;
+      }
+      setLookupState('found');
+      setLookupInfo(info);
+      setFormData((prev) => {
+        const keepImage =
+          prev.image && prev.image !== DEFAULT_IMG && !prev.image.startsWith('/api/products/');
+        return {
+          ...prev,
+          name: prev.name || info.name || prev.name,
+          brand: prev.brand || info.brand || prev.brand,
+          description: prev.description || info.description || prev.description,
+          image: keepImage ? prev.image : info.image || prev.image,
+          category: categories.includes(info.category) ? info.category : prev.category
+        };
+      });
+    } catch {
+      setLookupState('error');
+      setLookupError('Sin conexión para consultar el código. Verificá tu internet.');
+    }
+  };
+
+  // Si otro producto (distinto id) ya usa ese código de barras, se avisa en el
+  // formulario y se bloquea el guardado para no duplicar códigos.
+  const codeConflict =
+    String(formData.code || '').trim().length > 0 &&
+    (products || []).some((p) => p.id !== formData.id && String(p.code || '').trim() === String(formData.code).trim());
 
   const sizeType = ['ml', 'L'].includes(formData.sizeUnit) ? 'liquid' : 'solid';
   const sizeUnits = sizeType === 'liquid' ? ['ml', 'L'] : ['g', 'kg'];
@@ -15352,10 +16259,12 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.name || !formData.price || formData.stock === '') return;
+    if (codeConflict) return;
 
     onSave({
       ...formData,
       price: Number(formData.price),
+      cost: Number(formData.cost) || 0,
       stock: Number(formData.stock),
       sizeValue: formData.sizeValue === '' ? '' : Number(formData.sizeValue),
       category: newCatInput.trim() ? newCatInput.trim() : formData.category
@@ -15387,6 +16296,74 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
               placeholder="Ej: Chocolate Semi Amargo"
               className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Código de barras (EAN/UPC)</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={formData.code}
+                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                placeholder="Ej: 7790070035394"
+                className="flex-1 min-w-0 px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setScannerOpen(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 font-bold text-xs hover:bg-teal-500/25 transition-all active:scale-95"
+              >
+                <Icon name="camera" className="w-4 h-4" />
+                Escanear
+              </button>
+            </div>
+            <div className="flex items-center justify-between gap-2 mt-1">
+              <p className="text-[10px] text-slate-500">
+                {formData.code ? 'Este código reemplaza al generado automáticamente.' : 'Si no lo cargás, se genera uno automático (PROD-XXX).'}
+              </p>
+              {formData.code.trim() && (
+                <button
+                  type="button"
+                  onClick={() => lookupProductInfo(formData.code)}
+                  disabled={lookupState === 'loading'}
+                  className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold hover:bg-cyan-500/25 transition-all disabled:opacity-50"
+                  title="Buscar nombre, marca, imagen y más datos de este código"
+                >
+                  <Icon name={lookupState === 'loading' ? 'clock' : 'search'} className="w-3 h-3" />
+                  {lookupState === 'loading' ? 'Buscando…' : 'Buscar datos'}
+                </button>
+              )}
+            </div>
+            {lookupState === 'loading' && (
+              <p className="text-[10px] text-cyan-300 font-semibold mt-1 flex items-center gap-1">
+                <Icon name="clock" className="w-3 h-3" />
+                Consultando base de códigos…
+              </p>
+            )}
+            {lookupState === 'found' && lookupInfo && (
+              <p className="text-[10px] text-emerald-400 font-semibold mt-1 flex items-center gap-1">
+                <Icon name="check" className="w-3 h-3" />
+                Datos encontrados en {lookupInfo.source}. Se rellenaron los campos vacíos.
+              </p>
+            )}
+            {lookupState === 'notfound' && (
+              <p className="text-[10px] text-slate-400 mt-1">
+                No encontramos datos para este código. Cargá el producto a mano.
+              </p>
+            )}
+            {lookupState === 'error' && (
+              <p className="text-[10px] text-rose-400 font-semibold mt-1 flex items-center gap-1">
+                <Icon name="alertTriangle" className="w-3 h-3" />
+                {lookupError}
+              </p>
+            )}
+            {codeConflict && (
+              <p className="text-[10px] text-rose-400 font-semibold mt-1 flex items-center gap-1">
+                <Icon name="alertTriangle" className="w-3 h-3" />
+                Ya existe otro producto con ese código. Usá uno distinto.
+              </p>
+            )}
           </div>
 
           <div>
@@ -15422,6 +16399,19 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                 value={formData.price}
                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                 placeholder="1500"
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Costo ($ ARS)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.cost}
+                onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
+                placeholder="1200"
                 className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
               />
             </div>
@@ -15651,6 +16641,161 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
           </button>
         </form>
       </div>
+      {scannerOpen && (
+        <BarcodeScannerModal
+          onScan={(code) => {
+            setFormData((prev) => ({ ...prev, code }));
+            setScannerOpen(false);
+            lookupProductInfo(code);
+          }}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Recibir mercadería: escanear (o tipear) el código de barras de un producto,
+// ver su stock actual y sumar las unidades recibidas de una. Reutiliza el
+// BarcodeScannerModal como overlay superior.
+function ReceiveStockModal({ products = [], onReceiveStock, onClose }) {
+  useOverlay(true, onClose);
+  const [scannerOpen, setScannerOpen] = useState(true);
+  const [found, setFound] = useState(null);
+  const [qty, setQty] = useState('');
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleCode = (code) => {
+    const p = (products || []).find((x) => String(x.code || '').trim() === String(code).trim());
+    if (!p) {
+      setMsg(`No hay ningún producto con el código ${code}.`);
+      setScannerOpen(false);
+      return;
+    }
+    setMsg('');
+    setFound(p);
+    setQty('');
+    setScannerOpen(false);
+  };
+
+  const confirmReceiving = async () => {
+    const n = Number(qty);
+    if (!n || n <= 0) {
+      setMsg('Ingresá una cantidad mayor a 0.');
+      return;
+    }
+    if (!found) return;
+    setSaving(true);
+    const ok = await onReceiveStock(found, n);
+    setSaving(false);
+    if (ok) {
+      setFound(null);
+      setQty('');
+      setMsg('');
+      setScannerOpen(true);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-screen-up max-h-[92vh] flex flex-col">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-white text-sm flex items-center gap-2">
+            <Icon name="package" className="w-4 h-4 text-teal-400" />
+            Recibir mercadería
+          </h3>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
+          {!found && (
+            <div className="rounded-2xl bg-slate-800/60 border border-slate-700 p-4 text-center space-y-2">
+              <Icon name="scan" className="w-8 h-8 mx-auto text-teal-400" />
+              <p className="text-xs text-slate-300 font-semibold">
+                Escaneá el código de barras del producto que llegó
+              </p>
+              <p className="text-[11px] text-slate-500">También podés tipearlo en el escáner.</p>
+              {!scannerOpen && (
+                <button
+                  onClick={() => setScannerOpen(true)}
+                  className="w-full py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 font-bold text-xs hover:bg-teal-500/25 transition-all"
+                >
+                  Reintentar lectura
+                </button>
+              )}
+            </div>
+          )}
+
+          {msg && !found && (
+            <p className="text-[12px] text-rose-400 font-semibold flex items-center gap-1">
+              <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+              {msg}
+            </p>
+          )}
+
+          {found && (
+            <>
+              <div className="flex items-center gap-3 rounded-2xl bg-slate-800/80 border border-slate-700 p-3">
+                <ProductImg product={found} alt={found.name} className="w-14 h-14 rounded-xl object-cover bg-slate-900 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-white text-sm truncate">{found.name}</h4>
+                  <p className="text-[11px] text-slate-400">Código: {found.code}</p>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    Stock actual: <span className="text-teal-300 font-bold">{found.stock}</span>
+                    {found.price ? <> · {formatUsd(found.price)}</> : null}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setFound(null); setScannerOpen(true); setMsg(''); }}
+                  className="shrink-0 text-[11px] font-semibold text-slate-400 hover:text-white"
+                >
+                  Cambiar
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Cantidad recibida</label>
+                <input
+                  type="number"
+                  min="1"
+                  autoFocus
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && confirmReceiving()}
+                  placeholder="Ej: 12"
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
+                />
+                <p className="text-[11px] text-teal-300 font-semibold mt-1">
+                  Quedaría en {Number(found.stock) + (Number(qty) || 0)} unidades
+                </p>
+              </div>
+
+              {msg && (
+                <p className="text-[12px] text-rose-400 font-semibold flex items-center gap-1">
+                  <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+                  {msg}
+                </p>
+              )}
+
+              <button
+                onClick={confirmReceiving}
+                disabled={saving || !qty}
+                className="w-full py-3 rounded-2xl bg-teal-500 text-slate-950 font-bold text-xs hover:bg-teal-400 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-teal-500/20"
+              >
+                <Icon name={saving ? 'clock' : 'download'} className="w-4 h-4" />
+                {saving ? 'Guardando…' : 'Recibir stock'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {scannerOpen && (
+        <BarcodeScannerModal onScan={handleCode} onClose={() => setScannerOpen(false)} />
+      )}
     </div>
   );
 }
@@ -16973,6 +18118,133 @@ function PaymentsAdminView({ payments, onLoadPayments, onApprovePayment, onRejec
 // Asistente IA "Don Aiker": chat que responde con datos reales del negocio
 // (deuda, pedidos, promos, tasa, productos) usando reglas locales sin API.
 // ============================================================================
+
+// Normaliza texto para matching tolerante: minúsculas, sin acentos, sin puntuación.
+const normalizeAiText = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+// Sinónimos comunes de productos para la búsqueda con partial match.
+const PRODUCT_SYNONYMS = {
+  gaseosa: ['coca', 'pepsi', 'sprite', 'cola', 'chicha', 'jugo', 'refresco'],
+  agua: ['agua', 'mineral'],
+  pan: ['pan', 'tostada', 'bimbo', 'integral'],
+  galleta: ['galleta', 'cookie', 'dulce'],
+  cafe: ['cafe', 'capuchino', 'express', 'nescafe'],
+  chocolate: ['chocolate', 'sublime', 'nutella'],
+  arroz: ['arroz', 'integral'],
+  aceite: ['aceite', 'vegetal', 'oliva'],
+  azucar: ['azucar', 'endulzante', 'stevia'],
+  harina: ['harina', 'maiz', 'pan'],
+  pasta: ['pasta', 'fideo', 'espagueti', 'tallarin'],
+  cerveza: ['cerveza', 'polar', 'solera', 'zulia'],
+  jugo: ['jugo', 'nectar', 'caja'],
+  leche: ['leche', 'evaporada', 'entera', 'descremada'],
+  queso: ['queso', 'fresco', 'guayanés', 'país'],
+  refresco: ['refresco', 'cola', 'cloro', 'pepsi', 'hit'],
+  jabon: ['jabon', 'aseo', 'tocador', 'lavanderia'],
+  cloro: ['cloro', 'lejia', 'limpieza'],
+  pañal: ['pañal', 'pnial', 'panal', 'bebe'],
+  papel: ['papel', 'toalla', 'higienico', 'servilleta'],
+  velas: ['velas', 'vela'],
+  hielo: ['hielo', 'helado']
+};
+
+// Palabras de relleno que no deben puntuar en la búsqueda de productos.
+const AI_STOPWORDS = new Set([
+  'que', 'con', 'para', 'esta', 'este', 'estas', 'estos', 'cual', 'cuales', 'como', 'cuando',
+  'donde', 'muy', 'mas', 'menos', 'por', 'los', 'las', 'una', 'uno', 'unos', 'el', 'la', 'lo',
+  'de', 'del', 'me', 'mi', 'tu', 'te', 'se', 'su', 'sus', 'y', 'o', 'a', 'hay', 'tienes',
+  'tiene', 'tengo', 'quiero', 'quieres', 'puedes', 'podrias', 'favor', 'disponible', 'precio',
+  'cuanto', 'cuanta', 'cuantos', 'cuantas', 'es', 'son', 'estoy', 'eso', 'eso', 'algo', 'dame',
+  'da', 'haz', 'muestra', 'dime', 'decime', 'saber', 'queria', 'quisiera', 'puedo', 'agregar',
+  'agregame', 'comprar', 'compra', 'pasame', 'pasar', 'busca', 'buscar', 'opcion', 'opciones'
+]);
+
+// Obtiene matches del texto contra el catálogo con scoring estricto: nombre completo,
+// contención del texto completo, token exacto, token parcial (3+ letras) y sinónimos.
+// Devuelve hasta `limit` y solo si el mejor match supera el umbral.
+function matchAiProducts(products, query, limit = 4) {
+  if (!Array.isArray(products) || products.length === 0) return [];
+  const q = normalizeAiText(query);
+  if (!q) return [];
+  const tokens = q.split(' ').filter((t) => t.length > 2 && !AI_STOPWORDS.has(t));
+  const scored = (products || [])
+    .filter((p) => p && p.name)
+    .map((p) => {
+      const n = normalizeAiText(p.name);
+      const nameTokens = n.split(' ').filter((t) => t.length > 2 && !AI_STOPWORDS.has(t));
+      let score = 0;
+      if (n === q) score += 100;
+      else if (q.length > 3 && n.includes(q)) score += 70;
+      else if (tokens.length && tokens.some((t) => nameTokens.some((nt) => nt === t))) score += 50;
+      // partial match por token relevante (nunca con stopwords ni tokens de 1-2 letras)
+      tokens.forEach((t) => {
+        if (t.length >= 3 && nameTokens.some((nt) => nt.startsWith(t))) score += 20;
+        else if (nameTokens.some((nt) => nt.length >= 4 && (nt.includes(t) || t.startsWith(nt)))) score += 20;
+      });
+      // sinónimos: solo si la keyword aparece completa en la pregunta
+      Object.entries(PRODUCT_SYNONYMS).forEach(([kw, alts]) => {
+        if (q.includes(kw)) {
+          alts.forEach((alt) => {
+            if (n.includes(alt)) score += 25;
+          });
+        }
+      });
+      return { p, score };
+    })
+    .filter((x) => x.score >= 40)
+    .sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((x) => x.p);
+}
+
+// Lectura de la respuesta del asistente en voz alta (TTS).
+const sayAi = (text) => speakText(text);
+
+// Menú de capacidades del asistente: el cliente escribe el número del punto
+// que desea ejecutar y el chat lo resuelve. Texto con puntos numerados.
+const AI_HELP_MENU = [
+  { n: 1, text: 'Consultar mi deuda o saldo' },
+  { n: 2, text: 'Ver mi último pedido y dónde va' },
+  { n: 3, text: 'Promos y ofertas activas' },
+  { n: 4, text: 'La tasa del día (dólar/bolívar)' },
+  { n: 5, text: 'Repetir mi último pedido' },
+  { n: 6, text: 'Ver el catálogo y agregar productos' },
+  { n: 7, text: 'Ver mi carrito o ir a pagar' },
+  { n: 8, text: 'Hablar con una persona del kiosko' }
+];
+
+// Texto de la respuesta con la lista de puntos que muestra el botón de ayuda.
+const AI_HELP_TEXT = `Claro, te cuento todo lo que puedo hacer por ti 😊\n\n${AI_HELP_MENU.map(
+  (m) => `${m.n}. ${m.text}`
+).join('\n')}\n\nEscribe el número del punto que quieres y lo ejecuto enseguida.`;
+
+// Bienvenida proactiva contextual según lo que el cliente tiene en curso.
+function buildAiWelcome(params) {
+  const { name, activePromos, pendingOrder, balance } = params || {};
+  const parts = [`¡Hola${name ? `, ${name}` : ''}! Soy Don Aiker, el asistente del kiosko 📣`];
+  if (Array.isArray(activePromos) && activePromos.length) {
+    const n = activePromos.length;
+    parts.push(`Mira, hoy hay ${n} promo${n > 1 ? 's' : ''} activa${n > 1 ? 's' : ''} 🎉.`);
+  }
+  if (pendingOrder) {
+    const label =
+      pendingOrder.status === 'en_camino'
+        ? 'tu pedido está en camino, seguilo abajo 🛵'
+        : `tienes ${pendingOrder.id} en curso (${STATUS_LABELS[pendingOrder.status] || pendingOrder.status})`;
+    parts.push(label);
+  } else if (balance > 0) {
+    parts.push(`Recuerda que tienes ${formatUsd(balance)} de deuda pendiente.`);
+  }
+  parts.push('Toca una pregunta rápida o pide un producto. Puedo contarte tu deuda, tus pedidos, las promos, la tasa y agregar al carrito. 😊');
+  return parts.join('\n');
+}
+
 function AikerAssistant({
   customer,
   customerOrders,
@@ -16980,33 +18252,53 @@ function AikerAssistant({
   promos,
   rate,
   savedCustomer,
+  storeLocation,
+  cartCount = 0,
   headerHeight = 0,
   onClose,
   onOpenDebt,
   onOpenOrders,
   onTrackOrder,
   onAddToCart,
-  onRepeatLastOrder
+  onRepeatLastOrder,
+  onOpenCart,
+  onOpenCheckout
 }) {
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState(() => [
     {
       from: 'ai',
-      text: '¡Hola! Soy Don Aiker, el asistente del kiosko. Toca una pregunta rápida o pide un producto para agregarlo al carrito. Puedo contarte tu deuda, tus pedidos, las promos y la tasa del día. 😊'
+      text: (() => {
+        const bal = Number(customer?.balance) || 0;
+        const ordinal = customer ? normalizePhoneDigits(customer.phone) : null;
+        const ords = (customerOrders || []).filter((o) => (ordinal ? normalizePhoneDigits(o.phone) === ordinal : true));
+        const pend = ords.find((o) => !['entregado', 'cancelado'].includes(o.status)) || null;
+        const active = (promos || []).filter((p) => p.active);
+        const firstName = customer?.customerName?.split(' ')[0] || savedCustomer?.customerName?.split(' ')[0] || '';
+        return buildAiWelcome({ name: firstName, activePromos: active, pendingOrder: pend, balance: bal });
+      })()
     }
   ]);
   const [thinking, setThinking] = useState(false);
-  // Acción profunda asociada a la última respuesta del asistente (botón debajo
-  // del mensaje): ver deuda, seguir pedido, repetir pedido o agregar al carrito.
-  const [action, setAction] = useState(null);
+  const [action, setAction] = useState([{ kind: 'help', label: 'Conoce en qué te puedo ayudar', icon: 'sparkles' }]);
+  const [followUps, setFollowUps] = useState([]);
   const [draft, setDraft] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [listening, setListening] = useState(false);
+  const [speechOn, setSpeechOn] = useState(false);
+  const [escalated, setEscalated] = useState(false);
+  const [liveOrder, setLiveOrder] = useState(null);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+  const recRef = useRef(null);
+  const replyTimerRef = useRef(null);
 
   useOverlay(true, onClose);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, thinking]);
+  }, [messages, thinking, liveOrder]);
+
+  useEffect(() => () => clearTimeout(replyTimerRef.current), []);
 
   const balance = Number(customer?.balance) || 0;
   const name = customer?.customerName?.split(' ')[0] || savedCustomer?.customerName?.split(' ')[0] || 'cliente';
@@ -17030,119 +18322,325 @@ function AikerAssistant({
       .slice(0, 3);
   }, [products, customerOrders]);
 
+  // Preguntas rápidas base (según el estado real del cliente).
   const baseReplies = ['¿Cuánto debo?', '¿Dónde está mi pedido?', 'Promos activas', '¿Cuál es la tasa?'];
   const quickReplies = myOrders.length ? [...baseReplies, 'Repetir mi último pedido'] : baseReplies;
 
-  // Responde una pregunta y adosale una acción profunda cuando corresponde.
+  const appendAi = (text) => setMessages((m) => [...m, { from: 'ai', text }]);
+
+  // Detector de intención: scoring sobre texto normalizado en vez de solo
+  // keywords crudas. Calcula un puntaje por categoría y gana la mejor reunión.
   const respond = (q) => {
-    const t = q.toLowerCase();
-    // Saludos
-    if (/hola|buenas|saludos|hey|qué tal|que tal|^hi|^hello/.test(t)) {
+    const raw = String(q || '').trim();
+    const t = normalizeAiText(raw);
+    if (!t) return null;
+
+    // ---- Menú de capacidades: "¿qué puedes hacer?" o un número del menú ----
+    if (/que puedes hacer|que haces|en que me ayudas|como me ayudas|como puedes ayudarme|menu|puntos|como funciona/.test(t)) {
       return {
-        text: `¡Hola${name !== 'cliente' ? `, ${name}` : ''}! Soy Don Aiker 🤖 ¿En qué te ayudo hoy? Toca abajo para ver tu deuda, tus pedidos, las promos activas, la tasa del día o agregar un producto.`
+        text: AI_HELP_TEXT,
+        followUps: AI_HELP_MENU.map((m) => String(m.n))
       };
     }
-    // Deuda / saldo / fiado
-    if (/deuda|debo|adeudo|saldo|fiado|cr[eé]dito|c[uú]anto pag|deber|pendiente/.test(t)) {
-      if (!customer) {
-        return { text: 'Aún no estás identificado. Identifícate con tu número para ver tu deuda y saldo a favor.' };
+    if (/^\d{1,2}$/.test(t)) {
+      const n = Number(t);
+      const item = AI_HELP_MENU.find((m) => m.n === n);
+      if (item) {
+        const map = {
+          1: '¿Cuánto debo?',
+          2: '¿Dónde está mi pedido?',
+          3: 'Promos activas',
+          4: '¿Cuál es la tasa?',
+          5: 'Repetir mi último pedido',
+          6: '¿Qué venden?',
+          7: 'Ver mi carrito',
+          8: 'Quiero hablar con una persona real'
+        };
+        return respond(map[n]);
       }
-      if (balance > 0) {
+      return {
+        text: `Ese punto (${n}) no está en la lista. Escribí un número del 1 al ${AI_HELP_MENU.length} o tocá la opción de abajo.`,
+        followUps: AI_HELP_MENU.map((m) => String(m.n))
+      };
+    }
+
+    // ---- Detección de productos (siempre primero: "agregar milka") ----
+    const matches = matchAiProducts(products, raw, 4);
+    const isProductIntent = /(agregar|quiero|una|un|hnos|da|pide|hay |quiere|cuesta|precio)/.test(t) || !!matches.length;
+    if (matches.length) {
+      if (matches.length === 1) {
+        const prod = matches[0];
+        const avail = Math.max(0, Number(prod.stock) - Number(prod.reserved || 0));
+        const priceBs = rate?.rate > 0 ? ` (${formatBs(usdToBs(prod.price, rate.rate))})` : '';
         return {
-          text: `Tienes ${formatUsd(balance)} de deuda pendiente.${
-            rate?.rate > 0 ? ` Equivale a ${formatBs(usdToBs(balance, rate.rate))} a la tasa del día (Bs ${Number(rate.rate).toFixed(2)}).` : ''
-          }\nPuedes abonar desde tu cuenta.`,
-          action: { kind: 'debt', label: 'Ver mi deuda', icon: 'creditCard' }
+          text: `Encontré "${prod.name}" a ${formatUsd(prod.price)}${priceBs}${
+            avail > 0 ? ` con ${avail} ${avail === 1 ? 'unidad' : 'unidades'} en stock` : ', pero está agotado por ahora'
+          }.`,
+          action: avail > 0 ? { kind: 'product', product: prod, label: 'Agregar al carrito', icon: 'plus' } : null,
+          followUps: [
+            ...(cartCount > 0 ? ['Ver mi carrito'] : []),
+            ...(avail > 0 ? ['Agregar y pagar'] : []),
+            'Ver promos activas'
+          ]
+        };
+      }
+      // varios matches → mostrar lista con botón por cada producto
+      const lines = matches
+        .map((p, i) => `${i + 1}. ${p.name} — ${formatUsd(p.price)}`)
+        .join('\n');
+      return {
+        text: `Encontré varias opciones:\n${lines}\n¿Cuál te agrego?`,
+        action: matches.map((p) => ({
+          kind: 'product',
+          product: p,
+          label: p.name.split(' ').slice(0, 2).join(' '),
+          icon: 'plus'
+        })),
+        followUps: [...(cartCount > 0 ? ['Ver mi carrito'] : []), 'Ver promos activas']
+      };
+    }
+    if (isProductIntent && products && products.length > 0 && /(agregar|hay |busca)/.test(t)) {
+      return {
+        text: 'Todavía no encuentro ese producto por nombre. Probá con otro nombre o decime la categoría (ej. "gaseosas", "galletas"). También podés ver todo el catálogo arriba 🔍.',
+        followUps: ['Ver promos activas', '¿Qué venden?']
+      };
+    }
+
+    // ---- Saludo ----
+    if (/^(hola|buenas|saludos|hey|que tal|buen dia|buenas tardes|buenas noches|hi|hello)/.test(t)) {
+      return {
+        text: `¡Hola${name !== 'cliente' ? `, ${name}` : ''}! Soy Don Aiker 🤖 ¿En qué te ayudo hoy? Tocá abajo tu deuda, tus pedidos, las promos, la tasa o un producto.`,
+        followUps: quickReplies.slice(0, 4)
+      };
+    }
+
+    // ---- Deuda / saldo / fiado (atención por pasos para fiado) ----
+    const debtIntent = /(deud|debo|adeudo|adeudar|saldo|fiado|credito|cuanto pag|deber|pendiente|abon)/.test(t);
+    if (debtIntent) {
+      if (!customer) {
+        return {
+          text: 'Aún no estás identificado. Identifícate con tu número en la tienda para ver tu deuda, tu saldo y tu fiado.',
+          followUps: ['Mis pedidos', 'Promos activas']
+        };
+      }
+      const isBenefited = Boolean(customer.isBenefited);
+      const creditLimit = Number(customer.creditLimit) || 0;
+      const creditInUse = isBenefited && creditLimit > 0 ? Math.min(100, (Math.max(0, balance) / creditLimit) * 100) : 0;
+
+      if (balance > 0) {
+        const detail = balanceDetail();
+        const head = `Tienes ${formatUsd(balance)} de deuda pendiente.${rate?.rate > 0 ? ` Son ${formatBs(usdToBs(balance, rate.rate))} a la tasa de hoy (Bs ${Number(rate.rate).toFixed(2)}).` : ''}`;
+        const text = isBenefited && creditLimit > 0
+          ? `${head}\n\nComo beneficiado tienes fiado disponible: usaste ${Math.round(creditInUse)}% de tu tope (${formatUsd(creditLimit)}).\n\nPasos para estar al día:\n1️⃣ Tocá "Abonar ahora" y sube tu comprobante.\n2️⃣ O pásate al kiosko a saldar en efectivo.\n\n${detail}`
+          : `${head}\n\nPasos para estar al día:\n1️⃣ Tocá "Abonar ahora" y sube tu comprobante.\n2️⃣ O pásate al kiosko a saldar en efectivo.\n\n${detail}`;
+        return {
+          text,
+          action: [
+            { kind: 'debt', label: 'Ver mi deuda desglosada', icon: 'creditCard' },
+            { kind: 'debt-whatsapp', label: 'Enviar cuenta por WhatsApp', icon: 'whatsapp' }
+          ],
+          followUps: [
+            ...(isBenefited && creditLimit > 0 ? [`Uso del fiado ${Math.round(creditInUse)}%`] : []),
+            'Mis pedidos',
+            'Promos activas'
+          ]
         };
       }
       if (balance < 0) {
         return {
-          text: `Tienes ${formatUsd(Math.abs(balance))} a tu favor en tu cartera 🎉. Al pagar tu próximo pedido elige "Mi Cartera" para usarlo.`,
-          action: { kind: 'debt', label: 'Ver mi saldo', icon: 'wallet' }
+          text: `Tienes ${formatUsd(Math.abs(balance))} a tu favor en tu cartera 🎉. Al pagar tu próximo pedido elegí "Mi Cartera" para usarlo.`,
+          action: { kind: 'debt', label: 'Ver mi saldo', icon: 'wallet' },
+          followUps: ['Ver promos activas', '¿Dónde está mi pedido?']
         };
       }
-      return { text: '¡Estás al día! No tienes deudas pendientes ni saldo a favor.' };
+      if (isBenefited && creditLimit > 0) {
+        return {
+          text: `¡Estás al día! ✅ Como beneficiado tienes ${formatUsd(creditLimit)} de fiado disponible (usaste ${Math.round(creditInUse)}%). Podés pedir a cuenta desde el carrito eligiendo "Sumar a mi cuenta".`,
+          followUps: ['Ver promos activas', '¿Qué venden?']
+        };
+      }
+      return {
+        text: '¡Estás al día! No tienes deudas pendientes ni saldo a favor.',
+        followUps: ['Ver promos activas', '¿Cuál es la tasa?']
+      };
     }
-    // Pedidos / rastreo
-    if (/pedido|orden|rastr|d[oó]nde est[aá]|en camino|entrega|estado/.test(t)) {
+
+    // ---- Pedidos / rastreo (progreso en vivo) ----
+    if (/pedido|orden|rastr|donde esta|en camino|entrega|estado|lleg|seguir|seguimiento|d[oó]nde/.test(t)) {
       if (myOrders.length === 0) {
-        return { text: 'Aún no tienes pedidos registrados con tu número. ¡Haz tu primer pedido en la tienda!' };
+        return {
+          text: 'Aún no tienes pedidos registrados con tu número. ¡Haz tu primer pedido en la tienda!',
+          followUps: ['¿Qué venden?', 'Promos activas']
+        };
       }
       const pending = myOrders.find((o) => !['entregado', 'cancelado'].includes(o.status));
       if (pending) {
+        const label =
+          pending.status === 'pendiente' ? 'pendiente de confirmar'
+            : pending.status === 'en_preparacion' ? 'en preparación'
+              : pending.status === 'listo' ? 'listo para retirar'
+                : pending.status === 'en_camino' ? 'en camino 🛵' : pending.status;
         return {
-          text: `Tu último pedido ${pending.id} está ${
-            pending.status === 'pendiente' ? 'pendiente de confirmar' : pending.status === 'preparando' ? 'en preparación' : pending.status === 'en_camino' ? 'en camino 🛵' : pending.status
-          }.\nSeguilo en vivo o revisalo en "Mis Pedidos".`,
+          text: `Tu pedido ${pending.id} está ${label} (${STATUS_LABELS[pending.status] || pending.status}).\nTe muestro el avance en vivo acá abajo.`,
           action:
             pending.type === 'delivery' && pending.status === 'en_camino'
-              ? { kind: 'track', order: pending, label: 'Seguir mi pedido', icon: 'navigation' }
-              : { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' }
+              ? { kind: 'track', order: pending, label: 'Abrir seguimiento completo', icon: 'navigation' }
+              : { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' },
+          liveOrder: pending,
+          followUps: ['Repetir mi último pedido', 'Promos activas']
         };
       }
       const latest = myOrders[0];
       return {
-        text: `Tu último pedido ${latest.id} fue entregado ✅.`,
-        action: { kind: 'orders', label: 'Ver mis pedidos', icon: 'package' }
+        text: `Tu último pedido ${latest.id} fue entregado ✅. ¿Quieres repetirlo?`,
+        action: { kind: 'repeat', label: 'Repetir último pedido', icon: 'refresh' },
+        followUps: ['Ver promos activas', 'Mis pedidos']
       };
     }
-    // Repetir último pedido
-    if (/repetir|repite|de nuevo/.test(t)) {
+
+    // ---- Repetir último pedido ----
+    if (/repetir|repite|de nuevo|otra vez|de nuevo el pedido/.test(t)) {
       if (myOrders.length === 0) {
-        return { text: 'No encontré pedidos anteriores para repetir. ¡Haz tu primer pedido en la tienda!' };
+        return {
+          text: 'No encontré pedidos anteriores para repetir. ¡Haz tu primer pedido en la tienda!',
+          followUps: ['¿Qué venden?']
+        };
       }
       return {
         text: 'Voy a cargar los artículos de tu último pedido en el carrito 🛒.',
-        action: { kind: 'repeat', label: 'Repetir último pedido', icon: 'refresh' }
+        action: { kind: 'repeat', label: 'Repetir último pedido', icon: 'refresh' },
+        followUps: [...(cartCount > 0 ? ['Ver mi carrito', 'Ir a pagar'] : [])]
       };
     }
-    // Promos / ofertas
-    if (/promo|oferta|descuento|rebaja|especial|combos|barato/.test(t)) {
+
+    // ---- Promos / ofertas ----
+    if (/promo|oferta|descuento|rebaja|especial|combos|2x1|barato/.test(t)) {
       if (activePromos.length === 0) {
-        return { text: 'Hoy no hay promos activas, pero te recomiendo revisar el Radar de Novedades por los productos nuevos.' };
+        return {
+          text: 'Hoy no hay promos activas, pero te recomiendo revisar el catálogo por los productos nuevos.',
+          followUps: ['¿Qué venden?', '¿Cuál es la tasa?']
+        };
       }
       const lines = activePromos.map((p, i) => `${i + 1}. ${p.title}${p.subtitle ? ` — ${p.subtitle}` : ''}`).join('\n');
-      return { text: `¡Hay ${activePromos.length} promo${activePromos.length > 1 ? 's' : ''} activa${activePromos.length > 1 ? 's' : ''}! 🎉\n${lines}` };
-    }
-    // Tasa / dólar / bolívar
-    if (/tasa|d[oó]lar|dolar|bol[ií]var|bs|bcv|divisa|cambio/.test(t)) {
-      if (rate?.rate > 0) {
-        return { text: `La tasa del día es Bs ${Number(rate.rate).toFixed(2)} por dólar. Por ejemplo, $10 serían ${formatBs(usdToBs(10, rate.rate))}.` };
-      }
-      return { text: 'Aún no tenemos la tasa del día disponible. Intenta de nuevo en unos minutos.' };
-    }
-    // Producto específico (por nombre completo o primera palabra). Se evalúa
-    // ANTES del catálogo genérico para que "agregar milka" o "hay cocacola"
-    // aterricen en el producto con acción "Agregar al carrito".
-    const prodList = Array.isArray(products) ? products : [];
-    const product =
-      prodList.find((p) => p.name && t.includes(p.name.toLowerCase())) ||
-      prodList.find((p) => p.name && t.includes(p.name.toLowerCase().split(' ')[0]));
-    if (product) {
-      const avail = Math.max(0, Number(product.stock) - Number(product.reserved || 0));
       return {
-        text: `"${product.name}" está disponible a ${formatUsd(product.price)}${
-          avail > 0 ? ` con ${avail} ${avail === 1 ? 'unidad' : 'unidades'} en stock` : ', agotado por ahora'
-        }.`,
-        action: avail > 0 ? { kind: 'product', product, label: 'Agregar al carrito', icon: 'plus' } : null
+        text: `¡Hay ${activePromos.length} promo${activePromos.length > 1 ? 's' : ''} activa${activePromos.length > 1 ? 's' : ''}! 🎉\n${lines}`,
+        followUps: ['¿Qué venden?', ...(myOrders.length ? ['Repetir mi último pedido'] : [])]
       };
     }
-    // Productos / catálogo
-    if (/qu[eé] venden|producto|c[aá]talogo|tienes|disponible|vendes|hay de|agregar/.test(t)) {
-      if (!Array.isArray(products) || products.length === 0) return { text: 'Ahora mismo el catálogo está cargando. Intenta en un momento.' };
+
+    // ---- Tasa / dólar / bolívar ----
+    if (/tasa|dolar|bolivar|bs |bcv|divisa|cambio|cuanto esta el/.test(t)) {
+      if (rate?.rate > 0) {
+        return {
+          text: `La tasa del día es Bs ${Number(rate.rate).toFixed(2)} por dólar. Por ejemplo, $10 serían ${formatBs(usdToBs(10, rate.rate))} y $50 serían ${formatBs(usdToBs(50, rate.rate))}.`,
+          followUps: ['Promos activas', 'Ver promos activas']
+        };
+      }
+      return {
+        text: 'Aún no tenemos la tasa del día disponible. Volvé a preguntar en unos minutos o revisa la barra de la tienda.',
+        followUps: ['Promos activas', '¿Qué venden?']
+      };
+    }
+
+    // ---- Productos / catálogo ----
+    if (/qu[eé] venden|producto|catalogo|tienes|disponible|vendes|hay de|que hay/.test(t)) {
+      if (!Array.isArray(products) || products.length === 0) {
+        return {
+          text: 'Ahora mismo el catálogo está cargando. Intenta en un momento o mira la barra superior 🔍.',
+          followUps: ['Promos activas']
+        };
+      }
       const cats = [...new Set(products.map((p) => p.category || 'Otros'))];
-      return { text: `Tenemos ${products.length} productos disponibles en ${cats.length} categoría${cats.length > 1 ? 's' : ''}: ${cats.slice(0, 6).join(', ')}. Busca en la barra superior o navega por categorías.` };
+      return {
+        text: `Tenemos ${products.length} productos disponibles en ${cats.length} categoría${cats.length > 1 ? 's' : ''}: ${cats.slice(0, 6).join(', ')}.\nBuscá en la barra superior o navegá por categorías.`,
+        followUps: ['Promos activas', ...(myOrders.length ? ['Repetir mi último pedido'] : [])]
+      };
     }
-    // Horario / abierto
-    if (/horario|abierto|hora|cu[aá]ndo|abren|cierran/.test(t)) {
-      return { text: 'Estamos abiertos ahora mismo ⏰ con atención rápida. Puedes pedir para retirar en el kiosko o para entrega.' };
+
+    // ---- Horario / abierto ----
+    if (/horario|abierto|hora|cuando|abren|cierran|atienden/.test(t)) {
+      return {
+        text: 'Atendemos de corrido con entrega y retiro en el kiosko 📍. Podés dejar tu pedido a cualquier hora y te lo confirmamos al instante.',
+        followUps: ['¿Qué venden?', 'Promos activas']
+      };
     }
-    // Agradecimiento
+
+    // ---- Carrito / pagar (chat transaccional de un toque) ----
+    if (/carrito|ir a pagar|pagar ahora|finalizar|quitar/.test(t)) {
+      if (cartCount === 0) {
+        return {
+          text: 'Tu carrito está vacío. ¿Qué te gustaría agregar?',
+          followUps: ['¿Qué venden?', 'Promos activas']
+        };
+      }
+      return {
+        text: `Tienes ${cartCount} ${cartCount === 1 ? 'artículo' : 'artículos'} en tu carrito. Podés revisarlo o ir directamente a pagar.`,
+        action: [
+          { kind: 'cart', label: 'Ver mi carrito', icon: 'shoppingBag' },
+          { kind: 'checkout', label: 'Ir a pagar ahora', icon: 'arrowRight' }
+        ],
+        followUps: ['¿Cuál es la tasa?']
+      };
+    }
+
+    // ---- Agradecimiento ----
     if (/gracias|genial|perfecto|excelente|muchas gracias/.test(t)) {
-      return { text: `¡Con gusto${name !== 'cliente' ? `, ${name}` : ''}! Recuerda que puedes pedir con voz tocando el micrófono del buscador 🎤.` };
+      return {
+        text: `¡Con gusto${name !== 'cliente' ? `, ${name}` : ''}! Recuerda que podés pedir con voz tocando el micrófono 🎤 y que estoy para lo que necesites.`,
+        followUps: ['¿Qué venden?', 'Promos activas']
+      };
     }
-    // Fallback
-    return { text: 'Todavía estoy aprendiendo. Tocá una pregunta rápida abajo o probá con: tu deuda, tus pedidos, las promos, la tasa del día o un producto del catálogo.' };
+
+    // ---- Pedir ayuda humana / escalar ----
+    if (/humano|persona real|ayuda|problema|no enti|representante|hablar con alguien|atend[ií]eme|queja|reclamo/.test(t)) {
+      const notifyAdmins = async () => {
+        if (escalated) return;
+        setEscalated(true);
+        try {
+          await api.assistantEscalate({ text: raw, customerName: customer?.customerName || savedCustomer?.customerName || '', phone: customer?.phone || savedCustomer?.phoneNumber || '' });
+        } catch {
+          /* sin red: no bloquea */
+        }
+      };
+      notifyAdmins();
+      return {
+        text: `Entiendo, ${name !== 'cliente' ? name : ''}, avisé al equipo del kiosko para que te atienda personalmente 🙌. Sin dudas te ayudarán enseguida. Mientras tanto puedo seguir ayudándote con tu deuda, pedidos o el catálogo.`,
+        followUps: ['¿Cuánto debo?', '¿Dónde está mi pedido?', '¿Qué venden?']
+      };
+    }
+
+    // ---- Fallback con disculpa + herramientas reales ----
+    return {
+      text: `Perdón, aun estoy aprendiendo y no entendí bien eso. 😅 Dijiste: "${raw}"\n\nProbá con estas opciones y enseguida te ayudo.`,
+      action: [
+        { kind: 'orders', label: 'Mis pedidos', icon: 'package' },
+        { kind: 'debt', label: 'Mi deuda', icon: 'creditCard' },
+        { kind: 'catalog', label: 'Ver catálogo', icon: 'search' }
+      ],
+      followUps: ['Promos activas', '¿Cuál es la tasa?', '¿Qué venden?']
+    };
+  };
+
+  // Desglose de la deuda en pedidos adeudados (para transparencia).
+  const balanceDetail = () => {
+    const key = normalizePhoneDigits(customer?.phone || '');
+    const debtOrders = myOrders
+      .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
+      .slice(-3);
+    if (debtOrders.length === 0) return '';
+    const lines = debtOrders.map(
+      (o) => `· ${o.id} (${new Date(o.createdAt || o.timestamp).toLocaleDateString('es-VE')}): ${formatUsd(Number(o.total) || 0)}`
+    );
+    return `Últimos pedidos adeudados:\n${lines.join('\n')}`;
+  };
+
+  const replyWith = (res) => {
+    setAction(Array.isArray(res.action) ? res.action : res.action ? [res.action] : null);
+    setFollowUps(Array.isArray(res.followUps) ? res.followUps : []);
+    setLiveOrder(res.liveOrder || null);
+    appendAi(res.text);
+    if (speechOn) sayAi(res.text);
+    setThinking(false);
   };
 
   const send = (text) => {
@@ -17150,23 +18648,96 @@ function AikerAssistant({
     if (!q || thinking) return;
     setMessages((m) => [...m, { from: 'user', text: q }]);
     setAction(null);
+    setFollowUps([]);
+    setLiveOrder(null);
     setThinking(true);
-    setTimeout(() => {
+    const delay = 420 + Math.random() * 380;
+    replyTimerRef.current = setTimeout(() => {
       const res = respond(q);
-      setMessages((m) => [...m, { from: 'ai', text: res.text }]);
-      setAction(res.action || null);
-      setThinking(false);
-    }, 650);
+      if (res) replyWith(res);
+      else setThinking(false);
+    }, delay);
+  };
+
+  const cancelReply = () => {
+    clearTimeout(replyTimerRef.current);
+    replyTimerRef.current = null;
+    setThinking(false);
+    setAction(null);
+    setFollowUps([]);
+    appendAi('Bueno, la cancelé 😉. Decime en qué te ayudo.');
+  };
+
+  // Voz: dictado de la pregunta y lectura de respuestas.
+  const toggleListening = () => {
+    if (listening) {
+      recRef.current?.stop?.();
+      recRef.current = null;
+      setListening(false);
+      return;
+    }
+    if (!speechRecognitionAvailable()) {
+      appendAi('Tu navegador no soporta voz 🎤. Probá escribir tu pregunta.');
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = 'es-ES';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    setListening(true);
+    rec.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript || '';
+      setListening(false);
+      if (transcript.trim()) send(transcript);
+    };
+    rec.onerror = () => {
+      recRef.current = null;
+      setListening(false);
+    };
+    rec.onend = () => {
+      recRef.current = null;
+      setListening(false);
+    };
+    rec.start();
   };
 
   const runAction = (a) => {
     if (!a) return;
     if (a.kind === 'debt') onOpenDebt?.();
-    else if (a.kind === 'orders') onOpenOrders?.();
+    else if (a.kind === 'debt-whatsapp') {
+      // Envía la cuenta desglosada por WhatsApp (transparencia ante discrepancias).
+      const wa = formatPhoneWhatsApp(customer?.phone);
+      if (wa) {
+        const msg = buildAccountMessage(customer, myOrders);
+        window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+      }
+      onClose();
+    } else if (a.kind === 'orders') onOpenOrders?.();
     else if (a.kind === 'track') onTrackOrder?.(a.order);
     else if (a.kind === 'repeat') onRepeatLastOrder?.();
-    else if (a.kind === 'product') onAddToCart?.(a.product);
-    onClose();
+    else if (a.kind === 'product') {
+      onAddToCart?.(a.product);
+      setAction([{ kind: 'cart', label: 'Abrir carrito', icon: 'shoppingBag' }]);
+      setFollowUps(['Ir a pagar']);
+      setLiveOrder(null);
+      appendAi(`Listo, agregué "${a.product.name}" a tu carrito 🛒.`);
+    } else if (a.kind === 'cart') onOpenCart?.();
+    else if (a.kind === 'checkout') {
+      if (cartCount === 0) {
+        appendAi('Tu carrito está vacío. Agreguemos algo primero 😉.');
+        return;
+      }
+      onOpenCheckout?.();
+    } else if (a.kind === 'catalog') {
+      onClose();
+    } else if (a.kind === 'help') {
+      // El botón "Conoce en qué te puedo ayudar" muestra el menú de capacidades.
+      send('Ayuda: ¿qué puedes hacer?');
+      return;
+    }
+    if (a.kind !== 'product') onClose();
   };
 
   return (
@@ -17185,9 +18756,22 @@ function AikerAssistant({
                 <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold uppercase tracking-wider border border-emerald-500/30">
                   asistente
                 </span>
+                {listening && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[9px] font-bold uppercase tracking-wider border border-rose-500/30 animate-pulse">
+                    escuchando 🎤
+                  </span>
+                )}
               </h3>
-              <p className="text-[11px] text-slate-400 truncate">Toca una pregunta o pide un producto</p>
+              <p className="text-[11px] text-slate-400 truncate">Toca una pregunta, pide un producto o dicta con voz</p>
             </div>
+            <button
+              onClick={() => setSpeechOn((v) => !v)}
+              aria-label={speechOn ? 'Activar lectura de respuestas' : 'Desactivar lectura de respuestas'}
+              title="Leer respuestas en voz"
+              className={`p-2 rounded-xl transition-all ${speechOn ? 'bg-teal-500/25 text-teal-300' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Icon name="volume2" className="w-5 h-5" />
+            </button>
             <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl" aria-label="Cerrar asistente">
               <Icon name="x" className="w-5 h-5" />
             </button>
@@ -17196,11 +18780,6 @@ function AikerAssistant({
           <div ref={scrollRef} className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0 bg-slate-950/40">
             {messages.map((m, i) => (
               <div key={i} className={`flex ${m.from === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-                {m.from === 'ai' && (
-                  <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
-                    <Icon name="chat" className="w-3.5 h-3.5" />
-                  </span>
-                )}
                 <div
                   className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed whitespace-pre-line ${
                     m.from === 'user'
@@ -17212,38 +18791,98 @@ function AikerAssistant({
                 </div>
               </div>
             ))}
-            {action && (
-              <div className="flex justify-start pl-9 animate-fade-in">
-                <button
-                  onClick={() => runAction(action)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-slate-950 text-xs font-bold shadow-lg shadow-indigo-500/25 transition-all active:scale-95 hover:from-indigo-400 hover:to-cyan-400"
-                >
-                  <Icon name={action.icon || 'check'} className="w-3.5 h-3.5" />
-                  {action.label}
-                </button>
+
+            {/* Rastreo con progreso en vivo dentro del chat */}
+            {liveOrder && !thinking && (
+              <div className="flex justify-start animate-fade-in">
+                <div className="w-full max-w-[80%] rounded-2xl bg-slate-900 border border-slate-700 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                      Pedido <span className="text-teal-300">{liveOrder.id}</span>
+                    </span>
+                    <span className={`text-[10px] font-bold ${liveOrder.status === 'en_camino' ? 'text-emerald-300' : 'text-slate-300'}`}>
+                      {STATUS_LABELS[liveOrder.status] || liveOrder.status}
+                    </span>
+                  </div>
+                  <OrderStepsTimeline order={liveOrder} />
+                  {liveOrder.type === 'delivery' && (
+                    <DeliveryMap order={liveOrder} storeLocation={storeLocation} />
+                  )}
+                  {liveOrder.estimatedMinutes != null && (
+                    <p className="text-[10px] text-slate-400 font-semibold">
+                      ⏱ Estimado: ~{liveOrder.estimatedMinutes} min
+                    </p>
+                  )}
+                  {liveOrder.type === 'delivery' && liveOrder.courier_lat != null && (
+                    <p className="text-[10px] text-teal-300 font-semibold">
+                      🛵 Tu repartidor está en movimiento ({Number(liveOrder.courier_lat).toFixed(4)}, {Number(liveOrder.courier_lng).toFixed(4)})
+                    </p>
+                  )}
+                </div>
               </div>
             )}
+
+            {/* Acciones profundas (botones bajo el mensaje; puede haber varias) */}
+            {Array.isArray(action) && action.length > 0 && (
+              <div className="flex flex-wrap justify-start gap-2 animate-fade-in">
+                {action.map((a, i) => (
+                  <button
+                    key={i}
+                    onClick={() => runAction(a)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-slate-950 text-xs font-bold shadow-lg shadow-indigo-500/25 transition-all active:scale-95 hover:from-indigo-400 hover:to-cyan-400"
+                  >
+                    <Icon name={a.icon || 'check'} className="w-3.5 h-3.5" />
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {thinking && (
-              <div className="flex justify-start animate-fade-in">
-                <span className="shrink-0 mr-2 mt-1 p-1.5 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white">
-                  <Icon name="chat" className="w-3.5 h-3.5" />
-                </span>
+              <div className="flex justify-start items-center animate-fade-in">
                 <div className="px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 text-sm rounded-bl-md flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }} />
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '120ms' }} />
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '240ms' }} />
                 </div>
+                <button
+                  onClick={cancelReply}
+                  aria-label="Cancelar pregunta"
+                  className="shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-rose-500/50 hover:text-rose-300 transition-all active:scale-95"
+                >
+                  Cancelar ✕
+                </button>
               </div>
             )}
           </div>
 
-          <div className="p-3 border-t border-slate-800 shrink-0 bg-slate-900">
+          <div className="p-3 border-t border-slate-800 shrink-0 bg-slate-900 relative">
+            {/* Sugerencias de autocompletado mientras se escribe */}
+            {suggestions.length > 0 && (
+              <div className="mb-2 rounded-2xl bg-slate-800 border border-slate-700 overflow-hidden animate-fade-in">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={`${s}-${i}`}
+                    onClick={() => {
+                      send(s);
+                      setDraft('');
+                      setSuggestions([]);
+                    }}
+                    className="block w-full text-left px-3.5 py-2.5 text-xs text-slate-200 hover:bg-slate-700/60 hover:text-teal-300 transition-colors border-b border-slate-700/60 last:border-b-0"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!draft.trim() || thinking) return;
                 send(draft);
                 setDraft('');
+                setSuggestions([]);
               }}
               className="mb-3 flex items-center gap-2"
             >
@@ -17251,12 +18890,38 @@ function AikerAssistant({
                 ref={inputRef}
                 type="text"
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Escribe tu pregunta o pide un producto…"
-                disabled={thinking}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  const q = normalizeAiText(e.target.value);
+                  if (q.length >= 2) {
+                    const opts = [
+                      ...(products || []).map((p) => p.name).filter((n) => normalizeAiText(n).includes(q)),
+                      ...quickReplies.filter((r) => normalizeAiText(r).includes(q))
+                    ];
+                    setSuggestions([...new Set(opts)].slice(0, 4));
+                  } else {
+                    setSuggestions([]);
+                  }
+                }}
+                placeholder={listening ? 'Escuchando… 🎤' : 'Escribe, dicta o pide un producto…'}
+                disabled={thinking || listening}
                 enterKeyHint="send"
                 className="flex-1 min-w-0 px-3.5 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/70 focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
               />
+              <button
+                type="button"
+                onClick={toggleListening}
+                disabled={thinking}
+                aria-label={listening ? 'Detener dictado' : 'Dictar por voz'}
+                title="Hablar"
+                className={`shrink-0 p-2.5 rounded-2xl transition-all active:scale-95 ${
+                  listening
+                    ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/40 animate-pulse'
+                    : 'bg-slate-800 border border-slate-700 text-slate-300 hover:border-teal-500/50 hover:text-teal-300 disabled:opacity-40'
+                }`}
+              >
+                <Icon name="mic" className="w-5 h-5" />
+              </button>
               <button
                 type="submit"
                 disabled={!draft.trim() || thinking}
@@ -17266,6 +18931,21 @@ function AikerAssistant({
                 <Icon name="arrowRight" className="w-5 h-5" />
               </button>
             </form>
+
+            {cartCount > 0 && (
+              <div className="mb-2.5">
+                <button
+                  onClick={() => {
+                    onClose();
+                    onOpenCart?.();
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-teal-500/15 border border-teal-500/40 text-[11px] font-bold text-teal-300 hover:bg-teal-500/25 transition-all active:scale-95"
+                >
+                  <Icon name="shoppingBag" className="w-3.5 h-3.5" />
+                  Ver mi carrito ({cartCount}) o ir a pagar
+                </button>
+              </div>
+            )}
             {popular.length > 0 && (
               <div className="mb-2.5">
                 <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 px-1">
@@ -17287,10 +18967,10 @@ function AikerAssistant({
               </div>
             )}
             <span className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 px-1">
-              ¿Qué quieres saber?
+              {followUps.length > 0 ? 'Sigue con…' : '¿Qué quieres saber?'}
             </span>
             <div className="flex flex-wrap gap-2">
-              {quickReplies.map((r) => (
+              {(followUps.length > 0 ? followUps : quickReplies).map((r) => (
                 <button
                   key={r}
                   onClick={() => send(r)}

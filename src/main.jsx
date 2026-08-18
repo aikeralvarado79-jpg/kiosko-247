@@ -7,6 +7,48 @@ import App from './App.jsx';
 // de recuperación si la app no logra montarse (caché rota del service worker).
 window.__APP_MOUNTED__ = true;
 
+// Reporte de errores no capturados: se acumulan en localStorage (últimos 20) y
+// se envían al server en lotes y con límite de frecuencia, para no inundar la
+// API ni el ancho de banda. No se envía información personal sensible.
+(function () {
+  const KEY = 'kiosko:errors:v1';
+  const MAX_LOCAL = 20;
+  const pushLocal = (entry) => {
+    try {
+      const list = JSON.parse(localStorage.getItem(KEY) || '[]');
+      list.push(entry);
+      if (list.length > MAX_LOCAL) list.splice(0, list.length - MAX_LOCAL);
+      localStorage.setItem(KEY, JSON.stringify(list));
+    } catch {}
+  };
+  let lastSentAt = 0;
+  const send = () => {
+    const now = Date.now();
+    if (now - lastSentAt < 30000) return; // como mucho 1 lote cada 30 s
+    lastSentAt = now;
+    try {
+      const list = JSON.parse(localStorage.getItem(KEY) || '[]');
+      if (!list.length) return;
+      localStorage.removeItem(KEY);
+      fetch('/api/errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: list[list.length - 1] })
+      }).catch(() => {});
+    } catch {}
+  };
+  const capture = (message, stack) => {
+    const entry = { message: String(message || '').slice(0, 500), stack: String(stack || '').slice(0, 2000), url: window.location.href };
+    pushLocal(entry);
+    send();
+  };
+  window.addEventListener('error', (e) => capture(e.message || 'error', e.error && (e.error.stack || e.error.message)));
+  window.addEventListener('unhandledrejection', (e) => {
+    const r = e.reason;
+    capture(r instanceof Error ? r.message : String(r || 'promise rejection'), r instanceof Error ? r.stack : '');
+  });
+})();
+
 // Error boundary: si algo falla al renderizar, muestra una pantalla de
 // recuperación en vez de dejar la app en blanco.
 class ErrorBoundary extends Component {

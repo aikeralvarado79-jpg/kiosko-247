@@ -3,6 +3,8 @@
 App de kiosco con catálogo, pedidos con retiro o envío, y panel de administración. Frontend React + Vite, backend Express, persistencia en Postgres (Neon) con fallback local a archivo y Supabase como respaldo.
 
 **Producción:** https://kiosko-247.onrender.com
+**Calidad (staging):** https://kiosko-247-staging.onrender.com (despliega `develop`)
+**Desarrollo (dev):** https://kiosko-247-dev.onrender.com (arena para refactors grandes)
 
 ## Stack
 
@@ -17,7 +19,7 @@ App de kiosco con catálogo, pedidos con retiro o envío, y panel de administrac
 | Servicio   | Valor                                                                                                   |
 | ---------- | ------------------------------------------------------------------------------------------------------- |
 | URL pública | `https://kiosko-247.onrender.com`                                                                      |
-| Admin pass | Master `kiosko247Aa` (`ADMIN_PASSWORD` en Render; localmente `server/config.json` → `kiosko123`). Cada admin puede tener su propia contraseña (login por teléfono + contraseña, configurada con "Recuperar contraseña"). |
+| Admin pass | Master definida en **Render** (`ADMIN_PASSWORD`, no está en el repo; ver §Descripción del proyecto). Cada admin puede tener su propia contraseña (login por teléfono + contraseña, configurada con "Recuperar contraseña"). En local, definir `ADMIN_PASSWORD` y `ADMIN_PHONES` en el entorno (ver `server/config.example.json`). |
 | Neon        | BD Postgres activa (plan free, 0.5 GB). Connection string se setea en `DATABASE_URL` en Render (no está en el repo). |
 | Supabase    | ref `xhklvjvqhnnfpccqygti`; **respaldo** de la BD y host de Storage para comprobantes. Se conecta por transaction pooler puerto 6543 (el directo 5432 es IPv6-only). |
 
@@ -60,7 +62,7 @@ Sin `DATABASE_URL` configurada, el backend usa `server/data.json` como almacenam
 1. Subí el repo a GitHub (`aikeralvarado79-jpg/kiosko-247`).
 2. En Render: **New → Blueprint**, seleccioná el repo.
 3. En `render.yaml` las variables `ADMIN_PASSWORD` y `DATABASE_URL` están como `sync: false`, así que Render te las pide al crear.
-4. `ADMIN_PASSWORD=kiosko247Aa` y `DATABASE_URL=postgresql://...neon.tech/neondb?sslmode=require` (connection string de Neon, se setea manualmente en el dashboard de Render; no está en el repo).
+4. Definí en el dashboard de Render los secrets `ADMIN_PASSWORD` (contraseña maestra del panel), `ADMIN_PHONES` y `DATABASE_URL` (connection string de Neon). No se commitearn al repo.
 5. **Apply** y esperá el deploy (2–3 min). La URL queda en `https://kiosko-247.onrender.com`.
 
 ### Costo y modo free
@@ -99,6 +101,30 @@ npm run check        # lint + test + build (gate de calidad local)
 - **Ramas:** los cambios van por PR a `develop` y de ahí a `main`. `main` protegida (sin push directo).
 - **Tests:** `server/store.test.js` (stock/cancelación/eliminación de pedidos), `server/rate.test.js` (tasa BCV con fallbacks) y `src/data.test.js` (helpers). Los tests usan un archivo temporal (`KIOSKO_DATA_FILE`) para no tocar `server/data.json`.
 - Antes de pushear: `npm run check`.
+
+## Ambientes
+
+| Ambiente    | Servicio Render          | Rama      | Neon schema          | Datos                                            |
+| ----------- | ------------------------ | --------- | -------------------- | ------------------------------------------------ |
+| Producción  | `kiosko-247`             | `main`    | `public`             | Reales (se escribe/lee aquí)                     |
+| Calidad     | `kiosko-247-staging`     | `develop` | `staging`            | Espejo automático `public → staging`             |
+| Desarrollo  | `kiosko-247-dev`         | `develop` (cambiable) | `dev` | Espejo automático `public → dev`                 |
+
+**Ambiente de desarrollo** (agregado para el refactor de `App.jsx`): arena aislada
+donde probar cambios grandes sin riesgo para calidad ni producción. Comparte la
+misma Neon pero opera solo sobre el schema `dev` (`KIOSKO_DB_SCHEMA=dev`), con
+espejo automático `public → dev` cada hora (`KIOSKO_REFRESH_INTERVAL_MS=3600000`)
+igual que staging. Para validar un refactor:
+
+1. Pusheá la rama del PR (`git push origin mi-rama`).
+2. En el dashboard de Render → `kiosko-247-dev` → **Deploy** → **Branch**, elegí la
+   rama del PR (Render usa el último commit de esa rama).
+3. Probá la UI en `https://kiosko-247-dev.onrender.com` con los datos reales espejados.
+4. Solo cuando no se perdió nada: merge a `develop` (calidad) y de ahí a `main` (producción).
+
+> **Horas del plan free:** los tres servicios comparten las horas gratuitas de la
+> cuenta de Render. Apagá `kiosko-247-dev` cuando no lo uses (el espejo igual se
+> rellena al volver a encenderlo o en el próximo refresco horario).
 
 ## Estructura
 

@@ -20,9 +20,49 @@ const persistEtags = () => {
   }
 };
 
-export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
-export const setToken = (token) => sessionStorage.setItem(TOKEN_KEY, token);
-export const clearToken = () => sessionStorage.removeItem(TOKEN_KEY);
+// Preferencia "Recordar sesión" del admin: si está activa, el token se guarda
+// también en localStorage para que la sesión sobreviva al cerrar la pestaña.
+const REMEMBER_KEY = 'kiosko_admin_remember';
+export const setRememberSession = (value) => {
+  try {
+    localStorage.setItem(REMEMBER_KEY, value ? '1' : '0');
+  } catch {
+    // almacenamiento no disponible: se ignora
+  }
+};
+export const getRememberSession = () => {
+  try {
+    return localStorage.getItem(REMEMBER_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const getToken = () => {
+  try {
+    const s = sessionStorage.getItem(TOKEN_KEY);
+    if (s) return s;
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+};
+export const setToken = (token) => {
+  sessionStorage.setItem(TOKEN_KEY, token);
+  if (getRememberSession()) {
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch {
+      // se ignora: la sesión se mantiene solo en sessionStorage
+    }
+  }
+};
+export const clearToken = () => {
+  sessionStorage.removeItem(TOKEN_KEY);
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {}
+};
 
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -61,6 +101,8 @@ export const api = {
   adminLogout: () => request('/api/auth/logout', { method: 'POST' }),
   changeAdminPassword: (currentPassword, newPassword) => request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
   getAdminProfile: () => request('/api/admin/profile'),
+  getProductCosts: () => request('/api/admin/products-cost'),
+  productInfo: (barcode) => request(`/api/admin/product-info/${encodeURIComponent(String(barcode).trim())}`),
   updateAdminProfile: (data) => request('/api/admin/profile', { method: 'PUT', body: JSON.stringify(data) }),
   listAdminEmployees: () => request('/api/admin/employees'),
   addAdminEmployee: (data) => request('/api/admin/employees', { method: 'POST', body: JSON.stringify(data) }),
@@ -68,6 +110,7 @@ export const api = {
   listAdminSessions: () => request('/api/admin/sessions'),
   revokeAdminSession: (phone) => request('/api/admin/sessions/revoke', { method: 'POST', body: JSON.stringify({ phone }) }),
   createOrder: (order) => request('/api/orders', { method: 'POST', body: JSON.stringify(order) }),
+  createCounterSale: (data) => request('/api/admin/sales', { method: 'POST', body: JSON.stringify(data) }),
   createProduct: (product) => request('/api/products', { method: 'POST', body: JSON.stringify(product) }),
   updateProduct: (id, product) => request(`/api/products/${id}`, { method: 'PUT', body: JSON.stringify(product) }),
   deleteProduct: (id) => request(`/api/products/${id}`, { method: 'DELETE' }),
@@ -114,5 +157,6 @@ export const api = {
   getOrderProof: (id, phone) => request(`/api/orders/${id}/proof?phone=${encodeURIComponent(phone || '')}`),
   convertOrderToCredit: (id, phone) => request(`/api/orders/${id}/payment/credit`, { method: 'POST', body: JSON.stringify({ phone }) }),
   getOrderMessages: (id, phone) => request(`/api/orders/${id}/messages?phone=${encodeURIComponent(phone || '')}`),
-  sendOrderMessage: (id, phone, text) => request(`/api/orders/${id}/messages`, { method: 'POST', body: JSON.stringify({ phone, text }) })
+  sendOrderMessage: (id, phone, text) => request(`/api/orders/${id}/messages`, { method: 'POST', body: JSON.stringify({ phone, text }) }),
+  assistantEscalate: (data) => request('/api/assistant/escalate', { method: 'POST', body: JSON.stringify(data) })
 };

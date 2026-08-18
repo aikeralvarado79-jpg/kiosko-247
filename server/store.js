@@ -70,16 +70,24 @@ export const holdStock = async (clientId, items, ttlMs = HOLD_CART_MS) => {
   const now = Date.now();
   if (list.length === 0) {
     holds.delete(clientId);
+    if (pgPool) await pgDeleteHolds(clientId);
   } else {
     const mine = new Map();
     for (const it of list) mine.set(it.id, { qty: it.qty, expiresAt: now + ttlMs });
     holds.set(clientId, mine);
+    if (pgPool) {
+      await pgReplaceHolds(clientId, mine);
+      await pgPurgeHolds().catch(() => {});
+    }
   }
   return { ok: true, available, expiresAt: now + ttlMs, state: await store.getPublicState(clientId) };
 };
 
 export const releaseStock = async (clientId) => {
-  if (clientId) holds.delete(clientId);
+  if (clientId) {
+    holds.delete(clientId);
+    if (pgPool) await pgDeleteHolds(clientId);
+  }
   return { ok: true, state: await store.getPublicState(clientId) };
 };
 
@@ -132,21 +140,27 @@ const getSharePublic = async (code) => {
 
 export const createShare = async ({ clientId, ownerName, items }) => {
   purgeExpiredShares();
+  if (pgPool) await pgPurgeShares().catch(() => {});
   if (!clientId) return { error: 'Sesión de cliente inválida' };
   for (const [code, s] of shares) {
-    if (s.ownerClientId === clientId) shares.delete(code);
+    if (s.ownerClientId === clientId) {
+      shares.delete(code);
+      if (pgPool) await pgDeleteShare(code);
+    }
   }
   const list = (Array.isArray(items) ? items : []).filter((it) => it && it.id && it.qty > 0);
   const now = Date.now();
   const code = generateShareCode();
-  shares.set(code, {
+  const share = {
     code,
     ownerClientId: clientId,
     ownerName: String(ownerName || '').slice(0, 60),
     items: new Map(list.map((it) => [it.id, Number(it.qty)])),
     expiresAt: now + SHARE_TTL_MS,
     updatedAt: now
-  });
+  };
+  shares.set(code, share);
+  if (pgPool) await pgSaveShare(share);
   return { ok: true, share: await getSharePublic(code) };
 };
 
@@ -173,6 +187,7 @@ export const addToShare = async ({ code, items }) => {
     s.items.set(it.id, Math.min(cur + qty, Math.max(avail, cur)));
   }
   s.updatedAt = Date.now();
+  if (pgPool) await pgSaveShare(s);
   return { ok: true, share: await getSharePublic(String(code).toUpperCase()) };
 };
 
@@ -184,8 +199,86 @@ export const deleteShare = async ({ code, clientId }) => {
     return { error: 'Solo el dueño puede cerrar el carrito compartido' };
   }
   shares.delete(String(code).toUpperCase());
+  if (pgPool) await pgDeleteShare(String(code).toUpperCase());
   return { ok: true };
 };
+
+// ---------------------------------------------------------------------------
+// Persistencia de holds/shares en Postgres. Los Maps quedan como cache de
+// lectura (reservedByProduct, getSharePublic…), pero cada escritura se refleja
+// en tablas (stock_holds/shares) y al arrancar se recargan. Así sobreviven a
+// los redeploys de Render (antes: se perdían, y un carrito reservado que el
+// cliente ya pagó seguía contando como reserva hasta expirar).
+// ---------------------------------------------------------------------------
+const pgReplaceHolds = async (clientId, mine) => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('stock_holds')} WHERE client_id = $1`, [clientId]);
+  for (const [pid, h] of mine) {
+    await retryingQuery(
+      pgPool,
+      `INSERT INTO ${q('stock_holds')} (client_id, product_id, qty, expires_at) VALUES ($1,$2,$3,$4)`,
+      [clientId, pid, h.qty, h.expiresAt]
+    );
+  }
+};
+
+const pgDeleteHolds = async (clientId) => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('stock_holds')} WHERE client_id = $1`, [clientId]);
+};
+
+const pgPurgeHolds = async () => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('stock_holds')} WHERE expires_at <= $1`, [Date.now()]);
+};
+
+const pgSaveShare = async (s) => {
+  await retryingQuery(
+    pgPool,
+    `INSERT INTO ${q('shares')} (code, owner_client_id, owner_name, items, expires_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (code) DO UPDATE SET
+       owner_client_id = EXCLUDED.owner_client_id,
+       owner_name = EXCLUDED.owner_name,
+       items = EXCLUDED.items,
+       expires_at = EXCLUDED.expires_at,
+       updated_at = EXCLUDED.updated_at`,
+    [s.code, s.ownerClientId, s.ownerName || '', JSON.stringify(Array.from(s.items.entries()).map(([id, qty]) => ({ id, qty }))), s.expiresAt, s.updatedAt]
+  );
+};
+
+const pgDeleteShare = async (code) => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('shares')} WHERE code = $1`, [code]);
+};
+
+const pgPurgeShares = async () => {
+  await retryingQuery(pgPool, `DELETE FROM ${q('shares')} WHERE expires_at <= $1`, [Date.now()]);
+};
+
+// Recarga holds/shares desde Postgres al arrancar (initStore).
+async function loadVolatileFromPg() {
+  try {
+    await pgPurgeHolds();
+    await pgPurgeShares();
+    const hrows = await retryingQuery(pgPool, `SELECT client_id, product_id, qty, expires_at FROM ${q('stock_holds')}`);
+    holds.clear();
+    for (const r of hrows.rows) {
+      if (!holds.has(r.client_id)) holds.set(r.client_id, new Map());
+      holds.get(r.client_id).set(r.product_id, { qty: r.qty, expiresAt: Number(r.expires_at) });
+    }
+    const srows = await retryingQuery(pgPool, `SELECT * FROM ${q('shares')}`);
+    shares.clear();
+    for (const r of srows.rows) {
+      shares.set(r.code, {
+        code: r.code,
+        ownerClientId: r.owner_client_id,
+        ownerName: r.owner_name || '',
+        items: new Map(Array.isArray(r.items) ? r.items.map((i) => [i.id, Number(i.qty)]) : []),
+        expiresAt: Number(r.expires_at),
+        updatedAt: Number(r.updated_at)
+      });
+    }
+  } catch (err) {
+    console.warn('[kiosko] No se pudieron cargar holds/shares desde Postgres:', err.message);
+  }
+}
 
 const generateProductId = () => `p-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -270,6 +363,37 @@ const fileStore = {
     }
   },
 
+  listPushSubs() {
+    return Array.isArray(this.state.settings?.pushSubs) ? this.state.settings.pushSubs : [];
+  },
+
+  async savePushSubscription(phone, sub) {
+    if (!sub || !sub.endpoint) return;
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const subs = this.listPushSubs().filter((s) => s.endpoint !== sub.endpoint);
+    subs.push({ phone: key, endpoint: sub.endpoint, keys: sub.keys, at: new Date().toISOString() });
+    this.state.settings = { ...this.state.settings, pushSubs: subs };
+    this.persist();
+  },
+
+  async getPushSubscriptions(phone) {
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    return this.listPushSubs()
+      .filter((s) => s.phone === key)
+      .map((s) => ({ endpoint: s.endpoint, keys: s.keys }));
+  },
+
+  async getAllPushSubscriptions() {
+    return this.listPushSubs().map((s) => ({ phone: s.phone, endpoint: s.endpoint, keys: s.keys }));
+  },
+
+  async removePushSubscription(endpoint) {
+    if (!endpoint) return;
+    const subs = this.listPushSubs().filter((s) => s.endpoint !== endpoint);
+    this.state.settings = { ...this.state.settings, pushSubs: subs };
+    this.persist();
+  },
+
   async getState(clientId) {
     this.persist();
     const state = { ...this.state, settings: { ...this.state.settings } };
@@ -289,7 +413,7 @@ const fileStore = {
   // convierte las imágenes base64 de productos en URLs servidas bajo demanda.
   async getPublicState(clientId) {
     const state = await this.getState(clientId);
-    state.products = state.products.map((p) => ({ ...p, image: productImageUrl(p.id, p.image) }));
+    state.products = state.products.map(({ cost, ...p }) => ({ ...p, image: productImageUrl(p.id, p.image) }));
     state.orders = state.orders.map((o) => {
       const { paymentProof, ...rest } = o;
       return { ...rest, hasProof: Boolean(paymentProof) };
@@ -303,6 +427,17 @@ const fileStore = {
   async getProductById(id) {
     const state = await this.getState();
     return state.products.find((p) => p.id === id) || null;
+  },
+
+  async listProductCosts() {
+    const state = await this.getState();
+    return state.products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      category: p.category,
+      price: Number(p.price) || 0,
+      cost: Number(p.cost) || 0
+    }));
   },
 
   async saveProducts(products) {
@@ -731,9 +866,104 @@ const q = (table) => (DB_SCHEMA === 'public' ? table : `${DB_SCHEMA}.${table}`);
 const pgPool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+      max: 5
     })
   : null;
+
+// El pool puede emitir "error" por eventos de red (Neon en auto-pause, caídas de
+// conexión, idle timeout). Sin listener, Node crashea el proceso entero ante el
+// primer parpadeo. Escuchamos, registramos y dejamos que pg reintente solo.
+let lastPoolError = null;
+if (pgPool && typeof pgPool.on === 'function') {
+  pgPool.on('error', (err) => {
+    lastPoolError = { message: err.message, at: new Date().toISOString() };
+    console.error('[kiosko] Error del pool de Postgres (Node reintentará la conexión):', err.message);
+  });
+}
+
+const isRetryablePgError = (err) => {
+  if (!err) return false;
+  const msg = String(err.message || '');
+  const code = String(err.code || '');
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === '57P01' || // terminating connection (admin shutdown / neon pause)
+    code === '57P02' || // crash-shutdown
+    msg.includes('connection terminated') ||
+    msg.includes('Connection terminated') ||
+    msg.includes('idle client timeout') ||
+    msg.includes('timeout expired')
+  );
+};
+
+// Un solo requery con backoff corto para lecturas: el primer hit después de un
+// cold start / auto-pause suele chocar con una conexión que se reabre sola.
+async function retryingQuery(pool, sql, params, attempts = 2) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await pool.query(sql, params);
+    } catch (err) {
+      const last = i === attempts - 1;
+      if (last || !isRetryablePgError(err)) throw err;
+      console.warn(`[kiosko] Reintentando query tras error de conexión (${i + 1}/${attempts}):`, err.message);
+      await new Promise((resolve) => setTimeout(resolve, 250 * (i + 1)));
+    }
+  }
+  throw new Error('retryingQuery: sin reintentos disponibles');
+};
+
+// Migraciones versionadas: cada archivo .sql en server/migrations se aplica una
+// sola vez, en orden, dentro de una transacción. La tabla schema_migrations
+// registra cuáles ya corrieron. Los archivos usan @SCHEMA@ como marcador del
+// schema de la app (vacio en public, "staging." en calidad).
+const SCHEMA_PREFIX = DB_SCHEMA === 'public' ? '' : `${DB_SCHEMA}.`;
+
+async function applyPgMigrations() {
+  try {
+    await retryingQuery(
+      pgPool,
+      `CREATE TABLE IF NOT EXISTS ${SCHEMA_PREFIX}schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT)`
+    );
+    const { rows } = await retryingQuery(pgPool, `SELECT id FROM ${SCHEMA_PREFIX}schema_migrations`);
+    const applied = new Set(rows.map((r) => r.id));
+    const dir = path.join(__dirname, 'migrations');
+    let files = [];
+    try {
+      files = fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith('.sql'))
+        .sort();
+    } catch {
+      files = [];
+    }
+    for (const name of files) {
+      if (applied.has(name)) continue;
+      const sql = fs.readFileSync(path.join(dir, name), 'utf8').replaceAll('@SCHEMA@', SCHEMA_PREFIX);
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(sql);
+        await client.query(
+          `INSERT INTO ${SCHEMA_PREFIX}schema_migrations (id, applied_at) VALUES ($1, $2)`,
+          [name, new Date().toISOString()]
+        );
+        await client.query('COMMIT');
+        console.log(`[kiosko] Migración aplicada: ${name}`);
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+  } catch (err) {
+    console.error('[kiosko] Error aplicando migraciones:', err.message);
+  }
+}
 
 // Tablas que se copian en el espejo. Fuente = producción (public), destino = schema
 // aislado de calidad (staging). Reemplazo total por tabla (no hace merge).
@@ -744,7 +974,7 @@ const pgPool = process.env.DATABASE_URL
 // en staging. Cada ambiente mantiene sus propias credenciales biométricas.
 const MIRROR_SOURCE_SCHEMA = process.env.MIRROR_SOURCE_SCHEMA || 'public';
 const MIRROR_TARGET_SCHEMA = process.env.MIRROR_TARGET_SCHEMA || 'staging';
-const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers'];
+const MIRROR_TABLES = ['products', 'categories', 'orders', 'settings', 'customers', 'admin_credentials'];
 
 // Refresca el espejo: copia el estado completo desde un schema fuente (producción)
 // hasta un schema destino (calidad), reemplazando su contenido por completo.
@@ -898,7 +1128,7 @@ const pgStore = {
   pool: pgPool,
 
   async ensureSchema() {
-    await this.pool.query(`
+    await retryingQuery(this.pool,`
       CREATE TABLE IF NOT EXISTS ${q('products')} (
         id TEXT PRIMARY KEY,
         code TEXT,
@@ -906,6 +1136,7 @@ const pgStore = {
         brand TEXT,
         description TEXT,
         price NUMERIC,
+        cost NUMERIC,
         category TEXT,
         stock INTEGER,
         "sizeValue" TEXT,
@@ -914,6 +1145,7 @@ const pgStore = {
         "createdAt" TEXT
       );
       ALTER TABLE ${q('products')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      ALTER TABLE ${q('products')} ADD COLUMN IF NOT EXISTS "cost" NUMERIC;
       CREATE TABLE IF NOT EXISTS ${q('categories')} (
         name TEXT PRIMARY KEY
       );
@@ -981,50 +1213,50 @@ const pgStore = {
         "decidedAt" TEXT
       );
     `);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
-    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
-    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "creditLimit" NUMERIC`);
-    await this.pool.query(`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT false`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
-    await this.pool.query(`ALTER TABLE ${q('webauthn_credentials')} ADD COLUMN IF NOT EXISTS rpID TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lat NUMERIC`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lng NUMERIC`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lat" NUMERIC`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lng" NUMERIC`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_updated_at" TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentMethod" TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentProof" TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentReference" TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`);
-    await this.pool.query(`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "walletApplied" NUMERIC DEFAULT 0`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "amountBs" NUMERIC DEFAULT 0`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS rate NUMERIC DEFAULT 0`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "amountUsd" NUMERIC DEFAULT 0`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS reference TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS proof TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pendiente'`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS note TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
-    await this.pool.query(`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "decidedAt" TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "isBenefited" BOOLEAN DEFAULT false`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS "creditLimit" NUMERIC`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('customers')} ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT false`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS credit BOOLEAN DEFAULT false`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('webauthn_credentials')} ADD COLUMN IF NOT EXISTS rpID TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lat NUMERIC`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS lng NUMERIC`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lat" NUMERIC`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_lng" NUMERIC`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "courier_updated_at" TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentMethod" TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentProof" TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "paymentReference" TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('orders')} ADD COLUMN IF NOT EXISTS "walletApplied" NUMERIC DEFAULT 0`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "amountBs" NUMERIC DEFAULT 0`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS rate NUMERIC DEFAULT 0`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "amountUsd" NUMERIC DEFAULT 0`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS reference TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS proof TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pendiente'`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS note TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "createdAt" TEXT`);
+    await retryingQuery(this.pool,`ALTER TABLE ${q('payments')} ADD COLUMN IF NOT EXISTS "decidedAt" TEXT`);
   },
 
   async seedIfEmpty() {
-    const { rows } = await this.pool.query(`SELECT COUNT(*)::int AS n FROM ${q('products')}`);
+    const { rows } = await retryingQuery(this.pool,`SELECT COUNT(*)::int AS n FROM ${q('products')}`);
     if (rows[0].n > 0) return;
     for (const p of defaultState().products) {
-      await this.pool.query(
-        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
-        [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
+      await retryingQuery(this.pool,
+        `INSERT INTO ${q('products')} (id, code, name, brand, description, price, cost, category, stock, "sizeValue", "sizeUnit", image)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
+        [p.id, p.code, p.name, p.brand, p.description, p.price, p.cost ?? 0, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '']
       );
     }
     for (const c of defaultState().categories) {
-      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [c]);
+      await retryingQuery(this.pool,`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [c]);
     }
     for (const o of defaultState().orders) {
-      await this.pool.query(
+      await retryingQuery(this.pool,
         `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes")
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
         [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes]
@@ -1032,13 +1264,44 @@ const pgStore = {
     }
   },
 
+  async savePushSubscription(phone, sub) {
+    const endpoint = sub.endpoint;
+    if (!endpoint) return;
+    await retryingQuery(
+      this.pool,
+      `INSERT INTO ${q('push_subscriptions')} (endpoint, phone, keys, created_at)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (endpoint) DO UPDATE SET phone = EXCLUDED.phone, keys = EXCLUDED.keys`,
+      [endpoint, phone, JSON.stringify(sub.keys || {}), new Date().toISOString()]
+    );
+  },
+
+  async getPushSubscriptions(phone) {
+    const { rows } = await retryingQuery(
+      this.pool,
+      `SELECT endpoint, keys FROM ${q('push_subscriptions')} WHERE phone = $1`,
+      [phone]
+    );
+    return rows.map((r) => ({ endpoint: r.endpoint, keys: r.keys }));
+  },
+
+  async getAllPushSubscriptions() {
+    const { rows } = await retryingQuery(this.pool, `SELECT phone, endpoint, keys FROM ${q('push_subscriptions')}`);
+    return rows.map((r) => ({ phone: r.phone, endpoint: r.endpoint, keys: r.keys }));
+  },
+
+  async removePushSubscription(endpoint) {
+    if (!endpoint) return;
+    await retryingQuery(this.pool, `DELETE FROM ${q('push_subscriptions')} WHERE endpoint = $1`, [endpoint]);
+  },
+
   async getState(clientId) {
     const [productsRes, categoriesRes, ordersRes, settingsRes, customersRes] = await Promise.all([
-      this.pool.query(`SELECT * FROM ${q('products')}`),
-      this.pool.query(`SELECT * FROM ${q('categories')} ORDER BY name`),
-      this.pool.query(`SELECT * FROM ${q('orders')}`),
-      this.pool.query(`SELECT key, value FROM ${q('settings')}`),
-      this.pool.query(`SELECT * FROM ${q('customers')}`)
+      retryingQuery(this.pool,`SELECT * FROM ${q('products')}`),
+      retryingQuery(this.pool,`SELECT * FROM ${q('categories')} ORDER BY name`),
+      retryingQuery(this.pool,`SELECT * FROM ${q('orders')}`),
+      retryingQuery(this.pool,`SELECT key, value FROM ${q('settings')}`),
+      retryingQuery(this.pool,`SELECT * FROM ${q('customers')}`)
     ]);
     const reserved = reservedByProduct(clientId);
     const orders = ordersRes.rows.map((r) => ({
@@ -1055,6 +1318,7 @@ const pgStore = {
         brand: r.brand,
         description: r.description,
         price: Number(r.price),
+        cost: r.cost == null ? 0 : Number(r.cost),
         category: r.category,
         stock: r.stock,
         reserved: reserved.get(r.id) || 0,
@@ -1088,7 +1352,7 @@ const pgStore = {
   // Vista pública del estado (ver fileStore.getPublicState).
   async getPublicState(clientId) {
     const state = await this.getState(clientId);
-    state.products = state.products.map((p) => ({ ...p, image: productImageUrl(p.id, p.image) }));
+    state.products = state.products.map(({ cost, ...p }) => ({ ...p, image: productImageUrl(p.id, p.image) }));
     state.orders = state.orders.map((o) => {
       const { paymentProof, ...rest } = o;
       return { ...rest, hasProof: Boolean(paymentProof) };
@@ -1097,14 +1361,14 @@ const pgStore = {
   },
 
   async getProductById(id) {
-    const { rows } = await this.pool.query(`SELECT * FROM ${q('products')} WHERE id = $1`, [id]);
+    const { rows } = await retryingQuery(this.pool,`SELECT * FROM ${q('products')} WHERE id = $1`, [id]);
     return rows[0] || null;
   },
 
   async saveProducts(products) {
-    await this.pool.query(`DELETE FROM ${q('products')}`);
+    await retryingQuery(this.pool,`DELETE FROM ${q('products')}`);
     for (const p of products) {
-      await this.pool.query(
+      await retryingQuery(this.pool,
         `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [p.id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || null]
@@ -1113,16 +1377,16 @@ const pgStore = {
   },
 
   async saveCategories(categories) {
-    await this.pool.query(`DELETE FROM ${q('categories')}`);
+    await retryingQuery(this.pool,`DELETE FROM ${q('categories')}`);
     for (const c of categories) {
-      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [c]);
+      await retryingQuery(this.pool,`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [c]);
     }
   },
 
   async saveOrders(orders) {
-    await this.pool.query(`DELETE FROM ${q('orders')}`);
+    await retryingQuery(this.pool,`DELETE FROM ${q('orders')}`);
     for (const o of orders) {
-      await this.pool.query(
+      await retryingQuery(this.pool,
         `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit, lat, lng, "courier_lat", "courier_lng", "courier_updated_at", "paymentMethod", "paymentStatus", "paymentProof", "paymentReference", messages, "walletApplied")
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
         [o.id, o.customerName, o.phone, o.type, o.address || '', o.notes || '', JSON.stringify(o.items || []), o.total, o.status, o.timestamp, o.estimatedMinutes, o.createdAt || new Date().toISOString(), Boolean(o.credit), o.lat != null ? Number(o.lat) : null, o.lng != null ? Number(o.lng) : null, o.courier_lat != null ? Number(o.courier_lat) : null, o.courier_lng != null ? Number(o.courier_lng) : null, o.courier_updated_at || null, o.paymentMethod || null, o.paymentStatus || null, o.paymentProof || null, o.paymentReference || null, JSON.stringify(o.messages || []), Number(o.walletApplied) || 0]
@@ -1141,7 +1405,7 @@ const pgStore = {
   },
 
   async getAdminPassword() {
-    const { rows } = await this.pool.query(
+    const { rows } = await retryingQuery(this.pool,
       `SELECT value FROM ${q('settings')} WHERE key = $1`,
       ['adminPassword']
     );
@@ -1156,14 +1420,14 @@ const pgStore = {
   async getAdminCredential(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query(`SELECT salt, hash FROM ${q('admin_credentials')} WHERE phone = $1`, [key]);
+    const { rows } = await retryingQuery(this.pool,`SELECT salt, hash FROM ${q('admin_credentials')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return { salt: rows[0].salt, hash: rows[0].hash };
   },
 
   async setAdminCredential(phone, entry) {
     const key = normalizePhone(phone);
-    await this.pool.query(
+    await retryingQuery(this.pool,
       `INSERT INTO ${q('admin_credentials')} (phone, salt, hash, "createdAt")
        VALUES ($1,$2,$3,$4)
        ON CONFLICT (phone) DO UPDATE SET salt = EXCLUDED.salt, hash = EXCLUDED.hash`,
@@ -1241,7 +1505,7 @@ const pgStore = {
   },
 
   async listCollections() {
-    const { rows } = await this.pool.query(`SELECT value FROM ${q('settings')} WHERE key = $1`, ['collections']);
+    const { rows } = await retryingQuery(this.pool,`SELECT value FROM ${q('settings')} WHERE key = $1`, ['collections']);
     if (!rows[0]) return [];
     try {
       const v = rows[0].value;
@@ -1257,7 +1521,7 @@ const pgStore = {
   },
 
   async getSetting(key) {
-    const { rows } = await this.pool.query(`SELECT value FROM ${q('settings')} WHERE key = $1`, [key]);
+    const { rows } = await retryingQuery(this.pool,`SELECT value FROM ${q('settings')} WHERE key = $1`, [key]);
     if (!rows[0] || rows[0].value == null) return null;
     const v = rows[0].value;
     if (typeof v === 'string') {
@@ -1272,12 +1536,12 @@ const pgStore = {
 
   async setSetting(key, value) {
     const json = JSON.stringify(value);
-    const res = await this.pool.query(
+    const res = await retryingQuery(this.pool,
       `UPDATE ${q('settings')} SET value = $2::jsonb WHERE key = $1`,
       [key, json]
     );
     if (res.rowCount === 0) {
-      await this.pool.query(
+      await retryingQuery(this.pool,
         `INSERT INTO ${q('settings')} (key, value) VALUES ($1, $2::jsonb) ON CONFLICT DO NOTHING`,
         [key, json]
       );
@@ -1287,13 +1551,13 @@ const pgStore = {
   async getCustomerByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query(`SELECT * FROM ${q('customers')} WHERE phone = $1`, [key]);
+    const { rows } = await retryingQuery(this.pool,`SELECT * FROM ${q('customers')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return { ...rows[0], addresses: rows[0].addresses || [] };
   },
 
   async listCustomers() {
-    const { rows } = await this.pool.query(`SELECT * FROM ${q('customers')} ORDER BY phone`);
+    const { rows } = await retryingQuery(this.pool,`SELECT * FROM ${q('customers')} ORDER BY phone`);
     return rows.map((r) => ({
       ...r,
       balance: Number(r.balance) || 0,
@@ -1306,7 +1570,7 @@ const pgStore = {
   async setCustomerBenefited(phone, benefited) {
     const key = normalizePhone(phone);
     if (!key) return null;
-    const { rows } = await this.pool.query(
+    const { rows } = await retryingQuery(this.pool,
       `UPDATE ${q('customers')} SET "isBenefited" = $2 WHERE phone = $1 RETURNING *`,
       [key, Boolean(benefited)]
     );
@@ -1319,7 +1583,7 @@ const pgStore = {
     if (!key) return null;
     const limit = Number(creditLimit);
     const value = Number.isFinite(limit) && limit > 0 ? limit : null;
-    const { rows } = await this.pool.query(
+    const { rows } = await retryingQuery(this.pool,
       `UPDATE ${q('customers')} SET "creditLimit" = $2 WHERE phone = $1 RETURNING *`,
       [key, value]
     );
@@ -1330,7 +1594,7 @@ const pgStore = {
   async setCustomerBalance(phone, amount) {
     const key = normalizePhone(phone);
     if (!key) return null;
-    const { rows } = await this.pool.query(
+    const { rows } = await retryingQuery(this.pool,
       `UPDATE ${q('customers')} SET balance = $2 WHERE phone = $1 RETURNING *`,
       [key, Number(amount) || 0]
     );
@@ -1341,7 +1605,7 @@ const pgStore = {
   async setCustomerDisabled(phone, disabled) {
     const key = normalizePhone(phone);
     if (!key) return null;
-    const { rows } = await this.pool.query(
+    const { rows } = await retryingQuery(this.pool,
       `UPDATE ${q('customers')} SET disabled = $2 WHERE phone = $1 RETURNING *`,
       [key, Boolean(disabled)]
     );
@@ -1352,14 +1616,14 @@ const pgStore = {
   async deleteCustomer(phone) {
     const key = normalizePhone(phone);
     if (!key) return false;
-    const { rowCount } = await this.pool.query(`DELETE FROM ${q('customers')} WHERE phone = $1`, [key]);
+    const { rowCount } = await retryingQuery(this.pool,`DELETE FROM ${q('customers')} WHERE phone = $1`, [key]);
     return rowCount > 0;
   },
 
   async addOrderToAccount(order) {
     if (!order || !order.phone) return null;
     const key = normalizePhone(order.phone);
-    const { rows } = await this.pool.query(
+    const { rows } = await retryingQuery(this.pool,
       `UPDATE ${q('customers')} SET balance = COALESCE(balance, 0) + $2, "customerName" = COALESCE(NULLIF($3, ''), "customerName")
        WHERE phone = $1 RETURNING *`,
       [key, Number(order.total) || 0, order.customerName || '']
@@ -1386,7 +1650,7 @@ const pgStore = {
     let id;
     do {
       id = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
-      const dup = await this.pool.query(`SELECT 1 FROM ${q('orders')} WHERE id = $1`, [id]);
+      const dup = await retryingQuery(this.pool,`SELECT 1 FROM ${q('orders')} WHERE id = $1`, [id]);
       if (dup.rowCount > 0) id = null;
     } while (!id);
     const order = {
@@ -1404,7 +1668,7 @@ const pgStore = {
       createdAt: new Date().toISOString(),
       credit: true
     };
-    await this.pool.query(
+    await retryingQuery(this.pool,
       `INSERT INTO ${q('orders')} (id, "customerName", phone, type, address, notes, items, total, status, timestamp, "estimatedMinutes", "createdAt", credit)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [order.id, order.customerName, order.phone, order.type, order.address || '', order.notes || '', JSON.stringify(order.items || []), order.total, order.status, order.timestamp, order.estimatedMinutes, order.createdAt, order.credit]
@@ -1416,7 +1680,7 @@ const pgStore = {
   // ---- Abonos a la deuda / pagos con comprobante (pgStore) ----
 
   async listPayments() {
-    const { rows } = await this.pool.query(
+    const { rows } = await retryingQuery(this.pool,
       `SELECT * FROM ${q('payments')} ORDER BY COALESCE("createdAt", '') DESC`
     );
     return rows.map((r) => ({
@@ -1428,7 +1692,7 @@ const pgStore = {
   },
 
   async getPaymentById(id) {
-    const { rows } = await this.pool.query(`SELECT * FROM ${q('payments')} WHERE id = $1`, [id]);
+    const { rows } = await retryingQuery(this.pool,`SELECT * FROM ${q('payments')} WHERE id = $1`, [id]);
     if (!rows[0]) return null;
     return { ...rows[0], amountBs: Number(rows[0].amountBs) || 0, amountUsd: Number(rows[0].amountUsd) || 0 };
   },
@@ -1439,11 +1703,11 @@ const pgStore = {
     let id;
     do {
       id = `PAG-${Math.floor(1000 + Math.random() * 9000)}`;
-      const dup = await this.pool.query(`SELECT 1 FROM ${q('payments')} WHERE id = $1`, [id]);
+      const dup = await retryingQuery(this.pool,`SELECT 1 FROM ${q('payments')} WHERE id = $1`, [id]);
       if (dup.rowCount > 0) id = null;
     } while (!id);
     const createdAt = new Date().toISOString();
-    await this.pool.query(
+    await retryingQuery(this.pool,
       `INSERT INTO ${q('payments')} (id, phone, "customerName", "amountBs", rate, "amountUsd", reference, proof, status, note, "createdAt", "decidedAt")
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [id, key, customerName || 'Cliente', Number(amountBs) || 0, Number(rate) || 0, Number(amountUsd) || 0, String(reference || '').slice(0, 120), proof || null, 'pendiente', null, createdAt, null]
@@ -1495,7 +1759,7 @@ const pgStore = {
   async getWebAuthnByPhone(phone) {
     const key = normalizePhone(phone);
     if (!key || key.length < 7) return null;
-    const { rows } = await this.pool.query(`SELECT * FROM ${q('webauthn_credentials')} WHERE phone = $1`, [key]);
+    const { rows } = await retryingQuery(this.pool,`SELECT * FROM ${q('webauthn_credentials')} WHERE phone = $1`, [key]);
     if (!rows[0]) return null;
     return {
       phone: rows[0].phone,
@@ -1509,7 +1773,7 @@ const pgStore = {
 
   async saveWebAuthn(phone, credential) {
     const key = normalizePhone(phone);
-    await this.pool.query(
+    await retryingQuery(this.pool,
       `INSERT INTO ${q('webauthn_credentials')} (phone, credential_id, public_key, counter, rpID, "createdAt")
        VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (phone) DO UPDATE SET
@@ -1523,7 +1787,7 @@ const pgStore = {
 
   async deleteWebAuthn(phone) {
     const key = normalizePhone(phone);
-    await this.pool.query(`DELETE FROM ${q('webauthn_credentials')} WHERE phone = $1`, [key]);
+    await retryingQuery(this.pool,`DELETE FROM ${q('webauthn_credentials')} WHERE phone = $1`, [key]);
   },
 
   async upsertCustomer({ phone, customerName, address }) {
@@ -1533,7 +1797,7 @@ const pgStore = {
     const addresses = existing?.addresses || [];
     if (address && !addresses.includes(address)) addresses.push(address);
     const now = new Date().toISOString();
-    await this.pool.query(
+    await retryingQuery(this.pool,
       `INSERT INTO ${q('customers')} (phone, "customerName", addresses, "createdAt", "lastOrderAt")
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (phone) DO UPDATE SET
@@ -1564,7 +1828,7 @@ const pgStore = {
     });
   },
 
-  async createOrderAtomic(orderData) {
+  async createOrderAtomic(orderData, opts = {}) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -1601,8 +1865,11 @@ const pgStore = {
       // Se descuenta el monto de la cartera del balance y, si cubre todo el
       // pedido, queda confirmado sin comprobante. Si no, el resto se paga con
       // el método indicado (paymentMethod del payload).
-      let walletApplied = Number(orderData.walletApplied) || 0;
+      let walletApplied = opts.walletApplied != null ? opts.walletApplied : (Number(orderData.walletApplied) || 0);
       const key = normalizePhone(orderData.phone);
+      // Las ventas de mostrador son pagos confirmados al momento: no aplican
+      // cartera ni requieren teléfono.
+      const paymentMethod = opts.paymentMethod || orderData.paymentMethod || 'efectivo';
       if (walletApplied > 0) {
         if (!key || key.length < 7) {
           await client.query('ROLLBACK');
@@ -1618,24 +1885,25 @@ const pgStore = {
         walletApplied = Math.min(walletApplied, Number(orderData.total) || 0);
       }
 
+      const type = opts.type || orderData.type || 'pickup';
       const order = {
         id,
         customerName: orderData.customerName || 'Cliente',
         phone: orderData.phone || '',
-        type: orderData.type || 'pickup',
-        address: orderData.type === 'delivery' ? orderData.address : undefined,
+        type,
+        address: type === 'delivery' ? orderData.address : undefined,
         notes: orderData.notes || '',
         items: orderData.items,
         total: Number(orderData.total) || 0,
-        status: 'pendiente',
+        status: opts.status || 'pendiente',
         timestamp: orderData.timestamp || '',
         estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
         createdAt: orderData.createdAt || new Date().toISOString(),
         credit: Boolean(orderData.credit),
-        lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
-        lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
-        paymentMethod: orderData.paymentMethod || 'efectivo',
-        paymentStatus: orderData.paymentStatus || (orderData.paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
+        lat: type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
+        lng: type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
+        paymentMethod,
+        paymentStatus: opts.paymentStatus || orderData.paymentStatus || (paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
         paymentProof: orderData.paymentProof || null,
         paymentReference: orderData.paymentReference || null,
         walletApplied,
@@ -1681,7 +1949,10 @@ const pgStore = {
       }
 
       await client.query('COMMIT');
-      if (orderData.clientId) holds.delete(orderData.clientId);
+      if (orderData.clientId) {
+        holds.delete(orderData.clientId);
+        await pgDeleteHolds(orderData.clientId).catch(() => {});
+      }
       return { state: await this.getPublicState(orderData.clientId), order };
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -1692,7 +1963,7 @@ const pgStore = {
   },
 
   async updateCourierLocation(id, lat, lng) {
-    const { rows } = await this.pool.query(
+    const { rows } = await retryingQuery(this.pool,
       `UPDATE ${q('orders')} SET "courier_lat" = $2, "courier_lng" = $3, "courier_updated_at" = $4
        WHERE id = $1 RETURNING *`,
       [id, Number(lat), Number(lng), new Date().toISOString()]
@@ -1724,6 +1995,16 @@ const pgStore = {
       const existing = rows[0];
       if (!existing) return { error: 'Pedido no encontrado' };
       await client.query(`UPDATE ${q('orders')} SET status = $2 WHERE id = $1`, [id, status]);
+      // Si el admin cancela el pedido, devolver el stock de sus artículos
+      // (misma lógica que atomicCancelOrder: sin doble restauración y sin
+      // restaurar pedidos ya listos o entregados).
+      const cancelledItems =
+        status === 'cancelado' && existing.status !== 'cancelado' && existing.status !== 'listo' && existing.status !== 'entregado'
+          ? existing.items || []
+          : [];
+      for (const it of cancelledItems) {
+        await client.query(`UPDATE ${q('products')} SET stock = stock + $1 WHERE id = $2`, [Number(it.quantity) || 0, it.id]);
+      }
       if (existing.credit && status === 'entregado') {
         // El teléfono del pedido puede venir con formato legible (espacios) mientras
         // que la tabla customers guarda el número normalizado; hay que normalizar
@@ -1749,9 +2030,18 @@ const pgStore = {
           }
         }
       }
-      return { ok: true };
+      return { ok: true, cancelledItems };
     });
     if (result.error) return result;
+    // Limpiar holds de los items restaurados (stock devuelto, reservas previas inválidas)
+    if (result.cancelledItems && result.cancelledItems.length > 0) {
+      for (const it of result.cancelledItems) {
+        for (const [clientId, items] of holds) {
+          if (items.has(it.id)) items.delete(it.id);
+          if (items.size === 0) holds.delete(clientId);
+        }
+      }
+    }
     return { state: await this.getPublicState() };
   },
 
@@ -1872,20 +2162,20 @@ const pgStore = {
       code: data.code || `PROD-${Math.floor(100 + Math.random() * 900)}`,
       createdAt: data.createdAt || new Date().toISOString()
     };
-    await this.pool.query(
-      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-      [product.id, product.code, product.name, product.brand, product.description, product.price, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '', product.createdAt]
+    await retryingQuery(this.pool,
+      `INSERT INTO ${q('products')} (id, code, name, brand, description, price, cost, category, stock, "sizeValue", "sizeUnit", image, "createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [product.id, product.code, product.name, product.brand, product.description, product.price, product.cost ?? 0, product.category, product.stock, String(product.sizeValue ?? ''), product.sizeUnit || '', product.image || '', product.createdAt]
     );
     if (product.category) {
-      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [product.category]);
+      await retryingQuery(this.pool,`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [product.category]);
     }
     return { state: await this.getPublicState() };
   },
 
   // Actualiza un producto con UPDATE puntual (sin tocar otras filas).
   async atomicUpdateProduct(id, data) {
-    const { rows } = await this.pool.query(`SELECT * FROM ${q('products')} WHERE id = $1 FOR UPDATE`, [id]);
+    const { rows } = await retryingQuery(this.pool,`SELECT * FROM ${q('products')} WHERE id = $1 FOR UPDATE`, [id]);
     if (!rows[0]) return { error: 'Producto no encontrado' };
     const payload = { ...data };
     // Si llega la URL pública de la imagen, conservar el base64 original.
@@ -1893,12 +2183,12 @@ const pgStore = {
       payload.image = rows[0].image;
     }
     const p = { ...rows[0], ...payload, id };
-    await this.pool.query(
-      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, category=$7, stock=$8, "sizeValue"=$9, "sizeUnit"=$10, image=$11, "createdAt"=$12 WHERE id=$1`,
-      [id, p.code, p.name, p.brand, p.description, p.price, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || rows[0].createdAt || null]
+    await retryingQuery(this.pool,
+      `UPDATE ${q('products')} SET code=$2, name=$3, brand=$4, description=$5, price=$6, cost=$7, category=$8, stock=$9, "sizeValue"=$10, "sizeUnit"=$11, image=$12, "createdAt"=$13 WHERE id=$1`,
+      [id, p.code, p.name, p.brand, p.description, p.price, p.cost ?? 0, p.category, p.stock, String(p.sizeValue ?? ''), p.sizeUnit || '', p.image || '', p.createdAt || rows[0].createdAt || null]
     );
     if (p.category) {
-      await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [p.category]);
+      await retryingQuery(this.pool,`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [p.category]);
     }
     // Limpiar holds de este producto: el stock cambió, reservas previas son inválidas
     for (const [clientId, items] of holds) {
@@ -1910,14 +2200,26 @@ const pgStore = {
 
   // Elimina un producto con DELETE puntual.
   async atomicDeleteProduct(id) {
-    await this.pool.query(`DELETE FROM ${q('products')} WHERE id = $1`, [id]);
+    await retryingQuery(this.pool,`DELETE FROM ${q('products')} WHERE id = $1`, [id]);
     return { state: await this.getPublicState() };
   },
 
   // Agrega una categoría con INSERT idempotente.
   async atomicAddCategory(name) {
-    await this.pool.query(`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
+    await retryingQuery(this.pool,`INSERT INTO ${q('categories')} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
     return { state: await this.getPublicState() };
+  },
+
+  // Costos de los productos (solo admin: no viajan en el estado público).
+  async listProductCosts() {
+    const { rows } = await retryingQuery(this.pool,`SELECT id, name, category, price, cost FROM ${q('products')}`);
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      category: r.category,
+      price: Number(r.price) || 0,
+      cost: Number(r.cost) || 0
+    }));
   }
 };
 
@@ -1929,8 +2231,18 @@ if (fileStore) fileStore.load();
 
 export async function initStore() {
   if (pgPool) {
+    // Bootstrap del schema aislado (staging/dev). En el primer deploy el schema
+    // no existe todavía (refreshMirror lo crea, pero corre después de ensureSchema),
+    // así que se crea aquí para que CREATE TABLE IF NOT EXISTS no falle.
+    if (DB_SCHEMA !== 'public') {
+      await retryingQuery(pgPool, `CREATE SCHEMA IF NOT EXISTS ${DB_SCHEMA}`).catch((err) =>
+        console.warn('[kiosko] No se pudo crear el schema:', err.message)
+      );
+    }
     await pgStore.ensureSchema();
     await pgStore.seedIfEmpty();
+    await applyPgMigrations();
+    await loadVolatileFromPg();
   }
 }
 
@@ -1949,6 +2261,14 @@ export const saveSettings = (settings) => store.saveSettings(settings);
 export const getSetting = (key) => store.getSetting(key);
 
 export const setSetting = (key, value) => store.setSetting(key, value);
+
+export const savePushSubscription = (phone, sub) => store.savePushSubscription(phone, sub);
+
+export const getPushSubscriptions = (phone) => store.getPushSubscriptions(phone);
+
+export const getAllPushSubscriptions = () => store.getAllPushSubscriptions();
+
+export const removePushSubscription = (endpoint) => store.removePushSubscription(endpoint);
 
 export const getCustomerByPhone = (phone) => store.getCustomerByPhone(phone);
 
@@ -2069,13 +2389,13 @@ export const approvePayment = (id) => store.approvePayment(id);
 
 export const rejectPayment = (id, note) => store.rejectPayment(id, note);
 
-export const createOrder = async (orderData) => {
+export const createOrder = async (orderData, opts = {}) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {
     return { error: 'El pedido no tiene productos' };
   }
 
   if (pgPool) {
-    return pgStore.createOrderAtomic(orderData);
+    return pgStore.createOrderAtomic(orderData, opts);
   }
 
   const state = await store.getState();
@@ -2101,7 +2421,7 @@ export const createOrder = async (orderData) => {
 
   // Pago con "Mi Cartera": saldo a favor (balance < 0). Se descuenta del balance
   // y si cubre todo el pedido queda confirmado sin comprobante.
-  let walletApplied = Number(orderData.walletApplied) || 0;
+  let walletApplied = opts.walletApplied != null ? opts.walletApplied : (Number(orderData.walletApplied) || 0);
   const key = normalizePhone(orderData.phone);
   if (walletApplied > 0) {
     if (!key || key.length < 7) return { error: 'Teléfono inválido para usar Mi Cartera' };
@@ -2114,24 +2434,26 @@ export const createOrder = async (orderData) => {
     walletApplied = Math.min(walletApplied, Number(orderData.total) || 0);
   }
 
+  const type = opts.type || orderData.type || 'pickup';
+  const paymentMethod = opts.paymentMethod || orderData.paymentMethod || 'efectivo';
   const order = {
     id,
     customerName: orderData.customerName || 'Cliente',
     phone: orderData.phone || '',
-    type: orderData.type || 'pickup',
-    address: orderData.type === 'delivery' ? orderData.address : undefined,
+    type,
+    address: type === 'delivery' ? orderData.address : undefined,
     notes: orderData.notes || '',
     items: orderData.items,
     total: Number(orderData.total) || 0,
-    status: 'pendiente',
+    status: opts.status || 'pendiente',
     timestamp: orderData.timestamp || '',
     estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
     createdAt: orderData.createdAt || new Date().toISOString(),
     credit: Boolean(orderData.credit),
-    lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
-    lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
-    paymentMethod: orderData.paymentMethod || 'efectivo',
-    paymentStatus: orderData.paymentStatus || (orderData.paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
+    lat: type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
+    lng: type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
+    paymentMethod,
+    paymentStatus: opts.paymentStatus || orderData.paymentStatus || (paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
     paymentProof: orderData.paymentProof || null,
     paymentReference: orderData.paymentReference || null,
     walletApplied,
@@ -2165,6 +2487,21 @@ export const createOrder = async (orderData) => {
   if (orderData.clientId) holds.delete(orderData.clientId);
   const newState = await store.getPublicState(orderData.clientId);
   return { state: newState, order };
+};
+
+// Venta en mostrador: el admin registra una venta física desde el panel. Se crea
+// como pedido tipo pickup ya entregado y pagado (alimenta Finanzas, descuenta
+// stock y queda en el historial). No usa cartera, no exige teléfono válido.
+export const createCounterSale = async (orderData, opts = {}) => {
+  const saleOpts = {
+    status: 'entregado',
+    type: 'pickup',
+    paymentStatus: 'confirmado',
+    paymentMethod: orderData.paymentMethod || 'efectivo',
+    walletApplied: 0,
+    ...opts
+  };
+  return createOrder({ ...orderData, paymentMethod: saleOpts.paymentMethod }, saleOpts);
 };
 
 export const createProduct = async (data) => {
@@ -2238,11 +2575,36 @@ export const updateOrderStatus = async (id, status) => {
   if (!existing) return { error: 'Pedido no encontrado' };
 
   const orders = state.orders.map((o) => (o.id === id ? { ...o, status } : o));
+
+  // Si el admin cancela el pedido, devolver el stock de sus artículos (misma
+  // lógica que cancelOrder: sin doble restauración y sin restaurar pedidos ya
+  // listos o entregados).
+  const itemsToRestore =
+    status === 'cancelado' && existing.status !== 'cancelado' && existing.status !== 'listo' && existing.status !== 'entregado'
+      ? existing.items || []
+      : [];
+  if (itemsToRestore.length > 0) {
+    const products = state.products.map((p) => {
+      const it = itemsToRestore.find((x) => x.id === p.id);
+      return it ? { ...p, stock: Number(p.stock) + Number(it.quantity) } : p;
+    });
+    await store.saveProducts(products);
+  }
   await store.saveOrders(orders);
 
   // Los pedidos a crédito se suman a la cuenta del cliente cuando se entregan.
   if (existing.credit && status === 'entregado') {
     await store.addOrderToAccount(existing);
+  }
+
+  // Limpiar holds de los items restaurados (stock devuelto, reservas previas inválidas)
+  if (itemsToRestore.length > 0) {
+    for (const it of itemsToRestore) {
+      for (const [clientId, items] of holds) {
+        if (items.has(it.id)) items.delete(it.id);
+        if (items.size === 0) holds.delete(clientId);
+      }
+    }
   }
 
   const newState = await store.getPublicState();
@@ -2357,4 +2719,60 @@ function maybeAddCategory(categories, cat) {
     return [...categories, cat];
   }
   return categories;
+}
+
+// Cierra el pool de Postgres en el apagado del proceso (SIGTERM/SIGINT) para
+// no dejar conexiones colgadas durante un redeploy de Render.
+export async function closePool() {
+  if (pgPool) {
+    try {
+      await pgPool.end();
+      console.log('[kiosko] Pool de Postgres cerrado.');
+    } catch (err) {
+      console.warn('[kiosko] Error cerrando el pool:', err.message);
+    }
+  }
+}
+
+export const getLastPoolError = () => lastPoolError;
+
+// Chequeo de salud activo para /readyz: SELECT 1 con un reintento de conexión.
+export async function pingDb() {
+  if (!pgPool) return true;
+  const { rows } = await retryingQuery(pgPool, 'SELECT 1 AS ok');
+  return rows[0]?.ok === 1;
+}
+
+// Métricas livianas de salud para /api/health/metrics. Con conteos por tabla se
+// puede vigilar el crecimiento (clave con el límite de 0.5 GB de Neon free).
+export async function getMetrics() {
+  const counts = {};
+  if (pgPool) {
+    for (const t of ['products', 'categories', 'orders', 'customers', 'payments', 'admin_credentials', 'webauthn_credentials', 'push_subscriptions', 'stock_holds', 'shares', 'schema_migrations']) {
+      try {
+        const { rows } = await retryingQuery(pgPool, `SELECT count(*)::int AS n FROM ${q(t)}`);
+        counts[t] = rows[0]?.n ?? 0;
+      } catch {
+        counts[t] = -1;
+      }
+    }
+  } else {
+    try {
+      const state = fileStore.state;
+      counts.products = (state.products || []).length;
+      counts.categories = (state.categories || []).length;
+      counts.orders = (state.orders || []).length;
+      counts.customers = (state.customers || []).length;
+    } catch {
+      counts.fileStore = -1;
+    }
+  }
+  return {
+    db: pgPool ? 'postgres' : 'file',
+    counts,
+    lastPoolError: lastPoolError || null,
+    pid: process.pid,
+    uptime: Math.round(process.uptime()),
+    memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024)
+  };
 }

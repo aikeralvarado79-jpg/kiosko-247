@@ -2861,7 +2861,7 @@ export default function App() {
   }, [customerOrders, currentOrderTracking]);
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950 overflow-x-clip">
       {/* Toast Notification Container */}
       <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
         {toasts.map((toast) => {
@@ -10971,7 +10971,7 @@ function AdminView({
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
                 <button
                   onClick={() => setInvStockFilter((v) => (v === 'todas' ? 'bajo' : v === 'bajo' ? 'agotado' : 'todas'))}
                   className={`shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
@@ -11593,7 +11593,7 @@ function AdminView({
                             {o.routeNumber}
                           </span>
                           <div className="flex-1 min-w-0">
-<div className="flex flex-wrap items-center gap-2">
+                              <div className="flex items-center gap-2">
                               <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
                               <span className="text-xs font-bold text-white truncate">{o.customerName}</span>
                               {isTracking && (

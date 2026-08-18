@@ -109,6 +109,38 @@ describe('fileStore', () => {
     expect(cancelado.state.products.find((p) => p.id === 'p1').stock).toBe(product.stock);
   });
 
+  it('updateOrderStatus a cancelado devuelve el stock de los items', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    const created = await store.createOrder({
+      customerName: 'Cliente W',
+      phone: '41155556666',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 3 }],
+      total: product.price * 3
+    });
+
+    const cancelado = await store.updateOrderStatus(created.order.id, 'cancelado');
+    expect(cancelado.state.orders.find((o) => o.id === created.order.id).status).toBe('cancelado');
+    expect(cancelado.state.products.find((p) => p.id === 'p1').stock).toBe(product.stock);
+  });
+
+  it('updateOrderStatus a cancelado no devuelve stock si ya estaba entregado', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    const created = await store.createOrder({
+      customerName: 'Cliente V',
+      phone: '41177778888',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 3 }],
+      total: product.price * 3
+    });
+    await store.updateOrderStatus(created.order.id, 'entregado');
+    const entregadoStock = (await store.getState()).products.find((p) => p.id === 'p1').stock;
+    const cancelado = await store.updateOrderStatus(created.order.id, 'cancelado');
+    expect(cancelado.state.products.find((p) => p.id === 'p1').stock).toBe(entregadoStock);
+  });
+
   it('no permite cancelar un pedido de otro teléfono', async () => {
     const store = await freshStore();
     const state = await store.getState();

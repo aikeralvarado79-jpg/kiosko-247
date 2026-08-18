@@ -101,6 +101,7 @@ export const api = {
   adminLogout: () => request('/api/auth/logout', { method: 'POST' }),
   changeAdminPassword: (currentPassword, newPassword) => request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
   getAdminProfile: () => request('/api/admin/profile'),
+  getProductCosts: () => request('/api/admin/products-cost'),
   updateAdminProfile: (data) => request('/api/admin/profile', { method: 'PUT', body: JSON.stringify(data) }),
   listAdminEmployees: () => request('/api/admin/employees'),
   addAdminEmployee: (data) => request('/api/admin/employees', { method: 'POST', body: JSON.stringify(data) }),

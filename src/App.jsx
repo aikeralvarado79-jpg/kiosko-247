@@ -1292,6 +1292,25 @@ export default function App() {
     setIsLoading(false);
   }, [clientId, isAdminAuthed]);
 
+  // Costos de productos: solo para el admin (no viajan en /api/state público).
+  const loadProductCosts = useCallback(async () => {
+    try {
+      const res = await api.getProductCosts();
+      if (res.ok && Array.isArray(res.data.costs)) {
+        const map = {};
+        res.data.costs.forEach((c) => { map[c.id] = Number(c.cost) || 0; });
+        setCostMap(map);
+      }
+    } catch {
+      // silencioso: los costos son secundarios para la navegación
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isAdminAuthed) return;
+    loadProductCosts();
+  }, [isAdminAuthed, loadProductCosts]);
+
   useEffect(() => {
     loadState();
   }, [loadState]);
@@ -1611,6 +1630,7 @@ export default function App() {
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState(null);
   const [deleteConfirmProduct, setDeleteConfirmProduct] = useState(null);
+  const [costMap, setCostMap] = useState({});
   const [orderDetailOrder, setOrderDetailOrder] = useState(null);
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState(null);
   const [deleteOrderTarget, setDeleteOrderTarget] = useState(null);
@@ -2664,6 +2684,7 @@ export default function App() {
       setProducts(res.data.state.products || []);
       setCategories(res.data.state.categories || []);
       addToast(`Producto "${productData.name}" actualizado`);
+      loadProductCosts();
     } else {
       // Create new (id y code los genera el servidor)
       const res = await api.createProduct(productData);
@@ -2674,6 +2695,7 @@ export default function App() {
       setProducts(res.data.state.products || []);
       setCategories(res.data.state.categories || []);
       addToast(`Producto "${productData.name}" creado con éxito`);
+      loadProductCosts();
     }
 
     setIsAddEditModalOpen(false);
@@ -2689,6 +2711,7 @@ export default function App() {
     setProducts(res.data.state.products || []);
     addToast('Producto eliminado del inventario', 'info');
     setDeleteConfirmProduct(null);
+    loadProductCosts();
   };
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
@@ -3184,6 +3207,7 @@ export default function App() {
         ) : isAdminAuthed ? (
           <AdminView
             products={products}
+            costById={costMap}
             orders={orders}
             rate={rate}
             promos={promos}
@@ -3197,10 +3221,10 @@ export default function App() {
               setProductToEdit(null);
               setIsAddEditModalOpen(true);
             }}
-            onEditProduct={(product) => {
-              setProductToEdit(product);
-              setIsAddEditModalOpen(true);
-            }}
+onEditProduct={(product) => {
+        setProductToEdit({ ...product, cost: costMap[product.id] ?? product.cost ?? '' });
+        setIsAddEditModalOpen(true);
+      }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onUpdateOrderPayment={handleUpdateOrderPayment}
@@ -9356,6 +9380,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
 
 function AdminView({
   products,
+  costById = {},
   orders,
   rate,
   promos,
@@ -9418,6 +9443,7 @@ function AdminView({
   };
   const [initialOrderPrefs] = useState(loadOrderPrefs);
   const [confirmRefresh, setConfirmRefresh] = useState(false);
+  const [confirmCancelOrder, setConfirmCancelOrder] = useState(null);
   const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
   const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
@@ -9818,6 +9844,30 @@ function AdminView({
     } else {
       addToast(res.data?.error || 'No se pudo enviar el recordatorio', 'error');
     }
+  };
+
+  const handleAdminSubscribePush = async () => {
+    if (!('Notification' in window) || !('PushManager' in window)) {
+      addToast('Tu navegador no soporta notificaciones', 'error');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      addToast('Notificaciones bloqueadas. Actívalas en los ajustes del navegador', 'error');
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm !== 'granted') perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      addToast('Notificaciones no activadas', 'info');
+      return;
+    }
+    const ok = await subscribeToPush(adminPhone);
+    addToast(
+      ok
+        ? 'Activadas. Recibirás los pedidos nuevos aunque cierres la app.'
+        : 'No se pudo activar. Revisa que el teléfono del admin sea válido.',
+      ok ? 'success' : 'error'
+    );
   };
 
   // Modo Repartidor: cuando un pedido a domicilio está en "En Camino", el admin
@@ -10240,7 +10290,7 @@ function AdminView({
   const finDash = useMemo(() => {
     const today = toYMD(new Date());
     const yesterday = toYMD(new Date(Date.now() - 86400000));
-    const byDay = { [today]: { orders: 0, revenue: 0, cash: 0, digital: 0, credit: 0, tickets: 0 }, [yesterday]: { orders: 0, revenue: 0, cash: 0, digital: 0, credit: 0, tickets: 0 } };
+    const byDay = { [today]: { orders: 0, revenue: 0, cost: 0, cash: 0, digital: 0, credit: 0, tickets: 0 }, [yesterday]: { orders: 0, revenue: 0, cost: 0, cash: 0, digital: 0, credit: 0, tickets: 0 } };
     const todayItems = {};
     orders.forEach((o) => {
       const day = toYMD(parseOrderDate(o));
@@ -10251,11 +10301,13 @@ function AdminView({
       const total = Number(o.total) || 0;
       byDay[day].orders += 1;
       byDay[day].revenue += total;
+      const items = Array.isArray(o.items) ? o.items : [];
+      byDay[day].cost += items.reduce((acc, it) => acc + (it.quantity || 0) * (Number(costById[it.id]) || 0), 0);
       if (o.credit) byDay[day].credit += total;
       else if (o.paymentMethod === 'efectivo') byDay[day].cash += total;
       else byDay[day].digital += total;
       if (day === today) {
-        o.items.forEach((it) => {
+        items.forEach((it) => {
           todayItems[it.id] = (todayItems[it.id] || 0) + it.quantity;
         });
       }
@@ -10265,20 +10317,26 @@ function AdminView({
     const topToday = Object.entries(todayItems)
       .map(([id, quantity]) => {
         const p = products.find((prod) => prod.id === id);
-        return p ? { ...p, quantity } : null;
+        const cost = Number(costById[id]) || 0;
+        const unitRevenue = p ? Number(p.price) || 0 : 0;
+        return p
+          ? { ...p, quantity, cost, unitRevenue, marginUnit: unitRevenue - cost, margin: quantity * (unitRevenue - cost) }
+          : null;
       })
       .filter(Boolean)
       .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 5);
+      .slice(0, 8);
     return {
       today: t,
       yesterday: y,
+      grossProfit: t.revenue - t.cost,
+      grossMarginPct: t.revenue > 0 ? ((t.revenue - t.cost) / t.revenue) * 100 : 0,
       ticketAvg: t.orders > 0 ? t.revenue / t.orders : 0,
       revenueDelta: y.revenue > 0 ? ((t.revenue - y.revenue) / y.revenue) * 100 : (t.revenue > 0 ? 100 : 0),
       ticketsDelta: y.tickets > 0 ? ((t.tickets - y.tickets) / y.tickets) * 100 : (t.tickets > 0 ? 100 : 0),
       topToday
     };
-  }, [orders, products]);
+  }, [orders, products, costById]);
 
   // Total fiado pendiente (deuda activa de todos los clientes).
   const totalFiado = useMemo(
@@ -10592,7 +10650,7 @@ function AdminView({
             ].map((stBtn) => (
               <button
                 key={stBtn.key}
-                onClick={() => onUpdateOrderStatus(order.id, stBtn.key)}
+                onClick={() => (stBtn.key === 'cancelado' ? setConfirmCancelOrder(order) : onUpdateOrderStatus(order.id, stBtn.key))}
                 className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
                   order.status === stBtn.key
                     ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
@@ -10784,6 +10842,21 @@ function AdminView({
               onRefreshDb();
             }}
             onClose={() => setConfirmRefresh(false)}
+          />
+        )}
+
+        {confirmCancelOrder && (
+          <ConfirmActionModal
+            title="¿Cancelar este pedido?"
+            message="El pedido se marcará como cancelado, se devolverá el stock de sus artículos y el cliente quedará notificado."
+            note="Esta acción no se puede deshacer."
+            confirmLabel="Cancelar pedido"
+            onConfirm={() => {
+              const o = confirmCancelOrder;
+              setConfirmCancelOrder(null);
+              onUpdateOrderStatus(o.id, 'cancelado');
+            }}
+            onClose={() => setConfirmCancelOrder(null)}
           />
         )}
       </div>
@@ -11997,10 +12070,22 @@ function AdminView({
               </div>
             </div>
 
+            <div className="p-4 rounded-2xl bg-teal-500/10 border border-teal-500/30 space-y-2.5">
+              <span className="text-xs font-bold text-teal-300 block">Avisos para vos (admin)</span>
+              <p className="text-[11px] text-slate-400 leading-snug">
+                Recibí un aviso real cuando llegue un pedido nuevo, aunque la app esté cerrada. Se registra este dispositivo con el teléfono del admin ({adminPhone}).
+              </p>
+              <button
+                onClick={() => handleAdminSubscribePush()}
+                className="w-full py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs hover:bg-teal-400 transition-all active:scale-95"
+              >
+                Activar notificaciones en este dispositivo
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2.5">
-                <span className="text-xs font-bold text-slate-200 block">Notificación a todos</span>
-                <input
+                <span className="text-xs font-bold text-slate-200 block">Notificación a todos</span>                <input
                   type="text"
                   value={broadcastTitle}
                   onChange={(e) => setBroadcastTitle(e.target.value)}
@@ -12356,6 +12441,40 @@ function AdminView({
             </div>
           </div>
 
+          {/* Ganancia neta y margen */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-slate-900/80 border border-emerald-500/40 space-y-4">
+            <div className="flex items-center gap-2">
+              <Icon name="dollarSign" className="w-4 h-4 text-emerald-400" />
+              <h4 className="font-bold text-slate-200 text-sm">Ganancia Neta de Hoy</h4>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-3.5">
+                <span className="text-slate-400 block text-[10px] font-semibold uppercase tracking-wider">Ganancia (ventas − costos)</span>
+                <span className="text-xl sm:text-2xl font-black text-emerald-300 block mt-1">
+                  {formatUsd(finDash.grossProfit)}
+                </span>
+              </div>
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-3.5">
+                <span className="text-slate-400 block text-[10px] font-semibold uppercase tracking-wider">Margen bruto</span>
+                <span className="text-xl sm:text-2xl font-black text-white block mt-1">
+                  {finDash.grossMarginPct.toFixed(0)}%
+                </span>
+                <span className="text-[10px] text-slate-500 mt-0.5 block">del total vendido</span>
+              </div>
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700/70 p-3.5">
+                <span className="text-slate-400 block text-[10px] font-semibold uppercase tracking-wider">Costo de mercadería vendida</span>
+                <span className="text-xl sm:text-2xl font-black text-amber-300 block mt-1">
+                  {formatUsd(finDash.today.cost)}
+                </span>
+                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                  {finDash.today.cost > 0 && finDash.today.revenue > 0
+                    ? `= ${((finDash.today.cost / finDash.today.revenue) * 100).toFixed(0)}% de las ventas`
+                    : 'Define el "Costo" en cada producto'}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Kiosko Operator: resumen de jornada */}
           <div className="rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-indigo-500/15 via-slate-900/80 to-slate-900/80 overflow-hidden">
             <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
@@ -12505,8 +12624,13 @@ function AdminView({
                 <ul className="space-y-3">
                   {finDash.topToday.map((p, idx) => (
                     <li key={p.id} className="flex items-center justify-between text-xs gap-2">
-                      <span className="text-slate-300 font-medium truncate">#{idx + 1} {p.name}</span>
-                      <span className="text-teal-400 font-bold shrink-0">{p.quantity} un.</span>
+                      <span className="text-slate-300 font-medium truncate flex items-center gap-1.5">
+                        #{idx + 1} {p.name}
+                        {p.marginUnit > 0 && (
+                          <span className="text-[9px] font-bold text-emerald-400 shrink-0">+{formatUsd(p.marginUnit)}/un</span>
+                        )}
+                      </span>
+                      <span className="text-teal-400 font-bold shrink-0">{p.quantity} un. · {formatUsd(p.margin)}</span>
                     </li>
                   ))}
                 </ul>
@@ -13261,6 +13385,7 @@ function OrderChat({ order }) {
   const TEMPLATES = [
     { label: 'Listo 👍', text: (n, id) => `Hola ${n}, tu pedido ${id} está listo para retirar en Kiosko 24/7. ¡Te esperamos! 😊` },
     { label: 'En camino 🛵', text: (n, id) => `Hola ${n}, tu pedido ${id} ya va en camino. ¡Pronto llega! 🙌` },
+    { label: 'Llegó el repartidor 📦', text: (n, id) => `Hola ${n}, el repartidor llegó con tu pedido ${id}. ¡Que lo disfrutes! 🎉` },
     { label: 'En preparación', text: (n, id) => `Hola ${n}, estamos preparando tu pedido ${id}. Cualquier cambio te avisamos ✋` },
     { label: 'Confirmar pago', text: (n, id) => `Hola ${n}, sobre el pago de tu pedido ${id}. ¿Necesitas ayuda? 🙏` }
   ];
@@ -15318,6 +15443,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     brand: productToEdit?.brand || '',
     description: productToEdit?.description || '',
     price: productToEdit?.price || '',
+    cost: productToEdit?.cost || '',
     stock: productToEdit?.stock || '',
     category: productToEdit?.category || categories[0] || 'Comida',
     image: productToEdit?.image || 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=500&auto=format&fit=crop&q=80',
@@ -15465,6 +15591,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
     onSave({
       ...formData,
       price: Number(formData.price),
+      cost: Number(formData.cost) || 0,
       stock: Number(formData.stock),
       sizeValue: formData.sizeValue === '' ? '' : Number(formData.sizeValue),
       category: newCatInput.trim() ? newCatInput.trim() : formData.category
@@ -15531,6 +15658,19 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
                 value={formData.price}
                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                 placeholder="1500"
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Costo ($ ARS)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.cost}
+                onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
+                placeholder="1200"
                 className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
               />
             </div>

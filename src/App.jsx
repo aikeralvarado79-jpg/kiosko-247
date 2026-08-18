@@ -5,6 +5,7 @@ import { api, getToken, setToken, clearToken, setRememberSession, getRememberSes
 import { ADMIN_PHONES } from './data.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { BrowserMultiFormatReader } from '@zxing/browser';
 import LoadingScreen from './components/LoadingScreen.jsx';
 
 // ---------------------------------------------------------------------------
@@ -15436,21 +15437,20 @@ function CreditLimitInput({ customer, onSetCreditLimit }) {
 }
 
 // Escáner de código de barras para el formulario de productos. Usa la API
-// nativa BarcodeDetector (Chrome/Edge, escritorio y Android) con cámara trasera;
-// si no está disponible permite ingresar el código manualmente dentro del modal.
+// nativa BarcodeDetector (Chrome/Edge) cuando está disponible y, si no, decodifica
+// por software con ZXing (Safari, Firefox, iPhone). Siempre permite ingresar el
+// código manualmente como respaldo.
 function BarcodeScannerModal({ onScan, onClose }) {
   useOverlay(true, onClose);
   const videoRef = useRef(null);
-  const [supported] = useState(() => typeof window !== 'undefined' && 'BarcodeDetector' in window);
   const [cameraError, setCameraError] = useState('');
   const [manual, setManual] = useState('');
   const [flash, setFlash] = useState(false);
 
   useEffect(() => {
-    if (!supported) return undefined;
     let stream = null;
     let raf = 0;
-    let detector = null;
+    let zxControls = null;
     let cancelled = false;
     let last = 0;
 
@@ -15458,50 +15458,76 @@ function BarcodeScannerModal({ onScan, onClose }) {
       if (cancelled) return;
       cancelled = true;
       cancelAnimationFrame(raf);
+      if (zxControls && typeof zxControls.stop === 'function') {
+        try { zxControls.stop(); } catch {}
+      }
       if (stream) stream.getTracks().forEach((t) => t.stop());
     };
 
-    const step = () => {
+    const handleResult = (value) => {
       if (cancelled) return;
-      const v = videoRef.current;
-      const now = performance.now();
-      if (v && v.readyState >= 2 && now - last > 150) {
-        last = now;
-        detector
-          .detect(v)
-          .then((codes) => {
-            if (cancelled || !codes || codes.length === 0 || !codes[0].rawValue) return;
-            const value = String(codes[0].rawValue).trim();
-            if (!value) return;
-            setFlash(true);
-            stop();
-            onScan(value);
-          })
-          .catch(() => {});
-      }
-      raf = requestAnimationFrame(step);
+      const v = String(value || '').trim();
+      if (!v) return;
+      setFlash(true);
+      stop();
+      onScan(v);
     };
 
     (async () => {
+      const native = typeof window !== 'undefined' && 'BarcodeDetector' in window;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
-        if (cancelled || !videoRef.current) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        try {
-          detector = new window.BarcodeDetector({
-            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'codabar', 'itf', 'qr_code']
+        if (native) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
           });
-        } catch {
-          detector = new window.BarcodeDetector();
+          if (cancelled || !videoRef.current) {
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          let detector;
+          try {
+            detector = new window.BarcodeDetector({
+              formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'codabar', 'itf', 'qr_code']
+            });
+          } catch {
+            detector = new window.BarcodeDetector();
+          }
+          const step = () => {
+            if (cancelled) return;
+            const v = videoRef.current;
+            const now = performance.now();
+            if (v && v.readyState >= 2 && now - last > 150) {
+              last = now;
+              detector
+                .detect(v)
+                .then((codes) => {
+                  if (cancelled || !codes || codes.length === 0) return;
+                  handleResult(codes[0].rawValue);
+                })
+                .catch(() => {});
+            }
+            raf = requestAnimationFrame(step);
+          };
+          raf = requestAnimationFrame(step);
+        } else {
+          // Decodificador por software (ZXing): soporta EAN/UPC/Code128/QR en
+          // cualquier navegador con cámara. Busca la cámara trasera.
+          const reader = new BrowserMultiFormatReader();
+          const devices = await reader.listVideoInputDevices();
+          const backCam =
+            devices.find((d) => /back|rear|environment/i.test(d.label || '')) ||
+            devices[devices.length - 1];
+          if (!backCam || !videoRef.current) {
+            throw new Error('No camera');
+          }
+          zxControls = await reader.decodeFromVideoDevice(backCam.deviceId, videoRef.current, (result) => {
+            if (!result || !result.getText) return;
+            handleResult(result.getText());
+          });
         }
-        raf = requestAnimationFrame(step);
       } catch (err) {
         const denied = err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError');
         setCameraError(denied ? 'Permiso de cámara denegado. Ingresá el código manualmente.' : 'No se pudo abrir la cámara. Ingresá el código manualmente.');
@@ -15509,7 +15535,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
     })();
 
     return stop;
-  }, [onScan, supported]);
+  }, [onScan]);
 
   const applyManualCode = () => {
     const v = manual.trim();
@@ -15531,7 +15557,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
         </div>
 
         <div className="p-4 space-y-3">
-          {supported && !cameraError ? (
+          {!cameraError ? (
             <div className="relative overflow-hidden rounded-2xl bg-black aspect-video">
               <video ref={videoRef} playsInline muted className="absolute inset-0 w-full h-full object-cover" />
               <div className={`absolute inset-0 pointer-events-none transition-all duration-150 ${flash ? 'bg-teal-400/30' : 'bg-transparent'}`} />
@@ -15553,7 +15579,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
             <input
               type="text"
               inputMode="numeric"
-              autoFocus={!supported}
+              autoFocus={!!cameraError}
               value={manual}
               onChange={(e) => setManual(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && applyManualCode()}

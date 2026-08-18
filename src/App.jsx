@@ -2732,6 +2732,42 @@ export default function App() {
     return true;
   };
 
+  // Venta en mostrador: el admin registra una venta física desde el panel
+  // ("Ventas"). Se crea un pedido tipo pickup ya entregado y pagado, así se
+  // contabiliza en Finanzas, descuenta stock y queda en el historial.
+  const handleCounterSale = async ({ items, customerName, customerPhone, paymentMethod }) => {
+    const cleanItems = (items || []).map((it) => ({
+      id: it.id,
+      name: it.name,
+      price: Number(it.price) || 0,
+      quantity: Math.max(1, Math.round(Number(it.quantity) || 1))
+    }));
+    if (cleanItems.length === 0) {
+      addToast('Agregá al menos un producto para registrar la venta', 'error');
+      return { ok: false };
+    }
+    const total = cleanItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+    const res = await api.createCounterSale({
+      items: cleanItems,
+      customerName: (customerName || '').trim() || 'Venta en mostrador',
+      phone: (customerPhone || '').trim(),
+      paymentMethod: paymentMethod || 'efectivo',
+      total,
+      subtotal: total,
+      notes: 'Venta en mostrador'
+    });
+    if (!res.ok) {
+      addToast(res.data.error || 'No se pudo registrar la venta', 'error');
+      return { ok: false };
+    }
+    setProducts(res.data.state.products || []);
+    setOrders(res.data.state.orders || []);
+    if (res.data.state.customers) setAllCustomers(res.data.state.customers);
+    await loadState({ silent: true });
+    addToast(`Venta registrada: ${formatUsd(total)}`, 'success');
+    return { ok: true, order: res.data.order };
+  };
+
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
     const res = await api.updateOrderStatus(orderId, newStatus);
     if (!res.ok) {
@@ -3221,7 +3257,6 @@ export default function App() {
             onOpenVoice={openVoiceOrder}
             guestShare={guestShare}
             guestAdded={guestAdded}
-            addToast={addToast}
           />
         ) : isAdminAuthed ? (
           <AdminView
@@ -3246,6 +3281,7 @@ onEditProduct={(product) => {
       }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
             onReceiveStock={handleReceiveStock}
+            onCounterSale={handleCounterSale}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onUpdateOrderPayment={handleUpdateOrderPayment}
             onUpdateCourierLocation={handleUpdateCourierLocation}
@@ -4805,28 +4841,12 @@ function CustomerView({
   onOpenMyKiosko,
   onOpenVoice,
   guestShare,
-  guestAdded,
-  addToast
+  guestAdded
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [promoIdx, setPromoIdx] = useState(0);
   // Recorrido Horizontal: apagado por defecto; el usuario lo enciende con el switch.
   const [shelvesEnabled, setShelvesEnabled] = useState(false);
-  // Escáner de código de barras en la vitrina: agrega el producto al carrito
-  // sin buscar (venta en mostrador).
-  const [scanCartOpen, setScanCartOpen] = useState(false);
-
-  const handleScanCartCode = (code) => {
-    const found = (allProducts || []).find(
-      (p) => String(p.code || '').trim() === String(code).trim()
-    );
-    if (!found) {
-      if (addToast) addToast(`No hay productos con el código ${code}`, 'error');
-      return;
-    }
-    onAddToCart(found);
-  };
-
   // Carrusel de promos con autoplay (solo cuando hay más de una activa)
   const activePromos = promos.filter((p) => p.active);
   useEffect(() => {
@@ -5349,26 +5369,16 @@ function CustomerView({
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
             placeholder="Buscar productos, marcas..."
-            className="w-full pl-12 pr-36 py-3.5 bg-slate-800/80 border border-slate-700/80 rounded-2xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all text-sm backdrop-blur-md"
+            className="w-full pl-12 pr-24 py-3.5 bg-slate-800/80 border border-slate-700/80 rounded-2xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all text-sm backdrop-blur-md"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-28 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              className="absolute right-16 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
             >
               <Icon name="x" className="w-4 h-4" />
             </button>
           )}
-          <Btn
-            onClick={() => setScanCartOpen(true)}
-            variant="tonal"
-            size="sm"
-            icon="scan"
-            className="!absolute right-14 top-1/2 -translate-y-1/2 !p-2.5 !rounded-xl"
-            style={{ width: 'auto', height: 'auto' }}
-            title="Escanear código de barras para agregar al carrito"
-            aria-label="Escanear código de barras"
-          ></Btn>
           <Btn
             onClick={onOpenVoice}
             variant="tonal"
@@ -5691,15 +5701,6 @@ function CustomerView({
             </RevealOnScroll>
           ))}
         </div>
-      )}
-      {scanCartOpen && (
-        <BarcodeScannerModal
-          onScan={(code) => {
-            setScanCartOpen(false);
-            handleScanCartCode(code);
-          }}
-          onClose={() => setScanCartOpen(false)}
-        />
       )}
     </div>
   );
@@ -7711,6 +7712,7 @@ function BottomTabBar({
 
   const adminTabs = [
     { key: 'inventory', label: 'Inventario', icon: 'package', onClick: () => onAdminTab('inventory'), badge: null },
+    { key: 'ventas', label: 'Ventas', icon: 'shoppingBag', onClick: () => onAdminTab('ventas'), badge: null },
     { key: 'orders', label: 'Pedidos', icon: 'clock', onClick: () => onAdminTab('orders'), badge: pendingOrders > 0 ? pendingOrders : null },
     { key: 'benefited', label: 'Beneficiados', icon: 'users', onClick: () => onAdminTab('benefited'), badge: null },
     { key: 'blacklist', label: 'Lista Negra', icon: 'alertTriangle', onClick: () => onAdminTab('blacklist'), badge: null },
@@ -9449,6 +9451,7 @@ function AdminView({
   onEditProduct,
   onDeleteProduct,
   onReceiveStock,
+  onCounterSale,
   onUpdateOrderStatus,
   onUpdateOrderPayment,
   onUpdateCourierLocation,
@@ -9501,7 +9504,6 @@ function AdminView({
   const [confirmRefresh, setConfirmRefresh] = useState(false);
   const [confirmCancelOrder, setConfirmCancelOrder] = useState(null);
   const [receiveStockOpen, setReceiveStockOpen] = useState(false);
-  const [pickingOrder, setPickingOrder] = useState(null);
   const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
   const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
@@ -10697,15 +10699,6 @@ function AdminView({
           ) : (
           <>
           <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
-          {['pendiente', 'en_preparacion'].includes(order.status) && (
-            <button
-              onClick={() => setPickingOrder(order)}
-              className="w-full py-2 rounded-xl text-xs font-bold bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-1.5"
-            >
-              <Icon name="scan" className="w-3.5 h-3.5" />
-              Preparar con escáner
-            </button>
-          )}
           <div className="grid grid-cols-2 gap-2">
             {[
               { key: 'pendiente', label: 'Pendiente' },
@@ -10934,14 +10927,6 @@ function AdminView({
             onClose={() => setReceiveStockOpen(false)}
           />
         )}
-
-        {pickingOrder && (
-          <OrderPickingModal
-            order={pickingOrder}
-            products={products}
-            onClose={() => setPickingOrder(null)}
-          />
-        )}
       </div>
 
       {/* Analytics Summary Bar */}
@@ -11010,6 +10995,7 @@ function AdminView({
         >
           {[
             { key: 'inventory', label: 'Inventario', full: 'Inventario de Productos', icon: 'package' },
+            { key: 'ventas', label: 'Ventas', full: 'Venta en Mostrador', icon: 'shoppingBag' },
             { key: 'orders', label: `Pedidos (${pendingOrders.length})`, full: `Pedidos en Vivo (${pendingOrders.length})`, icon: 'clock' },
             { key: 'promos', label: 'Promos', full: 'Promos de Tienda', icon: 'sparkles' },
             { key: 'benefited', label: 'Beneficiados', full: 'Clientes Beneficiados', icon: 'users' },
@@ -11053,6 +11039,17 @@ function AdminView({
           <Icon name="chevronRight" className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Venta en mostrador: el admin escanea o toca productos y registra la
+          venta física como pedido pickup entregado y pagado. */}
+      {adminTab === 'ventas' && (
+        <CounterSalesPanel
+          products={products}
+          orders={orders}
+          onCounterSale={onCounterSale}
+          addToast={addToast}
+        />
+      )}
 
       {/* Tab 1: Inventory Management */}
       {adminTab === 'inventory' && (
@@ -15732,6 +15729,328 @@ function BarcodeScannerModal({ onScan, onClose, keepOpen = false, overlay = null
   );
 }
 
+// Venta en mostrador: panel del admin para registrar ventas físicas de manera
+// cómoda. Entrada por escáner de código de barras, por código tipeado o tocando
+// el producto en la lista. Al registrar crea un pedido pickup entregado y pagado.
+function CounterSalesPanel({ products = [], orders = [], onCounterSale, addToast }) {
+  const [saleCart, setSaleCart] = useState([]); // [{ product, qty }]
+  const [codeInput, setCodeInput] = useState('');
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('efectivo');
+  const [saving, setSaving] = useState(false);
+  const [saleSearch, setSaleSearch] = useState('');
+
+  const total = saleCart.reduce((acc, it) => acc + (Number(it.product.price) || 0) * it.qty, 0);
+  const totalUnits = saleCart.reduce((acc, it) => acc + it.qty, 0);
+
+  const addProduct = (product, qty = 1) => {
+    const n = Math.max(1, Math.round(Number(qty) || 1));
+    const available = Number(product.stock) || 0;
+    setSaleCart((prev) => {
+      const found = prev.find((it) => it.product.id === product.id);
+      const current = found ? found.qty : 0;
+      if (available < current + n) {
+        addToast?.(`Stock insuficiente para "${product.name}"`, 'error');
+        return prev;
+      }
+      if (found) {
+        return prev.map((it) => (it.product.id === product.id ? { ...it, qty: it.qty + n } : it));
+      }
+      return [...prev, { product, qty: n }];
+    });
+  };
+
+  const addByCode = (code) => {
+    const p = (products || []).find((x) => String(x.code || '').trim() === String(code || '').trim());
+    if (!p) {
+      addToast?.(`No hay productos con el código ${code}`, 'error');
+      return;
+    }
+    addProduct(p);
+  };
+
+  const changeQty = (id, delta) => {
+    setSaleCart((prev) =>
+      prev
+        .map((it) => {
+          if (it.product.id !== id) return it;
+          const next = it.qty + delta;
+          if (next < 1) return null;
+          if (next > (Number(it.product.stock) || 0) && delta > 0) return it;
+          return { ...it, qty: next };
+        })
+        .filter(Boolean)
+    );
+  };
+
+  const removeItem = (id) => setSaleCart((prev) => prev.filter((it) => it.product.id !== id));
+
+  const applyCode = () => {
+    const c = codeInput.trim();
+    if (!c) return;
+    addByCode(c);
+    setCodeInput('');
+  };
+
+  const registerSale = async () => {
+    if (saleCart.length === 0) {
+      addToast?.('Agregá al menos un producto para registrar la venta', 'error');
+      return;
+    }
+    setSaving(true);
+    const res = await onCounterSale({
+      items: saleCart.map((it) => ({
+        id: it.product.id,
+        name: it.product.name,
+        price: it.product.price,
+        quantity: it.qty
+      })),
+      customerName,
+      customerPhone,
+      paymentMethod
+    });
+    setSaving(false);
+    if (res && res.ok) {
+      setSaleCart([]);
+      setCodeInput('');
+      setCustomerName('');
+      setCustomerPhone('');
+      setPaymentMethod('efectivo');
+    }
+  };
+
+  const filteredProducts = useMemo(() => {
+    const q = saleSearch.trim().toLowerCase();
+    if (!q) return products || [];
+    return (products || []).filter(
+      (p) =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.brand || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        String(p.code || '').toLowerCase().includes(q)
+    );
+  }, [products, saleSearch]);
+
+  const recentCounterSales = useMemo(() => {
+    return (orders || [])
+      .filter((o) => o.status === 'entregado' && (o.notes || '').toLowerCase().includes('mostrador'))
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 6);
+  }, [orders]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-teal-500/30 bg-gradient-to-br from-teal-500/10 via-slate-900/80 to-slate-900/80 p-4 sm:p-5">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-teal-500/20 text-teal-300 shrink-0">
+            <Icon name="shoppingBag" className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="font-bold text-white text-sm">Registrar venta en mostrador</h2>
+            <p className="text-[11px] text-slate-400">
+              Escaneá el código, escribilo o tocá el producto de la lista.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 flex gap-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={codeInput}
+            onChange={(e) => setCodeInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && applyCode()}
+            placeholder="Código de barras (ej: 7790070035394)"
+            className="flex-1 min-w-0 px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+          />
+          <button
+            onClick={applyCode}
+            disabled={!codeInput.trim()}
+            className="shrink-0 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-xs hover:text-white transition-all disabled:opacity-40"
+          >
+            Agregar
+          </button>
+          <button
+            onClick={() => setScannerOpen(true)}
+            className="shrink-0 px-4 py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs hover:bg-teal-400 transition-all flex items-center gap-1.5"
+          >
+            <Icon name="scan" className="w-4 h-4" />
+            Escanear
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-slate-800/60 border border-slate-700 p-3 sm:p-4 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+            <Icon name="cart" className="w-4 h-4 text-teal-400" />
+            Venta actual · {totalUnits} un.
+          </h3>
+          <button
+            onClick={() => setSaleCart([])}
+            className="text-[11px] font-semibold text-slate-400 hover:text-rose-300 transition-colors"
+          >
+            Vaciar
+          </button>
+        </div>
+
+        {saleCart.length === 0 ? (
+          <p className="text-[11px] text-slate-500 text-center py-3">
+            Sin productos todavía. Escaneá o buscá arriba.
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+            {saleCart.map((it) => (
+              <div key={it.product.id} className="flex items-center gap-2 rounded-xl bg-slate-900/60 border border-slate-700/60 p-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-white truncate">{it.product.name}</p>
+                  <p className="text-[10px] text-slate-400">{formatUsd(it.product.price)} c/u</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => changeQty(it.product.id, -1)} className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center">
+                    <Icon name="minus" className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="w-7 text-center text-sm font-black text-white">{it.qty}</span>
+                  <button onClick={() => changeQty(it.product.id, 1)} className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center">
+                    <Icon name="plus" className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <span className="w-16 text-right text-xs font-bold text-white">{formatUsd((Number(it.product.price) || 0) * it.qty)}</span>
+                <button onClick={() => removeItem(it.product.id)} className="text-slate-500 hover:text-rose-300 transition-colors">
+                  <Icon name="trash2" className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between pt-1 border-t border-slate-700/60">
+          <span className="text-xs font-semibold text-slate-400">Total</span>
+          <span className="text-lg font-black text-teal-300">{formatUsd(total)}</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { key: 'efectivo', label: 'Efectivo' },
+            { key: 'qr', label: 'QR' },
+            { key: 'tarjeta', label: 'Tarjeta' },
+            { key: 'transferencia', label: 'Transferencia' }
+          ].map((pm) => (
+            <button
+              key={pm.key}
+              onClick={() => setPaymentMethod(pm.key)}
+              className={`px-2 py-2 rounded-xl text-[11px] font-bold border transition-all ${
+                paymentMethod === pm.key
+                  ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
+                  : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
+              }`}
+            >
+              {pm.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input
+            type="text"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Cliente (opcional)"
+            className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+          />
+          <input
+            type="tel"
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value)}
+            placeholder="WhatsApp (opcional)"
+            className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+          />
+        </div>
+
+        <button
+          onClick={registerSale}
+          disabled={saving || saleCart.length === 0}
+          className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-black text-sm hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          <Icon name={saving ? 'clock' : 'check'} className="w-4 h-4" />
+          {saving ? 'Registrando…' : `Registrar venta · ${formatUsd(total)}`}
+        </button>
+      </div>
+
+      <div className="rounded-2xl bg-slate-800/40 border border-slate-800 p-3 sm:p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+            <Icon name="package" className="w-4 h-4 text-teal-400" />
+            Productos (tocá para agregar)
+          </h3>
+          <input
+            type="text"
+            value={saleSearch}
+            onChange={(e) => setSaleSearch(e.target.value)}
+            placeholder="Buscar…"
+            className="w-36 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-80 overflow-y-auto pr-1">
+          {filteredProducts.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => addProduct(p)}
+              className="flex items-center gap-2 rounded-xl bg-slate-900/60 border border-slate-700/60 p-2 text-left hover:border-teal-500/50 transition-all"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-white truncate">{p.name}</p>
+                <p className="text-[10px] text-slate-400">
+                  {formatUsd(p.price)} · {p.stock} un.
+                </p>
+              </div>
+              <span className="shrink-0 w-7 h-7 rounded-lg bg-teal-500/15 border border-teal-500/30 text-teal-300 flex items-center justify-center">
+                <Icon name="plus" className="w-3.5 h-3.5" />
+              </span>
+            </button>
+          ))}
+          {filteredProducts.length === 0 && (
+            <p className="col-span-full text-[11px] text-slate-500 text-center py-3">
+              No hay productos que coincidan.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {recentCounterSales.length > 0 && (
+        <div className="rounded-2xl bg-slate-800/40 border border-slate-800 p-3 sm:p-4 space-y-1.5">
+          <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+            <Icon name="clock" className="w-4 h-4 text-teal-400" />
+            Últimas ventas de mostrador
+          </h3>
+          {recentCounterSales.map((o) => (
+            <div key={o.id} className="flex items-center gap-2 rounded-xl bg-slate-900/60 border border-slate-700/60 p-2">
+              <span className="font-mono text-[10px] font-bold text-teal-400 w-16 shrink-0">{o.id}</span>
+              <span className="flex-1 min-w-0 text-xs text-slate-300 truncate">{o.customerName}</span>
+              <span className="text-[10px] text-slate-500 shrink-0">
+                {new Date(o.createdAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+              <span className="text-xs font-bold text-white shrink-0">{formatUsd(o.total)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {scannerOpen && (
+        <BarcodeScannerModal
+          onScan={(code) => {
+            setScannerOpen(false);
+            addByCode(code);
+          }}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 function ProductFormModal({ productToEdit, categories, products = [], onClose, onSave }) {
   useOverlay(true, onClose);
   const [formData, setFormData] = useState({
@@ -16476,217 +16795,6 @@ function ReceiveStockModal({ products = [], onReceiveStock, onClose }) {
       </div>
       {scannerOpen && (
         <BarcodeScannerModal onScan={handleCode} onClose={() => setScannerOpen(false)} />
-      )}
-    </div>
-  );
-}
-
-// Preparar un pedido con escáner (picking): el admin escanea cada código de
-// barras y el artículo correspondiente queda marcado como verificado. El
-// escáner queda abierto (keepOpen) con un overlay que muestra el avance y los
-// ítems que faltan.
-function OrderPickingModal({ order, products = [], onClose }) {
-  useOverlay(true, onClose);
-  const items = order?.items || [];
-  const [checked, setChecked] = useState(() => new Set());
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [manualCode, setManualCode] = useState('');
-  const [msg, setMsg] = useState('');
-
-  const totalUnits = items.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
-  const doneUnits = items.reduce((s, i) => (checked.has(i.id) ? s + (Number(i.quantity) || 0) : s), 0);
-  const doneCount = items.filter((i) => checked.has(i.id)).length;
-  const pct = totalUnits ? Math.round((doneUnits / totalUnits) * 100) : 0;
-
-  const resolveCode = (code) => {
-    const p = (products || []).find((x) => String(x.code || '').trim() === String(code).trim());
-    if (!p) return { error: `Ningún producto tiene el código ${code}` };
-    const item = items.find((i) => String(i.id) === String(p.id));
-    if (!item) return { error: `${p.name} no está en este pedido` };
-    return { item, product: p };
-  };
-
-  const handleCode = (code) => {
-    const r = resolveCode(code);
-    if (r.error) {
-      setMsg(r.error);
-      return;
-    }
-    if (checked.has(r.item.id)) {
-      setMsg(`${r.item.name} ya estaba registrado.`);
-      return;
-    }
-    setChecked((prev) => new Set(prev).add(r.item.id));
-    setMsg('');
-  };
-
-  const toggleItem = (id) => {
-    setChecked((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  };
-
-  const applyManual = () => {
-    const v = manualCode.trim();
-    if (v) {
-      handleCode(v);
-      setManualCode('');
-    }
-  };
-
-  const scannerOverlay = (
-    <div className="rounded-2xl bg-slate-800/80 border border-slate-700 p-3 space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-bold text-white">
-          Pedido <span className="text-cyan-300 font-mono">{order?.id}</span>
-        </span>
-        <span className="text-[11px] font-black text-cyan-300">
-          {doneCount}/{items.length} ítems · {pct}%
-        </span>
-      </div>
-      <div className="h-1.5 rounded-full bg-slate-700/70 overflow-hidden">
-        <div
-          className="h-full bg-gradient-to-r from-cyan-400 to-teal-400 transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-        {items.map((it) => {
-          const done = checked.has(it.id);
-          return (
-            <span
-              key={it.id}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold ${
-                done
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                  : 'bg-slate-800/80 border-slate-700 text-slate-400'
-              }`}
-            >
-              <Icon name={done ? 'check' : 'layers'} className="w-3 h-3" />
-              {it.name}
-            </span>
-          );
-        })}
-      </div>
-      <button
-        onClick={() => setScannerOpen(false)}
-        className="w-full py-2 rounded-xl bg-teal-500 text-slate-950 text-xs font-bold hover:bg-teal-400 transition-all"
-      >
-        Terminar escaneo
-      </button>
-    </div>
-  );
-
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-screen-up max-h-[92vh] flex flex-col">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
-          <h3 className="font-bold text-white text-sm flex items-center gap-2">
-            <Icon name="scan" className="w-4 h-4 text-cyan-400" />
-            Preparar pedido {order?.id}
-          </h3>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
-            <Icon name="x" className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] text-slate-400 font-semibold">Verificación</span>
-              <span className="text-[11px] font-black text-cyan-300">
-                {doneUnits}/{totalUnits} un.
-              </span>
-            </div>
-            <div className="h-1.5 rounded-full bg-slate-700/70 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-cyan-400 to-teal-400 transition-all duration-300"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            {items.map((it) => {
-              const done = checked.has(it.id);
-              return (
-                <button
-                  key={it.id}
-                  onClick={() => toggleItem(it.id)}
-                  className={`w-full flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all ${
-                    done
-                      ? 'bg-emerald-500/15 border-emerald-500/40'
-                      : 'bg-slate-800/60 border-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
-                      done ? 'bg-emerald-500 border-emerald-400 text-slate-950' : 'border-slate-600'
-                    }`}
-                  >
-                    {done && <Icon name="check" className="w-3 h-3" />}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className={`block text-xs font-bold truncate ${done ? 'text-emerald-200' : 'text-white'}`}>
-                      {it.name}
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      x{it.quantity}
-                      {it.price ? ` · ${formatUsd(it.price)}` : ''}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {msg && (
-            <p className="text-[11px] text-rose-400 font-semibold flex items-center gap-1">
-              <Icon name="alertTriangle" className="w-3.5 h-3.5" />
-              {msg}
-            </p>
-          )}
-
-          <div className="flex gap-2">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={manualCode}
-              onChange={(e) => setManualCode(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && applyManual()}
-              placeholder="O escribí un código…"
-              className="flex-1 min-w-0 px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-            />
-            <button
-              onClick={applyManual}
-              disabled={!manualCode.trim()}
-              className="shrink-0 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-xs hover:text-white transition-all disabled:opacity-40"
-            >
-              Marcar
-            </button>
-          </div>
-
-          <button
-            onClick={() => setScannerOpen(true)}
-            className="w-full py-3 rounded-2xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 font-bold text-xs hover:bg-cyan-500/25 transition-all flex items-center justify-center gap-2"
-          >
-            <Icon name="camera" className="w-4 h-4" />
-            Escanear códigos de barras
-          </button>
-        </div>
-      </div>
-
-      {scannerOpen && (
-        <BarcodeScannerModal
-          keepOpen
-          onScan={handleCode}
-          onClose={() => setScannerOpen(false)}
-          overlay={scannerOverlay}
-        />
       )}
     </div>
   );

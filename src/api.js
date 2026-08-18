@@ -110,6 +110,7 @@ export const api = {
   listAdminSessions: () => request('/api/admin/sessions'),
   revokeAdminSession: (phone) => request('/api/admin/sessions/revoke', { method: 'POST', body: JSON.stringify({ phone }) }),
   createOrder: (order) => request('/api/orders', { method: 'POST', body: JSON.stringify(order) }),
+  createCounterSale: (data) => request('/api/admin/sales', { method: 'POST', body: JSON.stringify(data) }),
   createProduct: (product) => request('/api/products', { method: 'POST', body: JSON.stringify(product) }),
   updateProduct: (id, product) => request(`/api/products/${id}`, { method: 'PUT', body: JSON.stringify(product) }),
   deleteProduct: (id) => request(`/api/products/${id}`, { method: 'DELETE' }),

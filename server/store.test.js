@@ -669,4 +669,63 @@ describe('fileStore', () => {
     });
     expect(result.error).toBe('Tu cartera solo cubre $10.00. Ajusta el monto o usa otro método.');
   });
+
+  it('crea una venta de mostrador como pedido pickup entregado y pagado', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const product = state.products.find((p) => p.id === 'p1');
+    const stockAntes = product.stock;
+
+    const result = await store.createCounterSale({
+      customerName: 'Juan Compras',
+      items: [{ id: 'p1', name: product.name, price: product.price, quantity: 3 }],
+      total: product.price * 3
+    });
+
+    expect(result.order).toBeDefined();
+    expect(result.order.status).toBe('entregado');
+    expect(result.order.type).toBe('pickup');
+    expect(result.order.paymentStatus).toBe('confirmado');
+    expect(result.order.paymentMethod).toBe('efectivo');
+    expect(result.order.customerName).toBe('Juan Compras');
+    const nuevo = result.state.products.find((p) => p.id === 'p1');
+    expect(nuevo.stock).toBe(stockAntes - 3);
+  });
+
+  it('venta de mostrador sin teléfono no intenta Mi Cartera ni exige cliente', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+
+    const result = await store.createCounterSale({
+      items: [{ id: 'p1', name: p1.name, price: p1.price, quantity: 1 }],
+      total: p1.price
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.order.walletApplied).toBe(0);
+    expect(result.order.status).toBe('entregado');
+  });
+
+  it('venta de mostrador respeta el método de pago elegido y descuenta stock', async () => {
+    const store = await freshStore();
+    const state = await store.getState();
+    const p1 = state.products.find((p) => p.id === 'p1');
+    const stockAntes = p1.stock;
+
+    const result = await store.createCounterSale({
+      customerName: 'Mostrador',
+      items: [{ id: 'p1', name: p1.name, price: p1.price, quantity: 2 }],
+      total: p1.price * 2,
+      paymentMethod: 'pago_movil'
+    });
+    expect(result.order.paymentMethod).toBe('pago_movil');
+    expect(result.order.paymentStatus).toBe('confirmado');
+    expect(result.state.products.find((p) => p.id === 'p1').stock).toBe(stockAntes - 2);
+  });
+
+  it('venta de mostrador rechaza pedido sin productos', async () => {
+    const store = await freshStore();
+    const result = await store.createCounterSale({ items: [] });
+    expect(result.error).toContain('no tiene productos');
+  });
 });

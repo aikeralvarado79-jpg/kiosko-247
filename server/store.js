@@ -1828,7 +1828,7 @@ const pgStore = {
     });
   },
 
-  async createOrderAtomic(orderData) {
+  async createOrderAtomic(orderData, opts = {}) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -1865,8 +1865,11 @@ const pgStore = {
       // Se descuenta el monto de la cartera del balance y, si cubre todo el
       // pedido, queda confirmado sin comprobante. Si no, el resto se paga con
       // el método indicado (paymentMethod del payload).
-      let walletApplied = Number(orderData.walletApplied) || 0;
+      let walletApplied = opts.walletApplied != null ? opts.walletApplied : (Number(orderData.walletApplied) || 0);
       const key = normalizePhone(orderData.phone);
+      // Las ventas de mostrador son pagos confirmados al momento: no aplican
+      // cartera ni requieren teléfono.
+      const paymentMethod = opts.paymentMethod || orderData.paymentMethod || 'efectivo';
       if (walletApplied > 0) {
         if (!key || key.length < 7) {
           await client.query('ROLLBACK');
@@ -1882,24 +1885,25 @@ const pgStore = {
         walletApplied = Math.min(walletApplied, Number(orderData.total) || 0);
       }
 
+      const type = opts.type || orderData.type || 'pickup';
       const order = {
         id,
         customerName: orderData.customerName || 'Cliente',
         phone: orderData.phone || '',
-        type: orderData.type || 'pickup',
-        address: orderData.type === 'delivery' ? orderData.address : undefined,
+        type,
+        address: type === 'delivery' ? orderData.address : undefined,
         notes: orderData.notes || '',
         items: orderData.items,
         total: Number(orderData.total) || 0,
-        status: 'pendiente',
+        status: opts.status || 'pendiente',
         timestamp: orderData.timestamp || '',
         estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
         createdAt: orderData.createdAt || new Date().toISOString(),
         credit: Boolean(orderData.credit),
-        lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
-        lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
-        paymentMethod: orderData.paymentMethod || 'efectivo',
-        paymentStatus: orderData.paymentStatus || (orderData.paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
+        lat: type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
+        lng: type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
+        paymentMethod,
+        paymentStatus: opts.paymentStatus || orderData.paymentStatus || (paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
         paymentProof: orderData.paymentProof || null,
         paymentReference: orderData.paymentReference || null,
         walletApplied,
@@ -2385,13 +2389,13 @@ export const approvePayment = (id) => store.approvePayment(id);
 
 export const rejectPayment = (id, note) => store.rejectPayment(id, note);
 
-export const createOrder = async (orderData) => {
+export const createOrder = async (orderData, opts = {}) => {
   if (!orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {
     return { error: 'El pedido no tiene productos' };
   }
 
   if (pgPool) {
-    return pgStore.createOrderAtomic(orderData);
+    return pgStore.createOrderAtomic(orderData, opts);
   }
 
   const state = await store.getState();
@@ -2417,7 +2421,7 @@ export const createOrder = async (orderData) => {
 
   // Pago con "Mi Cartera": saldo a favor (balance < 0). Se descuenta del balance
   // y si cubre todo el pedido queda confirmado sin comprobante.
-  let walletApplied = Number(orderData.walletApplied) || 0;
+  let walletApplied = opts.walletApplied != null ? opts.walletApplied : (Number(orderData.walletApplied) || 0);
   const key = normalizePhone(orderData.phone);
   if (walletApplied > 0) {
     if (!key || key.length < 7) return { error: 'Teléfono inválido para usar Mi Cartera' };
@@ -2430,24 +2434,26 @@ export const createOrder = async (orderData) => {
     walletApplied = Math.min(walletApplied, Number(orderData.total) || 0);
   }
 
+  const type = opts.type || orderData.type || 'pickup';
+  const paymentMethod = opts.paymentMethod || orderData.paymentMethod || 'efectivo';
   const order = {
     id,
     customerName: orderData.customerName || 'Cliente',
     phone: orderData.phone || '',
-    type: orderData.type || 'pickup',
-    address: orderData.type === 'delivery' ? orderData.address : undefined,
+    type,
+    address: type === 'delivery' ? orderData.address : undefined,
     notes: orderData.notes || '',
     items: orderData.items,
     total: Number(orderData.total) || 0,
-    status: 'pendiente',
+    status: opts.status || 'pendiente',
     timestamp: orderData.timestamp || '',
     estimatedMinutes: Number(orderData.estimatedMinutes) || 10,
     createdAt: orderData.createdAt || new Date().toISOString(),
     credit: Boolean(orderData.credit),
-    lat: orderData.type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
-    lng: orderData.type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
-    paymentMethod: orderData.paymentMethod || 'efectivo',
-    paymentStatus: orderData.paymentStatus || (orderData.paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
+    lat: type === 'delivery' && orderData.lat != null ? Number(orderData.lat) : null,
+    lng: type === 'delivery' && orderData.lng != null ? Number(orderData.lng) : null,
+    paymentMethod,
+    paymentStatus: opts.paymentStatus || orderData.paymentStatus || (paymentMethod === 'efectivo' ? 'confirmado' : 'pendiente'),
     paymentProof: orderData.paymentProof || null,
     paymentReference: orderData.paymentReference || null,
     walletApplied,
@@ -2481,6 +2487,21 @@ export const createOrder = async (orderData) => {
   if (orderData.clientId) holds.delete(orderData.clientId);
   const newState = await store.getPublicState(orderData.clientId);
   return { state: newState, order };
+};
+
+// Venta en mostrador: el admin registra una venta física desde el panel. Se crea
+// como pedido tipo pickup ya entregado y pagado (alimenta Finanzas, descuenta
+// stock y queda en el historial). No usa cartera, no exige teléfono válido.
+export const createCounterSale = async (orderData, opts = {}) => {
+  const saleOpts = {
+    status: 'entregado',
+    type: 'pickup',
+    paymentStatus: 'confirmado',
+    paymentMethod: orderData.paymentMethod || 'efectivo',
+    walletApplied: 0,
+    ...opts
+  };
+  return createOrder({ ...orderData, paymentMethod: saleOpts.paymentMethod }, saleOpts);
 };
 
 export const createProduct = async (data) => {

@@ -1030,6 +1030,52 @@ app.get('/api/admin/products-cost', requireAdmin, async (req, res) => {
   }
 });
 
+// Datos de un producto por su código de barras (EAN/UPC) consultados a Open
+// Food Facts / Open Beauty Facts. Sirve para autocompletar el alta de productos
+// escaneando el código. Solo admin.
+app.get('/api/admin/product-info/:barcode', requireAdmin, async (req, res) => {
+  try {
+    const barcode = String(req.params.barcode || '').trim();
+    if (!/^[\d]{8,14}$/.test(barcode)) {
+      return res.status(400).json({ error: 'Código de barras inválido' });
+    }
+    const sources = [
+      { url: `https://world.openfoodfacts.org/api/v0/product/${barcode}.json`, name: 'Open Food Facts' },
+      { url: `https://world.openbeautyfacts.org/api/v0/product/${barcode}.json`, name: 'Open Beauty Facts' }
+    ];
+    for (const src of sources) {
+      try {
+        const upstream = await fetch(src.url, { headers: { 'User-Agent': 'kiosko-247/1.0 (admin product lookup)' } });
+        if (!upstream.ok) continue;
+        const data = await upstream.json();
+        if (!data || data.status !== 1 || !data.product) continue;
+        const p = data.product;
+        const image = p.image_url || p.image_front_url || p.image_front_small_url || null;
+        const brand = (p.brands || '').split(',').map((s) => s.trim()).filter(Boolean)[0] || null;
+        const category =
+          Array.isArray(p.categories_tags) && p.categories_tags.length > 0
+            ? p.categories_tags[0].replace(/^(en|es):/, '').replace(/-/g, ' ').trim()
+            : null;
+        return res.json({
+          found: true,
+          source: src.name,
+          name: p.product_name || p.generic_name || null,
+          brand,
+          description: p.quantity || p.generic_name || null,
+          image: image && /^https:\/\//.test(image) ? image : null,
+          category,
+          quantity: p.quantity || null
+        });
+      } catch (err) {
+        // si una fuente falla, probamos la siguiente
+      }
+    }
+    res.json({ found: false, source: null });
+  } catch (err) {
+    fail(res, err, 'No se pudo consultar la base de códigos de barras.');
+  }
+});
+
 // Admin
 app.post('/api/products', requireAdmin, async (req, res) => {
   try {

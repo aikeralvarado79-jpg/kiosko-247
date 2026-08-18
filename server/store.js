@@ -2256,6 +2256,8 @@ export const getPublicState = (clientId) => store.getPublicState(clientId);
 
 export const getProductById = (id) => store.getProductById(id);
 
+export const listProductCosts = () => store.listProductCosts();
+
 export const saveSettings = (settings) => store.saveSettings(settings);
 
 export const getSetting = (key) => store.getSetting(key);

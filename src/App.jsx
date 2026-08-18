@@ -16103,14 +16103,19 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
       setLookupInfo(info);
       setFormData((prev) => {
         const keepImage =
-          prev.image && prev.image !== DEFAULT_IMG && !prev.image.startsWith('/api/products/');
+          Boolean(productToEdit) ||
+          (prev.image && prev.image !== DEFAULT_IMG && !prev.image.startsWith('/api/products/'));
         return {
           ...prev,
           name: prev.name || info.name || prev.name,
           brand: prev.brand || info.brand || prev.brand,
           description: prev.description || info.description || prev.description,
           image: keepImage ? prev.image : info.image || prev.image,
-          category: categories.includes(info.category) ? info.category : prev.category
+          category: productToEdit
+            ? prev.category
+            : categories.includes(info.category)
+              ? info.category
+              : prev.category
         };
       });
     } catch {

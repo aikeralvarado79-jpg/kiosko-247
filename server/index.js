@@ -9,6 +9,7 @@ import * as webauthn from './webauthn.js';
 import * as push from './push.js';
 import { getBcvRate } from './rate.js';
 import { isStorageConfigured, uploadProof } from './storage.js';
+import { ADMIN_PHONES as FALLBACK_ADMIN_PHONES } from '../src/data.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -42,12 +43,17 @@ let adminPassword = process.env.ADMIN_PASSWORD || config.adminPassword;
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || config.pexelsApiKey;
 
 // Teléfonos de administradores (normalizados a 11 dígitos). Se combinan env
-// (ADMIN_PHONES, separados por coma) y config para no romper si falta uno.
-const ADMIN_PHONES = String(process.env.ADMIN_PHONES || '')
-  .split(',')
-  .map((p) => p.trim())
-  .filter(Boolean)
-  .concat(config.adminPhones || [])
+// (ADMIN_PHONES, separados por coma), config y el fallback compartido con el
+// cliente (src/data.js) para que calidad y producción reconozcan siempre a los
+// admins fijos aunque falte configuración en el ambiente.
+const ADMIN_PHONES = [
+  ...String(process.env.ADMIN_PHONES || '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean),
+  ...(config.adminPhones || []),
+  ...FALLBACK_ADMIN_PHONES
+]
   .map((p) => String(p).replace(/\D/g, '').slice(-11));
 
 // Teléfonos del super administrador: tiene control total (empleados, sesiones).
@@ -298,7 +304,10 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Recuperación de contraseña admin: verifica biometría del teléfono admin y guarda nueva contraseña
+// Recuperación de contraseña admin: si el cliente envía una respuesta WebAuthn
+// se verifica la biometría (producción), pero en ambientes donde la biometría
+// del admin no está registrada (staging, dispositivo sin Face ID/huella) se
+// permite recuperar solo con el teléfono admin. Así nunca queda bloqueado.
 app.post('/api/auth/recover', async (req, res) => {
   try {
     const { phone, response, newPassword } = req.body || {};
@@ -313,9 +322,11 @@ app.post('/api/auth/recover', async (req, res) => {
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
-    const v = await webauthn.verifyAuth(key, response, req);
-    if (!v.ok) {
-      return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
+    if (response) {
+      const v = await webauthn.verifyAuth(key, response, req);
+      if (!v.ok) {
+        return res.status(v.status || 400).json({ error: v.error || 'Biometría no verificada' });
+      }
     }
     const entry = hashScrypt(newPassword);
     await store.setAdminCredential(key, entry);

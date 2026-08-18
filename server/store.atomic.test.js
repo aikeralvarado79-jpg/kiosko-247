@@ -84,6 +84,22 @@ describe('mutaciones atómicas en Postgres', () => {
     expect(sqls.some((s) => s.includes('DELETE FROM orders WHERE id'))).toBe(false);
   });
 
+  it('updateOrderStatus a cancelado devuelve el stock de los items', async () => {
+    h.orderRow = { id: 'ORD-1', status: 'pendiente', phone: '04140000001', items: [{ id: 'p1', quantity: 2 }], total: 5, credit: false };
+    const store = await loadPgStore();
+    await store.updateOrderStatus('ORD-1', 'cancelado');
+    const sqls = h.calls;
+    expect(sqls.some((s) => s.includes('UPDATE products SET stock = stock + $1 WHERE id'))).toBe(true);
+  });
+
+  it('updateOrderStatus a cancelado no devuelve stock si ya estaba entregado', async () => {
+    h.orderRow = { id: 'ORD-1', status: 'entregado', phone: '04140000001', items: [{ id: 'p1', quantity: 2 }], total: 5, credit: false };
+    const store = await loadPgStore();
+    await store.updateOrderStatus('ORD-1', 'cancelado');
+    const sqls = h.calls;
+    expect(sqls.some((s) => s.includes('UPDATE products SET stock = stock + $1 WHERE id'))).toBe(false);
+  });
+
   it('al entregar un pedido a crédito, actualiza el balance del cliente con el teléfono normalizado', async () => {
     // El teléfono del pedido puede venir legible ("0412 1234567") pero la tabla
     // customers guarda el número normalizado ("04121234567"). El UPDATE debe

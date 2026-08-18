@@ -1977,6 +1977,16 @@ const pgStore = {
       const existing = rows[0];
       if (!existing) return { error: 'Pedido no encontrado' };
       await client.query(`UPDATE ${q('orders')} SET status = $2 WHERE id = $1`, [id, status]);
+      // Si el admin cancela el pedido, devolver el stock de sus artículos
+      // (misma lógica que atomicCancelOrder: sin doble restauración y sin
+      // restaurar pedidos ya listos o entregados).
+      const cancelledItems =
+        status === 'cancelado' && existing.status !== 'cancelado' && existing.status !== 'listo' && existing.status !== 'entregado'
+          ? existing.items || []
+          : [];
+      for (const it of cancelledItems) {
+        await client.query(`UPDATE ${q('products')} SET stock = stock + $1 WHERE id = $2`, [Number(it.quantity) || 0, it.id]);
+      }
       if (existing.credit && status === 'entregado') {
         // El teléfono del pedido puede venir con formato legible (espacios) mientras
         // que la tabla customers guarda el número normalizado; hay que normalizar
@@ -2002,9 +2012,18 @@ const pgStore = {
           }
         }
       }
-      return { ok: true };
+      return { ok: true, cancelledItems };
     });
     if (result.error) return result;
+    // Limpiar holds de los items restaurados (stock devuelto, reservas previas inválidas)
+    if (result.cancelledItems && result.cancelledItems.length > 0) {
+      for (const it of result.cancelledItems) {
+        for (const [clientId, items] of holds) {
+          if (items.has(it.id)) items.delete(it.id);
+          if (items.size === 0) holds.delete(clientId);
+        }
+      }
+    }
     return { state: await this.getPublicState() };
   },
 
@@ -2509,11 +2528,36 @@ export const updateOrderStatus = async (id, status) => {
   if (!existing) return { error: 'Pedido no encontrado' };
 
   const orders = state.orders.map((o) => (o.id === id ? { ...o, status } : o));
+
+  // Si el admin cancela el pedido, devolver el stock de sus artículos (misma
+  // lógica que cancelOrder: sin doble restauración y sin restaurar pedidos ya
+  // listos o entregados).
+  const itemsToRestore =
+    status === 'cancelado' && existing.status !== 'cancelado' && existing.status !== 'listo' && existing.status !== 'entregado'
+      ? existing.items || []
+      : [];
+  if (itemsToRestore.length > 0) {
+    const products = state.products.map((p) => {
+      const it = itemsToRestore.find((x) => x.id === p.id);
+      return it ? { ...p, stock: Number(p.stock) + Number(it.quantity) } : p;
+    });
+    await store.saveProducts(products);
+  }
   await store.saveOrders(orders);
 
   // Los pedidos a crédito se suman a la cuenta del cliente cuando se entregan.
   if (existing.credit && status === 'entregado') {
     await store.addOrderToAccount(existing);
+  }
+
+  // Limpiar holds de los items restaurados (stock devuelto, reservas previas inválidas)
+  if (itemsToRestore.length > 0) {
+    for (const it of itemsToRestore) {
+      for (const [clientId, items] of holds) {
+        if (items.has(it.id)) items.delete(it.id);
+        if (items.size === 0) holds.delete(clientId);
+      }
+    }
   }
 
   const newState = await store.getPublicState();

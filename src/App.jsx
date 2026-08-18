@@ -3410,6 +3410,7 @@ onEditProduct={(product) => {
         <ProductFormModal
           productToEdit={productToEdit}
           categories={categories}
+          products={products}
           onClose={() => setIsAddEditModalOpen(false)}
           onSave={handleSaveProduct}
         />
@@ -15434,7 +15435,146 @@ function CreditLimitInput({ customer, onSetCreditLimit }) {
   );
 }
 
-function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
+// Escáner de código de barras para el formulario de productos. Usa la API
+// nativa BarcodeDetector (Chrome/Edge, escritorio y Android) con cámara trasera;
+// si no está disponible permite ingresar el código manualmente dentro del modal.
+function BarcodeScannerModal({ onScan, onClose }) {
+  useOverlay(true, onClose);
+  const videoRef = useRef(null);
+  const [supported] = useState(() => typeof window !== 'undefined' && 'BarcodeDetector' in window);
+  const [cameraError, setCameraError] = useState('');
+  const [manual, setManual] = useState('');
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => {
+    if (!supported) return undefined;
+    let stream = null;
+    let raf = 0;
+    let detector = null;
+    let cancelled = false;
+    let last = 0;
+
+    const stop = () => {
+      if (cancelled) return;
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+
+    const step = () => {
+      if (cancelled) return;
+      const v = videoRef.current;
+      const now = performance.now();
+      if (v && v.readyState >= 2 && now - last > 150) {
+        last = now;
+        detector
+          .detect(v)
+          .then((codes) => {
+            if (cancelled || !codes || codes.length === 0 || !codes[0].rawValue) return;
+            const value = String(codes[0].rawValue).trim();
+            if (!value) return;
+            setFlash(true);
+            stop();
+            onScan(value);
+          })
+          .catch(() => {});
+      }
+      raf = requestAnimationFrame(step);
+    };
+
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        if (cancelled || !videoRef.current) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        try {
+          detector = new window.BarcodeDetector({
+            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'codabar', 'itf', 'qr_code']
+          });
+        } catch {
+          detector = new window.BarcodeDetector();
+        }
+        raf = requestAnimationFrame(step);
+      } catch (err) {
+        const denied = err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError');
+        setCameraError(denied ? 'Permiso de cámara denegado. Ingresá el código manualmente.' : 'No se pudo abrir la cámara. Ingresá el código manualmente.');
+      }
+    })();
+
+    return stop;
+  }, [onScan, supported]);
+
+  const applyManualCode = () => {
+    const v = manual.trim();
+    if (v) onScan(v);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-screen-up">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          <h3 className="font-bold text-white text-sm flex items-center gap-2">
+            <Icon name="camera" className="w-4 h-4 text-teal-400" />
+            Escanear código de barras
+          </h3>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+            <Icon name="x" className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {supported && !cameraError ? (
+            <div className="relative overflow-hidden rounded-2xl bg-black aspect-video">
+              <video ref={videoRef} playsInline muted className="absolute inset-0 w-full h-full object-cover" />
+              <div className={`absolute inset-0 pointer-events-none transition-all duration-150 ${flash ? 'bg-teal-400/30' : 'bg-transparent'}`} />
+              <div className="absolute pointer-events-none" style={{ inset: '18% 12%', border: '2px solid rgba(45,212,191,0.8)', borderRadius: '16px', boxShadow: '0 0 0 9999px rgba(0,0,0,0.28)' }} />
+              <p className="absolute bottom-3 left-0 right-0 text-center text-[11px] text-teal-300 font-semibold">
+                Apuntá al código de barras del producto
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-slate-800/60 border border-slate-700 p-4 text-center">
+              <Icon name="camera" className="w-8 h-8 mx-auto text-slate-500" />
+              <p className="text-xs text-slate-300 mt-2 font-semibold">
+                {cameraError || 'Tu navegador no soporta escaneo por cámara. Ingresá el código manualmente.'}
+              </p>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              autoFocus={!supported}
+              value={manual}
+              onChange={(e) => setManual(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && applyManualCode()}
+              placeholder="Escribí el código manualmente (ej: 7790070035394)"
+              className="flex-1 min-w-0 px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm placeholder-slate-500 focus:border-teal-500 focus:outline-none"
+            />
+            <button
+              onClick={applyManualCode}
+              disabled={!manual.trim()}
+              className="shrink-0 px-4 py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-40 disabled:pointer-events-none transition-all active:scale-95"
+            >
+              Usar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProductFormModal({ productToEdit, categories, products = [], onClose, onSave }) {
   useOverlay(true, onClose);
   const [formData, setFormData] = useState({
     id: productToEdit?.id || '',
@@ -15452,6 +15592,13 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
   });
 
   const [newCatInput, setNewCatInput] = useState('');
+  const [scannerOpen, setScannerOpen] = useState(false);
+
+  // Si otro producto (distinto id) ya usa ese código de barras, se avisa en el
+  // formulario y se bloquea el guardado para no duplicar códigos.
+  const codeConflict =
+    String(formData.code || '').trim().length > 0 &&
+    (products || []).some((p) => p.id !== formData.id && String(p.code || '').trim() === String(formData.code).trim());
 
   const sizeType = ['ml', 'L'].includes(formData.sizeUnit) ? 'liquid' : 'solid';
   const sizeUnits = sizeType === 'liquid' ? ['ml', 'L'] : ['g', 'kg'];
@@ -15587,6 +15734,7 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.name || !formData.price || formData.stock === '') return;
+    if (codeConflict) return;
 
     onSave({
       ...formData,
@@ -15623,6 +15771,37 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
               placeholder="Ej: Chocolate Semi Amargo"
               className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Código de barras (EAN/UPC)</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={formData.code}
+                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                placeholder="Ej: 7790070035394"
+                className="flex-1 min-w-0 px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setScannerOpen(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 font-bold text-xs hover:bg-teal-500/25 transition-all active:scale-95"
+              >
+                <Icon name="camera" className="w-4 h-4" />
+                Escanear
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              {formData.code ? 'Este código reemplaza al generado automáticamente.' : 'Si no lo cargás, se genera uno automático (PROD-XXX).'}
+            </p>
+            {codeConflict && (
+              <p className="text-[10px] text-rose-400 font-semibold mt-1 flex items-center gap-1">
+                <Icon name="alertTriangle" className="w-3 h-3" />
+                Ya existe otro producto con ese código. Usá uno distinto.
+              </p>
+            )}
           </div>
 
           <div>
@@ -15900,6 +16079,15 @@ function ProductFormModal({ productToEdit, categories, onClose, onSave }) {
           </button>
         </form>
       </div>
+      {scannerOpen && (
+        <BarcodeScannerModal
+          onScan={(code) => {
+            setFormData((prev) => ({ ...prev, code }));
+            setScannerOpen(false);
+          }}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
     </div>
   );
 }

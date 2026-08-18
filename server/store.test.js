@@ -448,10 +448,10 @@ describe('fileStore', () => {
   it('las reservas expiran tras su TTL y el stock vuelve a estar disponible', async () => {
     const store = await freshStore();
 
-    await store.holdStock('cliente-a', [{ id: 'p1', qty: 3 }], 50); // TTL 50 ms
+    await store.holdStock('cliente-a', [{ id: 'p1', qty: 3 }], 500); // TTL 500 ms
     expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(3);
 
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 1100));
 
     // getState purga las reservas vencidas.
     expect((await store.getState('cliente-b')).products.find((p) => p.id === 'p1').reserved).toBe(0);

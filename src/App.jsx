@@ -6624,7 +6624,7 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="flex items-center justify-between px-4 py-3 shrink-0">
+          <div className="pt-[max(0.75rem,env(safe-area-inset-top))] flex items-center justify-between px-4 py-3 shrink-0">
             <div className="flex items-center gap-2">
               {hasSameBrand && (
                 <>
@@ -6907,7 +6907,7 @@ function IdentityModal({ knownCustomers, allCustomers, savedCustomer, onConfirm,
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] overflow-y-auto">
         {/* Header */}
-        <div className="relative p-5 sm:p-7 border-b border-slate-800 text-center">
+        <div className="relative pt-[max(1.25rem,env(safe-area-inset-top))] p-5 sm:p-7 border-b border-slate-800 text-center">
           {(savedCustomer?.customerName || panel === 'confirm') && (
             <button
               type="button"
@@ -7214,7 +7214,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
 
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
         {/* Drawer Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
+        <div className="pt-[max(1rem,env(safe-area-inset-top))] p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
             <span className="p-2 rounded-xl bg-teal-500/20 text-teal-400">
               <Icon name="shoppingBag" className="w-5 h-5" />
@@ -7408,7 +7408,7 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
 
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
         {/* Drawer Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
+        <div className="pt-[max(1rem,env(safe-area-inset-top))] p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
             <span className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400">
               <Icon name="package" className="w-5 h-5" />
@@ -8286,7 +8286,7 @@ function MapPickerModal({ title, initial, onPick, onClose }) {
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col overflow-hidden animate-modal-spring">
-        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+        <div className="pt-[max(1rem,env(safe-area-inset-top))] p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
               <Icon name="mapPin" className="w-5 h-5 text-teal-400" />
@@ -12268,7 +12268,7 @@ function AdminView({
           {/* Promo Editor Modal */}
           {isPromoModalOpen && promoDraft && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm">
-              <div className="w-full sm:max-w-md p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl glass-strong bg-slate-900 border border-slate-700 shadow-2xl animate-screen-up space-y-4 max-h-[92vh] overflow-y-auto">
+              <div className="w-full sm:max-w-md pt-[max(1.25rem,env(safe-area-inset-top))] p-5 sm:p-6 rounded-t-3xl sm:rounded-3xl glass-strong bg-slate-900 border border-slate-700 shadow-2xl animate-screen-up space-y-4 max-h-[92vh] overflow-y-auto">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-white text-lg">{promoDraft.id.startsWith('promo-') ? 'Nueva Promo' : 'Editar Promo'}</h4>
                   <button onClick={() => setIsPromoModalOpen(false)} className="text-slate-400 hover:text-white">
@@ -13262,7 +13262,7 @@ function AdminProfilePanel({ phone, role, profile, onClose, onChangePassword, on
 
   return (
     <>
-      <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+      <div className="pt-[max(1rem,env(safe-area-inset-top))] p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
               <Icon name="user" className="w-5 h-5 text-teal-400" />
@@ -16341,7 +16341,7 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
       <div className="absolute inset-0" onClick={onClose} />
 
       <div className="relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-[92vh] flex flex-col">
-        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+        <div className="pt-[max(1rem,env(safe-area-inset-top))] p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <h2 className="text-lg sm:text-xl font-bold text-white">
             {productToEdit ? 'Editar Producto' : 'Crear Nuevo Producto'}
           </h2>
@@ -17643,7 +17643,7 @@ function ShareCartModal({ share, onClose, onCopy, onWhatsApp, onCloseShare, prod
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-modal-spring max-h-[92vh] flex flex-col">
+      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl pt-[max(1.25rem,env(safe-area-inset-top))] p-5 sm:p-6 shadow-2xl z-10 space-y-4 animate-modal-spring max-h-[92vh] flex flex-col">
         <div className="flex items-center gap-3">
           <span className="p-2.5 rounded-2xl bg-indigo-500/20 text-indigo-400 shrink-0">
             <Icon name="users" className="w-5 h-5" />

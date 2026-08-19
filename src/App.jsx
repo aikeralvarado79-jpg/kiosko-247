@@ -2715,23 +2715,6 @@ export default function App() {
     loadProductCosts();
   };
 
-  const handleReceiveStock = async (product, qty) => {
-    const addQty = Math.round(Number(qty) || 0);
-    if (addQty <= 0) return false;
-    const res = await api.updateProduct(product.id, {
-      stock: (Number(product.stock) || 0) + addQty
-    });
-    if (!res.ok) {
-      addToast(res.data.error || 'No se pudo actualizar el stock', 'error');
-      return false;
-    }
-    setProducts(res.data.state.products || []);
-    setCategories(res.data.state.categories || []);
-    loadProductCosts();
-    addToast(`Stock recibido: ${product.name} (+${addQty})`, 'success');
-    return true;
-  };
-
   // Venta en mostrador: el admin registra una venta física desde el panel
   // ("Ventas"). Se crea un pedido tipo pickup ya entregado y pagado, así se
   // contabiliza en Finanzas, descuenta stock y queda en el historial.
@@ -3280,7 +3263,6 @@ onEditProduct={(product) => {
         setIsAddEditModalOpen(true);
       }}
             onDeleteProduct={(product) => setDeleteConfirmProduct(product)}
-            onReceiveStock={handleReceiveStock}
             onCounterSale={handleCounterSale}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onUpdateOrderPayment={handleUpdateOrderPayment}
@@ -9450,7 +9432,6 @@ function AdminView({
   onOpenAddModal,
   onEditProduct,
   onDeleteProduct,
-  onReceiveStock,
   onCounterSale,
   onUpdateOrderStatus,
   onUpdateOrderPayment,
@@ -9503,7 +9484,6 @@ function AdminView({
   const [initialOrderPrefs] = useState(loadOrderPrefs);
   const [confirmRefresh, setConfirmRefresh] = useState(false);
   const [confirmCancelOrder, setConfirmCancelOrder] = useState(null);
-  const [receiveStockOpen, setReceiveStockOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState(initialOrderPrefs.statusFilter);
   const [ordersView, setOrdersView] = useState(initialOrderPrefs.ordersView); // lista | despacho | entregas | historial
   const [productFilter, setProductFilter] = useState(initialOrderPrefs.productFilter);
@@ -10920,14 +10900,7 @@ function AdminView({
           />
         )}
 
-        {receiveStockOpen && (
-          <ReceiveStockModal
-            products={products}
-            onReceiveStock={onReceiveStock}
-            onClose={() => setReceiveStockOpen(false)}
-          />
-        )}
-      </div>
+        </div>
 
       {/* Analytics Summary Bar */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
@@ -11182,14 +11155,6 @@ function AdminView({
                 >
                   <Icon name={invView === 'recorrido' ? 'list' : 'store'} className="w-4 h-4 shrink-0" />
                   <span>{invView === 'recorrido' ? 'Ver lista' : 'Recorrido'}</span>
-                </button>
-                <button
-                  onClick={() => setReceiveStockOpen(true)}
-                  className="shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25 shadow-lg shadow-emerald-500/10"
-                  title="Escanear productos y sumar stock al recibir mercadería"
-                >
-                  <Icon name="scan" className="w-4 h-4 shrink-0" />
-                  <span>Recibir</span>
                 </button>
               </div>
             </div>
@@ -16680,151 +16645,6 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
           }}
           onClose={() => setScannerOpen(false)}
         />
-      )}
-    </div>
-  );
-}
-
-// Recibir mercadería: escanear (o tipear) el código de barras de un producto,
-// ver su stock actual y sumar las unidades recibidas de una. Reutiliza el
-// BarcodeScannerModal como overlay superior.
-function ReceiveStockModal({ products = [], onReceiveStock, onClose }) {
-  useOverlay(true, onClose);
-  const [scannerOpen, setScannerOpen] = useState(true);
-  const [found, setFound] = useState(null);
-  const [qty, setQty] = useState('');
-  const [msg, setMsg] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const handleCode = (code) => {
-    const p = (products || []).find((x) => String(x.code || '').trim() === String(code).trim());
-    if (!p) {
-      setMsg(`No hay ningún producto con el código ${code}.`);
-      setScannerOpen(false);
-      return;
-    }
-    setMsg('');
-    setFound(p);
-    setQty('');
-    setScannerOpen(false);
-  };
-
-  const confirmReceiving = async () => {
-    const n = Number(qty);
-    if (!n || n <= 0) {
-      setMsg('Ingresá una cantidad mayor a 0.');
-      return;
-    }
-    if (!found) return;
-    setSaving(true);
-    const ok = await onReceiveStock(found, n);
-    setSaving(false);
-    if (ok) {
-      setFound(null);
-      setQty('');
-      setMsg('');
-      setScannerOpen(true);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-screen-up max-h-[92vh] flex flex-col">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
-          <h3 className="font-bold text-white text-sm flex items-center gap-2">
-            <Icon name="package" className="w-4 h-4 text-teal-400" />
-            Recibir mercadería
-          </h3>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
-            <Icon name="x" className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
-          {!found && (
-            <div className="rounded-2xl bg-slate-800/60 border border-slate-700 p-4 text-center space-y-2">
-              <Icon name="scan" className="w-8 h-8 mx-auto text-teal-400" />
-              <p className="text-xs text-slate-300 font-semibold">
-                Escaneá el código de barras del producto que llegó
-              </p>
-              <p className="text-[11px] text-slate-500">También podés tipearlo en el escáner.</p>
-              {!scannerOpen && (
-                <button
-                  onClick={() => setScannerOpen(true)}
-                  className="w-full py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 font-bold text-xs hover:bg-teal-500/25 transition-all"
-                >
-                  Reintentar lectura
-                </button>
-              )}
-            </div>
-          )}
-
-          {msg && !found && (
-            <p className="text-[12px] text-rose-400 font-semibold flex items-center gap-1">
-              <Icon name="alertTriangle" className="w-3.5 h-3.5" />
-              {msg}
-            </p>
-          )}
-
-          {found && (
-            <>
-              <div className="flex items-center gap-3 rounded-2xl bg-slate-800/80 border border-slate-700 p-3">
-                <ProductImg product={found} alt={found.name} className="w-14 h-14 rounded-xl object-cover bg-slate-900 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-bold text-white text-sm truncate">{found.name}</h4>
-                  <p className="text-[11px] text-slate-400">Código: {found.code}</p>
-                  <p className="text-[11px] text-slate-300 mt-0.5">
-                    Stock actual: <span className="text-teal-300 font-bold">{found.stock}</span>
-                    {found.price ? <> · {formatUsd(found.price)}</> : null}
-                  </p>
-                </div>
-                <button
-                  onClick={() => { setFound(null); setScannerOpen(true); setMsg(''); }}
-                  className="shrink-0 text-[11px] font-semibold text-slate-400 hover:text-white"
-                >
-                  Cambiar
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Cantidad recibida</label>
-                <input
-                  type="number"
-                  min="1"
-                  autoFocus
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && confirmReceiving()}
-                  placeholder="Ej: 12"
-                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:border-teal-500 focus:outline-none"
-                />
-                <p className="text-[11px] text-teal-300 font-semibold mt-1">
-                  Quedaría en {Number(found.stock) + (Number(qty) || 0)} unidades
-                </p>
-              </div>
-
-              {msg && (
-                <p className="text-[12px] text-rose-400 font-semibold flex items-center gap-1">
-                  <Icon name="alertTriangle" className="w-3.5 h-3.5" />
-                  {msg}
-                </p>
-              )}
-
-              <button
-                onClick={confirmReceiving}
-                disabled={saving || !qty}
-                className="w-full py-3 rounded-2xl bg-teal-500 text-slate-950 font-bold text-xs hover:bg-teal-400 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-teal-500/20"
-              >
-                <Icon name={saving ? 'clock' : 'download'} className="w-4 h-4" />
-                {saving ? 'Guardando…' : 'Recibir stock'}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-      {scannerOpen && (
-        <BarcodeScannerModal onScan={handleCode} onClose={() => setScannerOpen(false)} />
       )}
     </div>
   );

@@ -1447,6 +1447,21 @@ const pgStore = {
     await this.setSetting('managedAdmins', Array.isArray(list) ? list : []);
   },
 
+  // Perfil del administrador (JSON en settings, equivalente a fileStore).
+  async getAdminProfile(phone) {
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const v = await this.getSetting('adminProfiles');
+    const profiles = v && typeof v === 'object' ? v : {};
+    return profiles[key] || null;
+  },
+
+  async setAdminProfile(phone, profile) {
+    const key = String(phone || '').replace(/\D/g, '').slice(-11);
+    const v = await this.getSetting('adminProfiles');
+    const profiles = v && typeof v === 'object' ? v : {};
+    await this.setSetting('adminProfiles', { ...profiles, [key]: { ...(profiles[key] || {}), ...profile } });
+  },
+
   async listAdminSessions() {
     const v = await this.getSetting('adminSessions');
     const sessions = v && typeof v === 'object' ? v : {};

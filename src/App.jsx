@@ -15533,6 +15533,20 @@ function BarcodeScannerModal({ onScan, onClose, keepOpen = false, overlay = null
   const [manual, setManual] = useState('');
   const [flash, setFlash] = useState(false);
 
+  // Watchdog de cámara: dispara UNA vez al montar el modal y, si el video no
+  // arrancó en 5s (p. ej. getUserMedia colgado en iOS/PWA tras aceptar el
+  // permiso), deriva al ingreso manual en vez de dejar la app congelada.
+  // Vive en un effect propio para no reiniciarse con cada re-render del padre.
+  const cameraReadyRef = useRef(false);
+  const watchdogRef = useRef(0);
+  useEffect(() => {
+    watchdogRef.current = setTimeout(() => {
+      if (cameraReadyRef.current) return;
+      setCameraError('No se pudo abrir la cámara en este dispositivo. Ingresá el código manualmente.');
+    }, 5000);
+    return () => clearTimeout(watchdogRef.current);
+  }, []);
+
   useEffect(() => {
     let stream = null;
     let raf = 0;
@@ -15546,16 +15560,26 @@ function BarcodeScannerModal({ onScan, onClose, keepOpen = false, overlay = null
         ? null
         : new BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 150 });
 
+    const markStreamReady = () => {
+      cameraReadyRef.current = true;
+      clearTimeout(watchdogRef.current);
+    };
+
     const stop = () => {
       if (cancelled) return;
       cancelled = true;
       cancelAnimationFrame(raf);
       clearTimeout(flashTimer);
+      const videoEl = videoRef.current;
+      if (videoEl) videoEl.removeEventListener('playing', markStreamReady);
       if (zxControls && typeof zxControls.stop === 'function') {
         try { zxControls.stop(); } catch {}
       }
       if (stream) stream.getTracks().forEach((t) => t.stop());
     };
+
+    const videoEl = videoRef.current;
+    if (videoEl) videoEl.addEventListener('playing', markStreamReady);
 
     const handleResult = (value) => {
       if (cancelled) return;
@@ -15618,6 +15642,7 @@ function BarcodeScannerModal({ onScan, onClose, keepOpen = false, overlay = null
         }
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
+        markStreamReady();
 
         let detector;
         try {

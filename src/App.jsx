@@ -10940,37 +10940,36 @@ function AdminView({
             <span className="hidden sm:inline">Salir</span>
           </button>
         </div>
+</div>
 
-        {confirmRefresh && (
-          <ConfirmActionModal
-            title="¿Reemplazar los datos de calidad?"
-            message="Se copiará una muestra de producción sobre esta base. Todo lo que cambió en calidad se perderá."
-            note="Esta acción no se puede deshacer."
-            confirmLabel="Reemplazar"
-            onConfirm={() => {
-              setConfirmRefresh(false);
-              onRefreshDb();
-            }}
-            onClose={() => setConfirmRefresh(false)}
-          />
-        )}
+      {confirmRefresh && (
+        <ConfirmActionModal
+          title="¿Reemplazar los datos de calidad?"
+          message="Se copiará una muestra de producción sobre esta base. Todo lo que cambió en calidad se perderá."
+          note="Esta acción no se puede deshacer."
+          confirmLabel="Reemplazar"
+          onConfirm={() => {
+            setConfirmRefresh(false);
+            onRefreshDb();
+          }}
+          onClose={() => setConfirmRefresh(false)}
+        />
+      )}
 
-        {confirmCancelOrder && (
-          <ConfirmActionModal
-            title="¿Cancelar este pedido?"
-            message="El pedido se marcará como cancelado, se devolverá el stock de sus artículos y el cliente quedará notificado."
-            note="Esta acción no se puede deshacer."
-            confirmLabel="Cancelar pedido"
-            onConfirm={() => {
-              const o = confirmCancelOrder;
-              setConfirmCancelOrder(null);
-              onUpdateOrderStatus(o.id, 'cancelado');
-            }}
-            onClose={() => setConfirmCancelOrder(null)}
-          />
-        )}
-
-        </div>
+      {confirmCancelOrder && (
+        <ConfirmActionModal
+          title="¿Cancelar este pedido?"
+          message="El pedido se marcará como cancelado, se devolverá el stock de sus artículos y el cliente quedará notificado."
+          note="Esta acción no se puede deshacer."
+          confirmLabel="Cancelar pedido"
+          onConfirm={() => {
+            const o = confirmCancelOrder;
+            setConfirmCancelOrder(null);
+            onUpdateOrderStatus(o.id, 'cancelado');
+          }}
+          onClose={() => setConfirmCancelOrder(null)}
+        />
+      )}
 
       {/* Analytics Summary Bar */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
@@ -13051,8 +13050,8 @@ function AdminView({
           aria-label={`Ficha del pedido ${fichaOrder.id}`}
         >
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={closeFicha} />
-          <div className="relative h-full flex items-center justify-center p-3 sm:p-6 pointer-events-none">
-            <div className="pointer-events-auto relative w-full max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring flex flex-col max-h-full">
+          <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
+            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring flex flex-col max-h-full">
               <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">
                 <div>
                   <h3 className="font-black text-white text-sm flex items-center gap-2">
@@ -13069,7 +13068,7 @@ function AdminView({
                   <Icon name="x" className="w-4 h-4" />
                 </button>
               </div>
-              <div className="p-4 sm:p-5 overflow-y-auto flex-1 min-h-0">
+              <div className="p-4 sm:p-5 overflow-y-auto flex-1 min-h-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-6">
                 <OrderStepsTimeline order={fichaOrder} />
                 <div className="mt-4">
                   {renderOrderCard(fichaOrder, { inFicha: true })}
@@ -16726,7 +16725,7 @@ function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', 
   useOverlay(true, onClose);
   const danger = tone === 'danger';
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${danger ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
@@ -16801,7 +16800,7 @@ function DeleteConfirmModal({ product, onClose, onConfirm }) {
 function DeleteOrderModal({ order, onClose, onConfirm }) {
   useOverlay(true, onClose);
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">

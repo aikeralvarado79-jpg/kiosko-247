@@ -77,6 +77,19 @@ describe('pgStore: admins gestionados y sesiones (regresion PR #144)', () => {
     expect(await store.listRevokedAdminPhones()).toEqual([]);
   });
 
+  it('guarda y lee el perfil del admin (regresion PR #200: admin/profile 500 en Postgres)', async () => {
+    expect(await store.getAdminProfile('04242963490')).toBeNull();
+    await store.setAdminProfile('04242963490', { name: 'Kiosko', photo: 'data:image/png;base64,xxx' });
+    const profile = await store.getAdminProfile('04242963490');
+    expect(profile).not.toBeNull();
+    expect(profile.name).toBe('Kiosko');
+    expect(profile.photo).toBe('data:image/png;base64,xxx');
+    // Sobrescribe parcialmente sin perder campos previos.
+    await store.setAdminProfile('04242963490', { name: 'Kiosko 247' });
+    expect((await store.getAdminProfile('04242963490')).name).toBe('Kiosko 247');
+    expect((await store.getAdminProfile('04242963490')).photo).toBe('data:image/png;base64,xxx');
+  });
+
   it('inhabilita y elimina usuarios (lista de usuarios en el sistema)', async () => {
     const disabled = await store.setCustomerDisabled('04125557777', true);
     expect(disabled).not.toBeNull();

@@ -9715,6 +9715,14 @@ function AdminView({
   const closeFicha = () => {
     setFichaOrder(null);
   };
+
+  // Mientras la ficha está abierta se bloquea el scroll de la página: solo se
+  // desplaza el contenedor interno de la ficha.
+  useEffect(() => {
+    if (!fichaOrder) return undefined;
+    lockBodyScroll();
+    return () => unlockBodyScroll();
+  }, [fichaOrder]);
   const [broadcastTitle, setBroadcastTitle] = useState('');
   const [broadcastBody, setBroadcastBody] = useState('');
   const [reminderPhone, setReminderPhone] = useState('');
@@ -13068,7 +13076,7 @@ function AdminView({
                   <Icon name="x" className="w-4 h-4" />
                 </button>
               </div>
-              <div className="p-4 sm:p-5 overflow-y-auto flex-1 min-h-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-6">
+              <div className="px-4 sm:px-5 pt-2 sm:pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-6 overflow-y-auto flex-1 min-h-0">
                 <OrderStepsTimeline order={fichaOrder} />
                 <div className="mt-4">
                   {renderOrderCard(fichaOrder, { inFicha: true })}
@@ -16725,7 +16733,7 @@ function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', 
   useOverlay(true, onClose);
   const danger = tone === 'danger';
   return (
-    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center pb-[calc(5rem+env(safe-area-inset-bottom))] sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${danger ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>

@@ -156,6 +156,9 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
       barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
       star: <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />,
       wallet: <path d="M21 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2M21 12h-5a2 2 0 0 0 0 4h5a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1z" />,
+      cash: <><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 12h.01M18 12h.01" /></>,
+      bank: <path d="M3 21h18M2 9l10-6 10 6H2zM6 18v-7M10 18v-7M14 18v-7M18 18v-7M12 3v3" />,
+      smartphone: <><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M12 18h.01" /></>,
       type: <path d="M4 7V4h16v3M9 20h6M12 4v16" />,
       contrast: <><circle cx="12" cy="12" r="9" /><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor" stroke="none" /></>,
       scan: <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />,
@@ -8813,7 +8816,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
         <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
         {/* Header */}
-        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+        <div className="pt-[max(1rem,env(safe-area-inset-top))] p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-white">Finalizar Pedido</h2>
             {holdLeft > 0 && (
@@ -8835,7 +8838,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1 min-h-0">
+        <form onSubmit={handleSubmit} className="px-4 sm:px-6 pt-4 sm:pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4 sm:space-y-5 overflow-y-auto flex-1 min-h-0">
           {/* Order Method Selector */}
           <div className="grid grid-cols-2 gap-2 sm:gap-3 p-1 sm:p-1.5 rounded-2xl bg-slate-800 border border-slate-700">
             <button
@@ -9056,10 +9059,41 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
           </div>
 
           {/* Mini Summary Box */}
-          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
             <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Resumen del Pedido</span>
-            <div className="text-xs text-slate-300 flex justify-between">
-              <span>Productos ({cart.length})</span>
+
+            {/* Productos solicitados */}
+            <div className="space-y-2 pt-0.5">
+              {cart.map((item) => (
+                <div key={item.product.id} className="flex items-center gap-2.5">
+                  <ProductImg
+                    product={item.product}
+                    alt={item.product.name}
+                    className="w-9 h-9 rounded-lg object-cover bg-slate-900 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-slate-200 truncate">{item.product.name}</p>
+                    <p className="text-[10px] text-slate-500">
+                      {formatUsd(item.product.price)} c/u
+                      {rate?.rate > 0 && (
+                        <span className="block text-[9px] text-slate-600">
+                          {formatBs(usdToBs(item.product.price, rate.rate))} c/u
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-300 bg-slate-800 border border-slate-700 rounded-full px-2 py-0.5 shrink-0">
+                    ×{item.quantity}
+                  </span>
+                  <span className="text-xs font-bold text-white w-14 sm:w-16 text-right shrink-0">
+                    {formatUsd(item.product.price * item.quantity)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="text-xs text-slate-300 flex justify-between border-t border-slate-800 pt-2">
+              <span>Subtotal ({cart.reduce((acc, i) => acc + i.quantity, 0)} artículos)</span>
               <span className="font-bold text-white text-right">
                 {formatUsd(cartTotal)}
                 {rate?.rate > 0 && (
@@ -9127,36 +9161,58 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
           {!formData.credit && (
             <div className="space-y-2.5">
               <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Método de pago</span>
-              <div className={`grid gap-2 ${walletAvailable > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+              <div className={`grid gap-2 sm:gap-2.5 ${walletAvailable > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
                 {[
-                  { key: 'efectivo', label: 'Efectivo', icon: 'dollarSign' },
-                  { key: 'pago_movil', label: 'Pago Móvil', icon: 'zap' },
-                  { key: 'transferencia', label: 'Transferencia', icon: 'creditCard' },
+                  { key: 'efectivo', label: 'Efectivo', icon: 'cash', desc: 'Pago en tienda' },
+                  { key: 'pago_movil', label: 'Pago Móvil', icon: 'smartphone', desc: 'Pega y paga' },
+                  { key: 'transferencia', label: 'Transferencia', icon: 'bank', desc: 'Cuenta bancaria' },
                   ...(walletAvailable > 0
-                    ? [{ key: 'cartera', label: 'Mi Cartera', icon: 'wallet', sub: formatUsd(walletAvailable) }]
+                    ? [{ key: 'cartera', label: 'Mi Cartera', icon: 'wallet', sub: formatUsd(walletAvailable), desc: 'Saldo a favor' }]
                     : [])
-                ].map((m) => (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() =>
-                      setFormData({
-                        ...formData,
-                        paymentMethod: formData.paymentMethod === m.key ? '' : m.key,
-                        restPaymentMethod: m.key === 'cartera' ? formData.restPaymentMethod : ''
-                      })
-                    }
-                    className={`px-2 py-3 rounded-xl border text-[11px] sm:text-xs font-bold flex flex-col items-center gap-1.5 transition-all ${
-                      formData.paymentMethod === m.key
-                        ? 'bg-teal-500/15 border-teal-500/50 text-teal-300'
-                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-teal-500/40'
-                    }`}
-                  >
-                    <Icon name={m.icon} className="w-4 h-4" />
-                    {m.label}
-                    {m.sub && <span className="text-[9px] text-emerald-400 font-bold">{m.sub}</span>}
-                  </button>
-                ))}
+                ].map((m) => {
+                  const active = formData.paymentMethod === m.key;
+                  return (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          paymentMethod: active ? '' : m.key,
+                          restPaymentMethod: m.key === 'cartera' ? formData.restPaymentMethod : ''
+                        })
+                      }
+                      className={`relative px-2 py-3 sm:py-3.5 rounded-2xl border text-[11px] sm:text-xs font-bold flex flex-col items-center gap-1.5 transition-all ${
+                        active
+                          ? 'bg-gradient-to-b from-teal-500/20 to-teal-500/5 border-teal-400/60 text-teal-200 shadow-lg shadow-teal-500/10 ring-1 ring-teal-400/30'
+                          : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:border-slate-500 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span
+                        className={`p-2 rounded-xl transition-all ${
+                          active
+                            ? 'bg-teal-500 text-slate-950 shadow-md shadow-teal-500/40'
+                            : 'bg-slate-900 text-slate-400 border border-slate-700'
+                        }`}
+                      >
+                        <Icon name={m.icon} className="w-4 h-4" />
+                      </span>
+                      <span className={active ? 'text-teal-200' : 'text-slate-300'}>{m.label}</span>
+                      {m.sub ? (
+                        <span className="text-[9px] text-emerald-400 font-bold leading-none">{m.sub}</span>
+                      ) : (
+                        <span className={`text-[9px] font-medium leading-none ${active ? 'text-teal-300/70' : 'text-slate-500'}`}>
+                          {m.desc}
+                        </span>
+                      )}
+                      {active && (
+                        <span className="absolute top-1.5 right-1.5 p-0.5 rounded-full bg-teal-500 text-slate-950 shadow">
+                          <Icon name="check" className="w-3 h-3" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Cartera parcial: explicación + método para el resto */}
@@ -9178,24 +9234,38 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
                   {walletAvailable < cartTotal && (
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        { key: 'efectivo', label: 'Efectivo', icon: 'dollarSign' },
-                        { key: 'pago_movil', label: 'Pago Móvil', icon: 'zap' },
-                        { key: 'transferencia', label: 'Transferencia', icon: 'creditCard' }
-                      ].map((m) => (
-                        <button
-                          key={m.key}
-                          type="button"
-                          onClick={() => setFormData({ ...formData, restPaymentMethod: formData.restPaymentMethod === m.key ? '' : m.key })}
-                          className={`px-2 py-2.5 rounded-xl border text-[10px] sm:text-[11px] font-bold flex flex-col items-center gap-1 transition-all ${
-                            formData.restPaymentMethod === m.key
-                              ? 'bg-teal-500/15 border-teal-500/50 text-teal-300'
-                              : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-teal-500/40'
-                          }`}
-                        >
-                          <Icon name={m.icon} className="w-4 h-4" />
-                          {m.label}
-                        </button>
-                      ))}
+                        { key: 'efectivo', label: 'Efectivo', icon: 'cash' },
+                        { key: 'pago_movil', label: 'Pago Móvil', icon: 'smartphone' },
+                        { key: 'transferencia', label: 'Transferencia', icon: 'bank' }
+                      ].map((m) => {
+                        const active = formData.restPaymentMethod === m.key;
+                        return (
+                          <button
+                            key={m.key}
+                            type="button"
+                            onClick={() => setFormData({ ...formData, restPaymentMethod: active ? '' : m.key })}
+                            className={`relative px-2 py-2.5 rounded-xl border text-[10px] sm:text-[11px] font-bold flex flex-col items-center gap-1.5 transition-all ${
+                              active
+                                ? 'bg-gradient-to-b from-teal-500/20 to-teal-500/5 border-teal-400/60 text-teal-200 ring-1 ring-teal-400/30'
+                                : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:border-slate-500'
+                            }`}
+                          >
+                            <span
+                              className={`p-1.5 rounded-lg transition-all ${
+                                active ? 'bg-teal-500 text-slate-950 shadow' : 'bg-slate-900 text-slate-400 border border-slate-700'
+                              }`}
+                            >
+                              <Icon name={m.icon} className="w-3.5 h-3.5" />
+                            </span>
+                            {m.label}
+                            {active && (
+                              <span className="absolute top-1 right-1 p-0.5 rounded-full bg-teal-500 text-slate-950">
+                                <Icon name="check" className="w-2.5 h-2.5" />
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                   {formData.restPaymentMethod === 'pago_movil' && paymentConfig?.pagoMovil && (
@@ -17449,7 +17519,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
         <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
-          <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+<div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Icon name="zap" className="w-5 h-5 text-teal-400" />

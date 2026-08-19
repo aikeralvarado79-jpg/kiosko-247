@@ -2940,7 +2940,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-slate-950 overflow-x-clip">
       {/* Toast Notification Container */}
-      <div className="fixed top-4 left-4 right-4 sm:top-5 sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
+      <div className="fixed top-[max(1rem,env(safe-area-inset-top,0px))] left-4 right-4 sm:top-[max(1.25rem,env(safe-area-inset-top,0px))] sm:left-auto sm:right-5 sm:w-full sm:max-w-sm z-[90] flex flex-col gap-2 pointer-events-none">
         {toasts.map((toast) => {
           const meta = TOAST_META[toast.type] || TOAST_META.success;
           return (
@@ -2972,7 +2972,7 @@ export default function App() {
 
       {/* Aviso de versión nueva: no recarga sola para no perder el estado */}
       {updateReady && (
-        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[62] w-[92vw] max-w-sm rounded-2xl bg-slate-900 border border-teal-500/40 shadow-2xl shadow-teal-500/10 p-3.5 animate-fade-in">
+        <div className="fixed top-[max(0.75rem,env(safe-area-inset-top,0px))] left-1/2 -translate-x-1/2 z-[62] w-[92vw] max-w-sm rounded-2xl bg-slate-900 border border-teal-500/40 shadow-2xl shadow-teal-500/10 p-3.5 animate-fade-in">
           <p className="text-xs font-bold text-white">Hay una versión nueva disponible</p>
           <p className="text-[11px] text-slate-400 mt-0.5">
             Pulsa actualizar para recibir los últimos cambios. Si estás en un pedido, termínalo primero.
@@ -3009,7 +3009,7 @@ export default function App() {
           (salvo que ya esté instalada o se haya elegido "no preguntar" durante
           la sesión). Al elegir "Sí" guía según Android / iOS / escritorio. */}
       {showInstallPrompt && (
-        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[61] w-[92vw] max-w-sm rounded-2xl bg-slate-900 border border-teal-500/40 shadow-2xl shadow-teal-500/10 p-3.5 animate-fade-in">
+        <div className="fixed top-[max(0.75rem,env(safe-area-inset-top,0px))] left-1/2 -translate-x-1/2 z-[61] w-[92vw] max-w-sm rounded-2xl bg-slate-900 border border-teal-500/40 shadow-2xl shadow-teal-500/10 p-3.5 animate-fade-in">
           <div className="flex items-start gap-2.5">
             <span className="shrink-0 p-2 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400">
               <Icon name="download" className="w-4 h-4" />

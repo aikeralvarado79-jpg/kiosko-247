@@ -82,9 +82,31 @@ async function request(path, options = {}) {
 export const api = {
   getState: async (clientId, { useEtag = false } = {}) => {
     const key = clientId ? `c:${clientId}` : 'default';
+    const path = `/api/state${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`;
     const headers = {};
     if (useEtag && stateEtags[key]) headers['If-None-Match'] = stateEtags[key];
-    const res = await request(`/api/state${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`, { headers });
+    let res;
+    try {
+      res = await request(path, { headers });
+    } catch (err) {
+      // Sin conexión: servimos el último estado conocido desde Cache Storage
+      // (el service worker espeja /api/state; aquí también lo hacemos por si el
+      // SW aún no controla la página).
+      try {
+        const cache = typeof caches !== 'undefined' ? await caches.open('kiosko-state-v1') : null;
+        const hit = cache ? await cache.match(path) : null;
+        if (hit) return { ok: true, offline: true, status: 200, data: await hit.json(), etag: null };
+      } catch {}
+      throw err;
+    }
+    if (res.ok && !res.notModified) {
+      try {
+        const cache = typeof caches !== 'undefined' ? await caches.open('kiosko-state-v1') : null;
+        if (cache) {
+          await cache.put(path, new Response(JSON.stringify(res.data), { headers: { 'Content-Type': 'application/json' } }));
+        }
+      } catch {}
+    }
     if (res.ok && res.etag) {
       stateEtags[key] = res.etag;
       persistEtags();
@@ -159,4 +181,44 @@ export const api = {
   getOrderMessages: (id, phone) => request(`/api/orders/${id}/messages?phone=${encodeURIComponent(phone || '')}`),
   sendOrderMessage: (id, phone, text) => request(`/api/orders/${id}/messages`, { method: 'POST', body: JSON.stringify({ phone, text }) }),
   assistantEscalate: (data) => request('/api/assistant/escalate', { method: 'POST', body: JSON.stringify(data) })
+};
+
+// ---------------------------------------------------------------------------
+//  Cola de acciones offline (outbox): guarda en localStorage los pedidos que
+//  no pudieron enviarse por falta de conexión y los reenvía solos cuando
+//  vuelve la red. Simple y tolerante a fallos: si algo se corrompe, arranca
+//  con una cola vacía.
+// ---------------------------------------------------------------------------
+const OUTBOX_KEY = 'kiosko_outbox';
+
+const readOutbox = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeOutbox = (queue) => {
+  try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue)); } catch {}
+};
+
+export const outbox = {
+  count: () => readOutbox().length,
+  list: () => readOutbox(),
+  push: (job) => {
+    const queue = readOutbox();
+    // Dedupe básico: no encolar dos veces el mismo pedido (mismo clientId).
+    if (job.kind === 'createOrder' && job.payload?.clientId) {
+      const dupe = queue.find((j) => j.kind === 'createOrder' && j.payload?.clientId === job.payload.clientId);
+      if (dupe) return queue.length;
+    }
+    queue.push({ id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, ts: Date.now(), ...job });
+    writeOutbox(queue);
+    return queue.length;
+  },
+  remove: (id) => {
+    writeOutbox(readOutbox().filter((job) => job.id !== id));
+  }
 };

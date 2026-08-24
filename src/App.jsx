@@ -843,15 +843,31 @@ const nextOrderStatus = (order) => {
   return i >= 0 && i < flow.length - 1 ? flow[i + 1] : null;
 };
 
-// Transición suave entre pestañas con View Transitions API cuando existe
+// Transición entre pestañas con View Transitions API cuando existe
 // (Chrome/Edge/Safari 18+); en el resto, el cambio de estado es directo y las
 // vistas ya animan su montaje con animate-fade-in.
+// Push horizontal direccional: se marca la dirección en <html data-vt-dir>
+// según el orden de las pestañas en su eje (cliente o admin).
+const VIEW_AXIS = {
+  customer: ['store', 'calc', 'cart', 'orders', 'account'],
+  admin: ['inventory', 'ventas', 'orders', 'benefited', 'blacklist', 'abonos', 'analytics', 'profile']
+};
+
+const tabDirection = (axisKey, prevTab, nextTab) => {
+  const axis = VIEW_AXIS[axisKey] || [];
+  const a = axis.indexOf(prevTab);
+  const b = axis.indexOf(nextTab);
+  if (a < 0 || b < 0 || a === b) return 'forward';
+  return b > a ? 'forward' : 'back';
+};
+
 const prefersReducedMotion = () => {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 };
-const withViewTransition = (update) => {
+const withViewTransition = (update, dir = 'forward') => {
   try {
     if (!prefersReducedMotion() && typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
+      try { document.documentElement.dataset.vtDir = dir === 'back' ? 'back' : 'forward'; } catch {}
       document.startViewTransition(() => { flushSync(update); });
       return;
     }
@@ -2458,7 +2474,7 @@ export default function App() {
     withViewTransition(() => {
       setActiveView('admin');
       setAdminTab(key);
-    });
+    }, tabDirection('admin', adminTab, key));
   };
 
   const handleToggleBenefited = async (phone, benefited) => {
@@ -3600,7 +3616,7 @@ export default function App() {
           {/* Mode Switcher: Customer vs Admin Panel */}
           <div className="flex items-center gap-1 sm:gap-2 bg-slate-800/90 p-1 rounded-xl sm:p-1.5 sm:rounded-2xl border border-slate-700/60 shadow-inner shrink-0">
             <button
-              onClick={() => withViewTransition(() => setActiveView('customer'))}
+              onClick={() => withViewTransition(() => setActiveView('customer'), 'back')}
               className={`px-2.5 sm:px-4 py-2 rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 flex items-center gap-1.5 sm:gap-2 ${
                 activeView === 'customer'
                   ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-md shadow-teal-500/20'
@@ -3612,7 +3628,7 @@ export default function App() {
             </button>
             {(isCurrentAdmin || isAdminAuthed) && (
               <button
-                onClick={() => withViewTransition(() => setActiveView('admin'))}
+                onClick={() => withViewTransition(() => setActiveView('admin'), 'forward')}
                 className={`px-2.5 sm:px-4 py-2 rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 flex items-center gap-1.5 sm:gap-2 ${
                   activeView === 'admin'
                     ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 shadow-md shadow-cyan-500/20'
@@ -4056,7 +4072,7 @@ onEditProduct={(product) => {
             setActiveView('customer');
             setCustomerTab(tab);
             setFocusCustomerSection(null);
-          });
+          }, tabDirection('customer', customerTab, tab));
           if (tab === 'orders') setIsOrdersDrawerOpen(true);
           if (tab === 'account') {
             setDebtDrawerMode('saldo');
@@ -4077,13 +4093,13 @@ onEditProduct={(product) => {
             setIsIdentityOpen(false);
             setActiveView('admin');
             setAdminTab('inventory');
-          });
+          }, tabDirection('admin', adminTab, 'inventory'));
         }}
         onGoStore={() => {
           withViewTransition(() => {
             setActiveView('customer');
             setCustomerTab('store');
-          });
+          }, tabDirection('customer', customerTab, 'store'));
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onCustomerLogout={openIdentityLogout}

@@ -884,11 +884,24 @@ html[data-theme="light"] .shelf-product__shadow { background: radial-gradient(el
 }
 .celebrate-check-pop { animation: celebrate-check-pop 1.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
-/* Transición entre pestañas con View Transitions API (fallback: fade local). */
-::view-transition-old(root) { animation: kvt-out 0.16s ease both; }
-::view-transition-new(root) { animation: kvt-in 0.22s ease both; }
-@keyframes kvt-out { to { opacity: 0; } }
-@keyframes kvt-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* Transición entre pestañas con View Transitions API: push horizontal
+   direccional estilo app nativa. La dirección se marca en <html data-vt-dir>
+   justo antes de cada transición: adelante = la vista nueva entra desde la
+   derecha; atrás = desde la izquierda. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.3s;
+  animation-timing-function: cubic-bezier(0.3, 0.9, 0.3, 1);
+}
+html[data-vt-dir='forward']::view-transition-old(root) { animation-name: kvt-push-out-left; }
+html[data-vt-dir='forward']::view-transition-new(root) { animation-name: kvt-push-in-right; }
+html[data-vt-dir='back']::view-transition-old(root) { animation-name: kvt-push-out-right; }
+html[data-vt-dir='back']::view-transition-new(root) { animation-name: kvt-push-in-left; }
+
+@keyframes kvt-push-out-left { to { opacity: 0.55; transform: translateX(-32%); } }
+@keyframes kvt-push-in-right { from { transform: translateX(100%); } }
+@keyframes kvt-push-out-right { to { opacity: 0.55; transform: translateX(32%); } }
+@keyframes kvt-push-in-left { from { transform: translateX(-100%); } }
 
 @media (prefers-reduced-motion: reduce) {
   .confetti-once,

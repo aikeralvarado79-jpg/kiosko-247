@@ -860,6 +860,15 @@ const nextOrderStatus = (order) => {
   return i >= 0 && i < flow.length - 1 ? flow[i + 1] : null;
 };
 
+// Código de retiro de mostrador: 4 dígitos derivados del id del pedido.
+// Determinista (cliente y admin lo calculan igual) sin cambios de servidor.
+const pickupCodeOf = (orderId) => {
+  const s = `${orderId}:kiosko-retiro`;
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h * 31) + s.charCodeAt(i)) >>> 0;
+  return String(h % 10000).padStart(4, '0');
+};
+
 // Transición entre pestañas con View Transitions API cuando existe
 // (Chrome/Edge/Safari 18+); en el resto, el cambio de estado es directo y las
 // vistas ya animan su montaje con animate-fade-in.
@@ -1077,50 +1086,139 @@ function CelebrationBurst() {
   );
 }
 
-// Área con detección de presión larga (touch): usada en tarjetas de pedido para
-// abrir acciones rápidas. Ignora gestos sobre controles interactivos.
-function LongPressArea({ onLongPress, children, ...rest }) {
-  const timer = useRef(null);
-  const start = useRef({ x: 0, y: 0 });
+// Contenedor de tarjeta de pedido con gestos táctiles combinados:
+//  · Press largo (~480ms) → acciones rápidas.
+//  · Swipe horizontal: derecha = avanzar estado · izquierda = ver ficha,
+//    con pista de color mientras se arrastra y deslizamiento fuera al soltar.
+//  · El scroll vertical nunca se interrumpe: si el gesto arranca vertical,
+//    el componente suelta el control y la lista scrollea normal.
+function OrderCardGestures({ onLongPress, onSwipeRight, onSwipeLeft, children, ...rest }) {
+  const wrapRef = useRef(null);
+  const cardRef = useRef(null);
+  const cbRef = useRef({});
+  cbRef.current = { onLongPress, onSwipeRight, onSwipeLeft };
 
-  const clearTimer = () => {
-    clearTimeout(timer.current);
-    timer.current = null;
-  };
+  useEffect(() => {
+    const el = wrapRef.current;
+    const card = cardRef.current;
+    if (!el || !card) return undefined;
 
-  useEffect(() => clearTimer, []);
+    let sx = 0;
+    let sy = 0;
+    let dx = 0;
+    let mode = null; // null | 'h' | 'v' | 'done'
+    let longTimer = null;
 
-  const handleStart = (e) => {
-    if (!onLongPress) return;
-    if (!e.touches || e.touches.length !== 1) return;
-    const t = e.target;
-    if (t && t.closest && t.closest('button, a, input, textarea, select, [data-no-longpress]')) return;
-    start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    clearTimer();
-    timer.current = setTimeout(() => {
-      timer.current = null;
-      haptic(16);
-      onLongPress();
-    }, 480);
-  };
+    const clearLong = () => { clearTimeout(longTimer); longTimer = null; };
+    const springBack = () => {
+      card.style.transition = 'transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
+      card.style.transform = 'translateX(0)';
+      setTimeout(() => { el.dataset.hint = ''; }, 220);
+    };
 
-  const handleMove = (e) => {
-    if (!timer.current || !e.touches || !e.touches.length) return;
-    const dx = e.touches[0].clientX - start.current.x;
-    const dy = e.touches[0].clientY - start.current.y;
-    if (Math.hypot(dx, dy) > 12) clearTimer();
-  };
+    const onStart = (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      const t = e.target;
+      if (t && t.closest && t.closest('button, a, input, textarea, select, [data-no-swipe]')) return;
+      sx = e.touches[0].clientX;
+      sy = e.touches[0].clientY;
+      dx = 0;
+      mode = null;
+      card.style.transition = 'none';
+      if (cbRef.current.onLongPress) {
+        clearTimeout(longTimer);
+        longTimer = setTimeout(() => {
+          if (mode === null && Math.abs(dx) < 8) {
+            haptic(16);
+            mode = 'done';
+            cbRef.current.onLongPress();
+          }
+        }, 480);
+      }
+    };
+
+    const onMove = (e) => {
+      if (mode === 'done' || !e.touches || e.touches.length !== 1) return;
+      const tx = e.touches[0].clientX - sx;
+      const ty = e.touches[0].clientY - sy;
+      if (mode === null) {
+        if (Math.abs(tx) > 18 && Math.abs(tx) > Math.abs(ty) * 1.15) {
+          mode = 'h';
+          clearLong();
+        } else if (Math.abs(ty) > 14) {
+          mode = 'v';
+          clearLong();
+        } else {
+          return;
+        }
+      }
+      if (mode !== 'h') return;
+      dx = tx;
+      // Resistencia más allá del límite para que "frene" al final del recorrido.
+      const limit = 150;
+      const shown = Math.abs(dx) > limit
+        ? Math.sign(dx) * (limit + (Math.abs(dx) - limit) * 0.35)
+        : dx;
+      card.style.transition = 'none';
+      card.style.transform = `translateX(${shown}px)`;
+      el.dataset.hint = dx > 6 ? 'right' : dx < -6 ? 'left' : '';
+      if (Math.abs(dx) > 12) e.preventDefault();
+    };
+
+    const onEnd = () => {
+      if (mode === 'h') {
+        const dir = dx > 0 ? 'right' : 'left';
+        const action = dir === 'right' ? cbRef.current.onSwipeRight : cbRef.current.onSwipeLeft;
+        if (action && Math.abs(dx) > 96) {
+          haptic(12);
+          card.style.transition = 'transform 0.16s ease-in';
+          card.style.transform = `translateX(${dir === 'right' ? 120 : -120}%)`;
+          setTimeout(() => action(), 110);
+          setTimeout(() => springBack(), 240);
+          mode = 'done';
+          return;
+        }
+      }
+      if (mode === 'h') springBack();
+      clearLong();
+      mode = null;
+      dx = 0;
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    el.addEventListener('touchcancel', onEnd, { passive: true });
+    return () => {
+      clearLong();
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, []);
 
   return (
-    <div
-      onTouchStart={handleStart}
-      onTouchMove={handleMove}
-      onTouchEnd={clearTimer}
-      onTouchCancel={clearTimer}
-      onContextMenu={(e) => { if (timer.current || onLongPress) e.preventDefault(); }}
-      {...rest}
-    >
-      {children}
+    <div ref={wrapRef} data-order-card className="group relative overflow-hidden rounded-3xl" {...rest}>
+      {/* Pistas de acción detrás de la tarjeta */}
+      <span
+        aria-hidden="true"
+        className="absolute left-3 top-1/2 -translate-y-1/2 z-0 px-3 py-2 rounded-2xl bg-emerald-500 text-slate-950 text-xs font-black flex items-center gap-1.5 opacity-0 transition-opacity duration-150 group-data-[hint=right]:opacity-100"
+      >
+        <Icon name="check" className="w-4 h-4" /> Avanzar
+      </span>
+      <span
+        aria-hidden="true"
+        className="absolute right-3 top-1/2 -translate-y-1/2 z-0 px-3 py-2 rounded-2xl bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 opacity-0 transition-opacity duration-150 group-data-[hint=left]:opacity-100"
+      >
+        Ficha <Icon name="eye" className="w-4 h-4" />
+      </span>
+      <div
+        ref={cardRef}
+        className={`relative z-10 ${rest.className || ''}`}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -10287,6 +10385,17 @@ function AdminView({
   const [fichaOrder, setFichaOrder] = useState(null);
   // Acciones rápidas por long-press en la tarjeta de pedido (Activos).
   const [quickMenuOrder, setQuickMenuOrder] = useState(null);
+  // Verificación de código de retiro antes de marcar entregado (#11).
+  const [retiroVerifyOrder, setRetiroVerifyOrder] = useState(null);
+  // Reloj vivo de la vista Mostrador: los cronómetros de espera tickean 1/s
+  // solo mientras la vista está visible.
+  const [mostradorNow, setMostradorNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (adminTab !== 'orders' || ordersView !== 'mostrador') return undefined;
+    setMostradorNow(Date.now());
+    const id = setInterval(() => setMostradorNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [adminTab, ordersView]);
   // Feedback "procesando" por botón: deshabilita el control y muestra spinner
   // mientras su acción corre. Claves: st:/pay:/del:/gps: + id del pedido.
   const [busyActions, setBusyActions] = useState({});
@@ -11103,21 +11212,40 @@ function AdminView({
     const payBusy = Boolean(busyActions[`pay:${order.id}`]);
     const delBusy = Boolean(busyActions[`del:${order.id}`]);
     const gpsBusy = Boolean(busyActions[`gps:${order.id}`]);
-    // Long-press (touch) abre acciones rápidas solo en la lista, no en la ficha.
-    const CardShell = inFicha ? 'div' : LongPressArea;
-    const shellProps = inFicha ? {} : { onLongPress: () => setQuickMenuOrder(order) };
+    // Tarjeta que envejece (#6): el tono sigue al semáforo de espera.
+    const isActiveStatus = ['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status);
+    const agingClass = !payPending && isActiveStatus && sem.tone !== 'emerald'
+      ? (sem.tone === 'rose'
+        ? 'border-rose-500/60 bg-rose-950/40 shadow-rose-900/20 animate-pulse'
+        : 'border-amber-500/50 bg-amber-950/30')
+      : '';
+    // Gestos (#3): swipe derecha avanza · izquierda abre ficha · press largo = menú.
+    const swipeNext = !payPending ? nextOrderStatus(order) : null;
+    const CardShell = inFicha ? 'div' : OrderCardGestures;
+    const shellProps = inFicha ? {} : {
+      onLongPress: () => setQuickMenuOrder(order),
+      onSwipeRight: swipeNext ? () => runExclusive(`st:${order.id}`, () => onUpdateOrderStatus(order.id, swipeNext)) : null,
+      onSwipeLeft: () => openFicha(order)
+    };
     return (
       <CardShell
         key={order.id}
         {...shellProps}
-        className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${payPending ? 'border-amber-500/50' : st.ring}`}
+        className={`p-4 sm:p-5 space-y-4 flex flex-col justify-between shadow-xl ${payPending ? 'bg-slate-800/80 border border-amber-500/50' : agingClass || `bg-slate-800/80 border ${st.ring}`}`}
       >
         <div className="space-y-3">
+          {/* Notas del cliente arriba y destacadas (#7): lo primero que se lee */}
+          {order.notes && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-400/15 border border-amber-400/50 text-amber-200 text-xs font-bold">
+              <Icon name="edit" className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span className="min-w-0 flex-1">{order.notes}</span>
+            </div>
+          )}
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
               {!payPending && ['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
-                <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 shrink-0 ${SEM_TONES[sem.tone]}`}>
+                <span className={`px-2 py-0.5 rounded-full border text-[11px] font-black flex items-center gap-1 shrink-0 tabular-nums ${SEM_TONES[sem.tone]} ${sem.tone === 'rose' ? 'animate-pulse' : ''}`}>
                   <Icon name="clock" className="w-3 h-3" />
                   {sem.text}
                 </span>
@@ -11163,6 +11291,14 @@ function AdminView({
                 <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
                   <Icon name="creditCard" className="w-3 h-3" />
                   A cuenta
+                </span>
+              )}
+              {order.type !== 'delivery' && ['en_preparacion', 'listo'].includes(order.status) && (
+                <span
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-teal-400/40 bg-teal-500/10 text-teal-300 text-[11px] font-black font-mono tabular-nums"
+                  title="Código de retiro: verificalo con el que muestra el cliente"
+                >
+                  🔑 {pickupCodeOf(order.id)}
                 </span>
               )}
               <button
@@ -11275,12 +11411,6 @@ function AdminView({
               <Icon name="alertTriangle" className="w-3.5 h-3.5 shrink-0" />
               Lleva más del tiempo estimado
             </div>
-          )}
-
-          {order.notes && (
-            <p className="text-xs text-slate-400 italic bg-slate-900/40 p-2 rounded-xl">
-              "{order.notes}"
-            </p>
           )}
 
           {/* Pago digital: comprobante y estado */}
@@ -11451,6 +11581,169 @@ function AdminView({
           )}
         </div>
       </CardShell>
+    );
+  };
+
+  // ── Vista Mostrador (#1): armado de pedidos en modo foco ────────────────
+  // Tarjetas XXL ordenadas por espera, cronómetro vivo y UN botón contextual
+  // por pedido (Aceptar → Listo → Despachar/Entregado). Sin chat ni filtros.
+  const renderMostrador = () => {
+    const active = (orders || []).filter((o) => !['entregado', 'cancelado'].includes(o.status));
+    const withWait = active.map((o) => {
+      const d = parseOrderDate(o);
+      const waitMs = isNaN(d) ? 0 : Math.max(0, mostradorNow - d.getTime());
+      return { o, waitMs };
+    });
+    const pendingPay = withWait.filter(({ o }) => needsPaymentValidation(o));
+    const queue = withWait
+      .filter(({ o }) => !needsPaymentValidation(o))
+      .sort((a, b) => b.waitMs - a.waitMs); // el más viejo primero
+
+    const stageChips = [
+      { label: 'Recibidos', n: queue.filter(({ o }) => o.status === 'pendiente').length, cls: 'bg-slate-700 text-slate-200 border-slate-600' },
+      { label: 'Armando', n: queue.filter(({ o }) => o.status === 'en_preparacion').length, cls: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40' },
+      { label: 'Listos', n: queue.filter(({ o }) => o.status === 'listo').length, cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
+      { label: 'Camino', n: queue.filter(({ o }) => o.status === 'en_camino').length, cls: 'bg-sky-500/15 text-sky-300 border-sky-500/40' }
+    ];
+
+    return (
+      <div className="max-w-md mx-auto sm:max-w-xl space-y-3 animate-fade-in">
+        {/* Resumen de etapas */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {stageChips.map((c) => (
+            <span key={c.label} className={`px-3 py-1.5 rounded-xl border text-[11px] font-black whitespace-nowrap shrink-0 ${c.cls}`}>
+              {c.label} · {c.n}
+            </span>
+          ))}
+          <span className="ml-auto text-[10px] text-slate-500 font-semibold whitespace-nowrap shrink-0">
+            → desliza tarjeta para avanzar
+          </span>
+        </div>
+
+        {queue.length === 0 && pendingPay.length === 0 ? (
+          <div className="py-16 text-center space-y-2 text-slate-500">
+            <Icon name="checkCircle" className="w-12 h-12 mx-auto text-emerald-500/60" />
+            <p className="font-bold text-slate-400">Sin pedidos activos 🎉</p>
+          </div>
+        ) : (
+          <>
+            {queue.map(({ o, waitMs }) => {
+              const mm = Math.floor(waitMs / 60000);
+              const ss = Math.floor((waitMs % 60000) / 1000);
+              const est = Number(o.estimatedMinutes) || 0;
+              const tone = (est > 0 && mm > est) || mm >= 10 ? 'rose' : mm >= 5 ? 'amber' : 'emerald';
+              const toneCls = tone === 'rose'
+                ? 'text-rose-400'
+                : tone === 'amber'
+                  ? 'text-amber-300'
+                  : 'text-emerald-300';
+              const cardTone = tone === 'rose'
+                ? 'border-rose-500/60 bg-rose-950/40'
+                : tone === 'amber'
+                  ? 'border-amber-500/50 bg-amber-950/30'
+                  : 'border-slate-700 bg-slate-800/80';
+              const busy = Boolean(busyActions[`st:${o.id}`]);
+              const missing = lowStockInOrder(o);
+              const isDelivery = o.type === 'delivery';
+
+              let action;
+              if (o.status === 'pendiente') action = { next: 'en_preparacion', label: 'Aceptar pedido', icon: 'check' };
+              else if (o.status === 'en_preparacion') action = { next: 'listo', label: 'Pedido listo', icon: 'package' };
+              else if (o.status === 'listo') action = isDelivery
+                ? { next: 'en_camino', label: 'Despachar pedido', icon: 'navigation' }
+                : { next: 'entregado', label: 'Cliente retiró', icon: 'checkCircle', verify: true };
+              else if (o.status === 'en_camino') action = { next: 'entregado', label: 'Marcar entregado', icon: 'checkCircle' };
+
+              return (
+                <div key={o.id} className={`p-4 rounded-3xl border shadow-xl space-y-3 ${cardTone}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-sm font-bold text-teal-400">{o.id}</span>
+                      <span className="px-2 py-0.5 rounded-full border border-slate-600 bg-slate-900/60 text-[10px] font-bold text-slate-300 shrink-0">
+                        {isDelivery ? '🛵 Delivery' : '🏪 Retiro'}
+                      </span>
+                    </div>
+                    {/* Cronómetro de espera vivo (#6) */}
+                    <span className={`font-mono font-black text-2xl leading-none tabular-nums ${toneCls}`}>
+                      {mm}:{String(ss).padStart(2, '0')}
+                    </span>
+                  </div>
+
+                  {o.customerName && (
+                    <p className="text-xs font-bold text-slate-300 truncate">{o.customerName}</p>
+                  )}
+
+                  {o.notes && (
+                    <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-400/15 border border-amber-400/50 text-amber-200 text-xs font-bold">
+                      <Icon name="edit" className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span className="min-w-0 flex-1">{o.notes}</span>
+                    </div>
+                  )}
+
+                  <ul className="space-y-1">
+                    {(o.items || []).map((it, idx) => (
+                      <li key={`${it.id}-${idx}`} className="flex items-baseline gap-2 text-sm">
+                        <span className="font-black text-white tabular-nums">{it.quantity}×</span>
+                        <span className="text-slate-200 min-w-0 truncate">{it.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {missing.length > 0 && (
+                    <p className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5">
+                      <Icon name="alertTriangle" className="w-3.5 h-3.5" />
+                      Sin stock: {missing.map((m) => m.name).join(', ')}
+                    </p>
+                  )}
+
+                  {!isDelivery && ['en_preparacion', 'listo'].includes(o.status) && (
+                    <p className="text-[11px] font-black font-mono tracking-widest text-teal-300">
+                      🔑 Código: {pickupCodeOf(o.id)}
+                    </p>
+                  )}
+
+                  {action && (
+                    <button
+                      onClick={() => {
+                        if (action.verify) setRetiroVerifyOrder(o);
+                        else runExclusive(`st:${o.id}`, () => onUpdateOrderStatus(o.id, action.next));
+                      }}
+                      disabled={busy}
+                      className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-sm font-black shadow-lg shadow-teal-500/25 flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 disabled:pointer-events-none"
+                    >
+                      {busy
+                        ? <><Icon name="refresh" className="w-4 h-4 animate-spin" /> Procesando…</>
+                        : <><Icon name={action.icon} className="w-4 h-4" /> {action.label}</>}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => openFicha(o)}
+                    data-no-swipe
+                    disabled={busy}
+                    className="w-full py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-300 text-[11px] font-bold hover:text-white transition-all disabled:opacity-60"
+                  >
+                    Ver ficha completa
+                  </button>
+                </div>
+              );
+            })}
+
+            {pendingPay.map(({ o }) => (
+              <div key={o.id} className="p-4 rounded-3xl border border-amber-500/50 bg-slate-800/80 space-y-2 opacity-80">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-sm font-bold text-teal-400">{o.id}</span>
+                  <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-400/40 bg-amber-500/15 text-amber-300 text-[11px] font-bold">
+                    <Icon name="clock" className="w-3 h-3" />
+                    Pago en revisión
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">Confirma o rechaza el pago desde Activos para poder armarlo.</p>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
     );
   };
 
@@ -12047,6 +12340,7 @@ function AdminView({
           {/* Vista operativa: Activos / Despacho·Caja / Entregas / Historial */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0">
             {[
+              { key: 'mostrador', label: 'Mostrador', icon: 'store' },
               { key: 'lista', label: 'Activos', icon: 'clock' },
               { key: 'despacho', label: 'Despacho / Caja', icon: 'package' },
               { key: 'entregas', label: 'Entregas (ruta)', icon: 'mapPin' },
@@ -12076,6 +12370,8 @@ function AdminView({
               </button>
             ))}
           </div>
+
+          {ordersView === 'mostrador' && renderMostrador()}
 
           {ordersView === 'lista' && (
           <>
@@ -13752,6 +14048,51 @@ function AdminView({
             >
               Cerrar
             </button>
+          </div>
+        </div>
+      )}
+      {/* Verificación de retiro en mostrador (#11): compara el código con el
+          que muestra el cliente antes de marcar entregado */}
+      {retiroVerifyOrder && (
+        <div className="fixed inset-0 z-[85] flex items-end sm:items-center justify-center pb-[calc(5rem+env(safe-area-inset-bottom))] sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="absolute inset-0" onClick={() => setRetiroVerifyOrder(null)} />
+          <div role="dialog" aria-label={`Verificar retiro del pedido ${retiroVerifyOrder.id}`} className="relative w-full sm:max-w-sm glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 space-y-4 z-10 animate-modal-spring text-center">
+            <p className="text-[11px] uppercase tracking-wider text-slate-500 font-black">Retiro en mostrador</p>
+            <h3 className="text-base font-bold text-white -mt-2">
+              Pedido {retiroVerifyOrder.id} · {retiroVerifyOrder.customerName || 'Cliente'}
+            </h3>
+            <div className="rounded-2xl border border-teal-500/40 bg-teal-500/10 py-4">
+              <p className="font-mono text-4xl font-black tracking-[0.3em] text-white pl-[0.3em]">
+                {pickupCodeOf(retiroVerifyOrder.id)}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1.5 px-4">
+                Verificá que coincida con el código que muestra el cliente en su app
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <button
+                onClick={() => setRetiroVerifyOrder(null)}
+                data-no-swipe
+                className="py-3 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition-all"
+              >
+                Cerrar
+              </button>
+              <button
+                onClick={() => {
+                  const id = retiroVerifyOrder.id;
+                  runExclusive(`st:${id}`, async () => {
+                    await onUpdateOrderStatus(id, 'entregado');
+                    setRetiroVerifyOrder(null);
+                  });
+                }}
+                disabled={Boolean(busyActions[`st:${retiroVerifyOrder.id}`])}
+                className="py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5 transition-all disabled:opacity-70 disabled:pointer-events-none"
+              >
+                {busyActions[`st:${retiroVerifyOrder.id}`]
+                  ? <><Icon name="refresh" className="w-3.5 h-3.5 animate-spin" /> Procesando…</>
+                  : <><Icon name="checkCircle" className="w-3.5 h-3.5" /> Dar como entregado</>}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -17850,6 +18191,15 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
         </div>
 
         <div data-sheet-scroll className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+          {order.type !== 'delivery' && !['entregado', 'cancelado'].includes(order.status) && (
+            <div className="rounded-2xl border border-teal-500/40 bg-teal-500/10 p-4 text-center">
+              <p className="text-[11px] uppercase tracking-wider text-teal-300/80 font-black">🔑 Código de retiro</p>
+              <p className="font-mono text-3xl font-black tracking-[0.35em] text-white mt-1 pl-[0.35em]">
+                {pickupCodeOf(order.id)}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1">Mostralo al retirar tu pedido</p>
+            </div>
+          )}
           {needsPaymentValidation(order) && (
             <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
               <Icon name="clock" className="w-4 h-4 shrink-0" />

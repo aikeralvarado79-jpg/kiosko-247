@@ -833,6 +833,23 @@ const celebrate = () => {
   try { window.dispatchEvent(new CustomEvent(CELEBRATE_EVENT)); } catch {}
 };
 
+// Bloqueo anti-doble-disparo: mientras una acción con la misma clave está en
+// vuelo, los clics repetidos se ignoran. Evita toasts y efectos duplicados
+// aunque el botón no quede deshabilitado (doble click, Enter sostenido, etc.).
+const inflightActions = new Set();
+const withInflightGuard = (key, fn) => {
+  if (inflightActions.has(key)) return Promise.resolve(false);
+  inflightActions.add(key);
+  let p;
+  try {
+    p = Promise.resolve(fn());
+  } catch (err) {
+    inflightActions.delete(key);
+    throw err;
+  }
+  return p.finally(() => inflightActions.delete(key));
+};
+
 // Siguiente estado natural del pedido (para la acción rápida de long-press).
 const nextOrderStatus = (order) => {
   if (!order) return null;
@@ -3218,6 +3235,7 @@ export default function App() {
   // ("Ventas"). Se crea un pedido tipo pickup ya entregado y pagado, así se
   // contabiliza en Finanzas, descuenta stock y queda en el historial.
   const handleCounterSale = async ({ items, customerName, customerPhone, paymentMethod }) => {
+    return withInflightGuard('sale', async () => {
     const cleanItems = (items || []).map((it) => ({
       id: it.id,
       name: it.name,
@@ -3250,9 +3268,11 @@ export default function App() {
     celebrate();
     addToast(`Venta registrada: ${formatUsd(total)}`, 'success');
     return { ok: true, order: res.data.order };
+    });
   };
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
+    return withInflightGuard(`st:${orderId}`, async () => {
     // Optimistic UI: la tarjeta refleja el cambio al instante; si el servidor
     // falla, se revierte al estado previo y se avisa con un toast.
     const prevOrders = orders;
@@ -3282,10 +3302,12 @@ export default function App() {
       const fresh = await api.getCustomer(normalizePhoneDigits(customerProfile.phone));
       if (fresh.ok && fresh.data?.phone) setCustomerProfile(fresh.data);
     }
+    });
   };
 
   // Admin confirma o rechaza el pago digital de un pedido (dispara push al cliente).
   const handleUpdateOrderPayment = async (orderId, newStatus) => {
+    return withInflightGuard(`pay:${orderId}`, async () => {
     const res = await api.updateOrderPayment(orderId, newStatus);
     if (!res.ok) {
       addToast(res.data.error || 'No se pudo actualizar el pago', 'error');
@@ -3293,6 +3315,7 @@ export default function App() {
     }
     setOrders(res.data.state.orders || []);
     addToast(`Pago del pedido ${orderId} ${newStatus === 'confirmado' ? 'confirmado' : 'rechazado'}`);
+    });
   };
 
   // Refresca la copia de un pedido en todos los sitios donde el cliente lo ve
@@ -3316,6 +3339,7 @@ export default function App() {
   };
 
   const handleCancelOrder = async (orderId, phone) => {
+    return withInflightGuard(`cancel:${orderId}`, async () => {
     const res = await api.cancelOrder(orderId, phone);
     if (!res.ok) {
       addToast(res.data.error || 'No se pudo cancelar el pedido', 'error');
@@ -3324,9 +3348,11 @@ export default function App() {
     setOrders(res.data.state.orders || []);
     setCancelConfirmOrder(null);
     addToast(`Pedido ${orderId} cancelado`, 'info');
+    });
   };
 
   const handleDeleteOrder = async (orderId) => {
+    return withInflightGuard(`delord:${orderId}`, async () => {
     const res = await api.deleteOrder(orderId);
     if (!res.ok) {
       addToast(res.data.error || 'No se pudo eliminar el pedido', 'error');
@@ -3335,6 +3361,7 @@ export default function App() {
     setOrders(res.data.state.orders || []);
     setDeleteOrderTarget(null);
     addToast(`Pedido ${orderId} eliminado`, 'info');
+    });
   };
 
   const handleSavePromos = async (newPromos) => {
@@ -10260,6 +10287,19 @@ function AdminView({
   const [fichaOrder, setFichaOrder] = useState(null);
   // Acciones rápidas por long-press en la tarjeta de pedido (Activos).
   const [quickMenuOrder, setQuickMenuOrder] = useState(null);
+  // Feedback "procesando" por botón: deshabilita el control y muestra spinner
+  // mientras su acción corre. Claves: st:/pay:/del:/gps: + id del pedido.
+  const [busyActions, setBusyActions] = useState({});
+  const busyActionsRef = useRef({});
+  const runExclusive = useCallback((key, fn) => {
+    if (busyActionsRef.current[key]) return;
+    busyActionsRef.current[key] = true;
+    setBusyActions((prev) => ({ ...prev, [key]: true }));
+    Promise.resolve(fn()).finally(() => {
+      busyActionsRef.current[key] = false;
+      setBusyActions((prev) => ({ ...prev, [key]: false }));
+    });
+  }, []);
   const openFicha = (o) => {
     setFichaOrder(o);
   };
@@ -11058,6 +11098,11 @@ function AdminView({
     const missingStock = lowStockInOrder(order);
     const isPinned = pinnedOrders.includes(order.id);
     const payPending = needsPaymentValidation(order);
+    // Estados "procesando" de los botones de esta tarjeta.
+    const stBusy = Boolean(busyActions[`st:${order.id}`]);
+    const payBusy = Boolean(busyActions[`pay:${order.id}`]);
+    const delBusy = Boolean(busyActions[`del:${order.id}`]);
+    const gpsBusy = Boolean(busyActions[`gps:${order.id}`]);
     // Long-press (touch) abre acciones rápidas solo en la lista, no en la ficha.
     const CardShell = inFicha ? 'div' : LongPressArea;
     const shellProps = inFicha ? {} : { onLongPress: () => setQuickMenuOrder(order) };
@@ -11282,18 +11327,20 @@ function AdminView({
               {order.paymentStatus === 'pendiente' && (
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => onUpdateOrderPayment(order.id, 'confirmado')}
-                    className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                    onClick={() => runExclusive(`pay:${order.id}`, () => onUpdateOrderPayment(order.id, 'confirmado'))}
+                    disabled={payBusy}
+                    className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
                   >
-                    <Icon name="check" className="w-3.5 h-3.5" />
-                    Confirmar pago
+                    <Icon name={payBusy ? 'refresh' : 'check'} className={`w-3.5 h-3.5 ${payBusy ? 'animate-spin' : ''}`} />
+                    {payBusy ? 'Procesando…' : 'Confirmar pago'}
                   </button>
                   <button
-                    onClick={() => onUpdateOrderPayment(order.id, 'rechazado')}
-                    className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                    onClick={() => runExclusive(`pay:${order.id}`, () => onUpdateOrderPayment(order.id, 'rechazado'))}
+                    disabled={payBusy}
+                    className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
                   >
-                    <Icon name="x" className="w-3.5 h-3.5" />
-                    Rechazar pago
+                    <Icon name={payBusy ? 'refresh' : 'x'} className={`w-3.5 h-3.5 ${payBusy ? 'animate-spin' : ''}`} />
+                    {payBusy ? 'Procesando…' : 'Rechazar pago'}
                   </button>
                 </div>
               )}
@@ -11325,13 +11372,18 @@ function AdminView({
             ].map((stBtn) => (
               <button
                 key={stBtn.key}
-                onClick={() => (stBtn.key === 'cancelado' ? setConfirmCancelOrder(order) : onUpdateOrderStatus(order.id, stBtn.key))}
-                className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all ${
+                onClick={() => runExclusive(`st:${order.id}`, () => {
+                  if (stBtn.key === 'cancelado') setConfirmCancelOrder(order);
+                  else onUpdateOrderStatus(order.id, stBtn.key);
+                })}
+                disabled={stBusy}
+                className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none ${
                   order.status === stBtn.key
                     ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
                     : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
                 }`}
               >
+                {stBusy && <Icon name="refresh" className="w-3 h-3 animate-spin" />}
                 {stBtn.label}
               </button>
             ))}
@@ -11342,19 +11394,21 @@ function AdminView({
             <div className="pt-1">
               {courierOrderId === order.id && courierActive ? (
                 <button
-                  onClick={stopCourierTracking}
-                  className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                  onClick={() => runExclusive(`gps:${order.id}`, () => stopCourierTracking())}
+                  disabled={gpsBusy}
+                  className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
                 >
-                  <Icon name="mapPin" className="w-3.5 h-3.5" />
-                  Detener rastreo en vivo
+                  <Icon name={gpsBusy ? 'refresh' : 'mapPin'} className={`w-3.5 h-3.5 ${gpsBusy ? 'animate-spin' : ''}`} />
+                  {gpsBusy ? 'Deteniendo…' : 'Detener rastreo en vivo'}
                 </button>
               ) : (
                 <button
-                  onClick={() => startCourierTracking(order.id)}
-                  className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                  onClick={() => runExclusive(`gps:${order.id}`, () => startCourierTracking(order.id))}
+                  disabled={gpsBusy}
+                  className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
                 >
-                  <Icon name="mapPin" className="w-3.5 h-3.5" />
-                  Comenzar entrega (GPS en vivo)
+                  <Icon name={gpsBusy ? 'refresh' : 'mapPin'} className={`w-3.5 h-3.5 ${gpsBusy ? 'animate-spin' : ''}`} />
+                  {gpsBusy ? 'Iniciando…' : 'Comenzar entrega (GPS en vivo)'}
                 </button>
               )}
             </div>
@@ -11364,15 +11418,17 @@ function AdminView({
           {order.credit && order.status === 'pendiente' && (
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => onUpdateOrderStatus(order.id, 'en_preparacion')}
-                className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
+                onClick={() => runExclusive(`st:${order.id}`, () => onUpdateOrderStatus(order.id, 'en_preparacion'))}
+                disabled={stBusy}
+                className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
               >
-                <Icon name="check" className="w-3.5 h-3.5" />
-                Aceptar y preparar
+                <Icon name={stBusy ? 'refresh' : 'check'} className={`w-3.5 h-3.5 ${stBusy ? 'animate-spin' : ''}`} />
+                {stBusy ? 'Procesando…' : 'Aceptar y preparar'}
               </button>
               <button
-                onClick={() => onUpdateOrderStatus(order.id, 'cancelado')}
-                className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+                onClick={() => runExclusive(`st:${order.id}`, () => setConfirmCancelOrder(order))}
+                disabled={stBusy}
+                className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
               >
                 <Icon name="x" className="w-3.5 h-3.5" />
                 Rechazar
@@ -11383,11 +11439,12 @@ function AdminView({
           {/* Eliminar pedido cancelado (para no acumular en la lista) */}
           {order.status === 'cancelado' && (
             <button
-              onClick={() => onDeleteOrder(order)}
-              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
+              onClick={() => runExclusive(`del:${order.id}`, () => onDeleteOrder(order))}
+              disabled={delBusy}
+              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
             >
-              <Icon name="trash" className="w-3.5 h-3.5" />
-              Eliminar pedido
+              <Icon name={delBusy ? 'refresh' : 'trash'} className={`w-3.5 h-3.5 ${delBusy ? 'animate-spin' : ''}`} />
+              {delBusy ? 'Eliminando…' : 'Eliminar pedido'}
             </button>
           )}
           </>
@@ -13659,17 +13716,21 @@ function AdminView({
             {(() => {
               const next = nextOrderStatus(quickMenuOrder);
               if (!next || needsPaymentValidation(quickMenuOrder)) return null;
+              const qmBusy = Boolean(busyActions[`st:${quickMenuOrder.id}`]);
               return (
                 <button
                   onClick={() => {
                     const n = next;
-                    setQuickMenuOrder(null);
-                    onUpdateOrderStatus(quickMenuOrder.id, n);
+                    runExclusive(`st:${quickMenuOrder.id}`, async () => {
+                      await onUpdateOrderStatus(quickMenuOrder.id, n);
+                      setQuickMenuOrder(null);
+                    });
                   }}
-                  className="w-full py-3 px-3 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 font-bold text-sm flex items-center gap-2 hover:bg-teal-500/25 transition-all"
+                  disabled={qmBusy}
+                  className="w-full py-3 px-3 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 font-bold text-sm flex items-center gap-2 hover:bg-teal-500/25 transition-all disabled:opacity-60 disabled:pointer-events-none"
                 >
-                  <Icon name="arrowRight" className="w-4 h-4" />
-                  Avanzar a {STATUS_LABELS[next] || next}
+                  <Icon name={qmBusy ? 'refresh' : 'arrowRight'} className={`w-4 h-4 ${qmBusy ? 'animate-spin' : ''}`} />
+                  {qmBusy ? 'Procesando…' : `Avanzar a ${STATUS_LABELS[next] || next}`}
                 </button>
               );
             })()}
@@ -17343,18 +17404,33 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
 // window.confirm del navegador). Muestra título, mensaje y botones estilizados.
 function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', tone = 'danger', icon = 'alertTriangle', onConfirm, onClose }) {
   useOverlay(true, onClose);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const danger = tone === 'danger';
+  // Un solo click: mientras procesa se bloquea todo el modal y el confirm
+  // muestra spinner. Si onConfirm cierra el modal, el setState final es no-op.
+  const handleConfirm = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center pb-[calc(5rem+env(safe-area-inset-bottom))] sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
+      {!busy && <div className="absolute inset-0" onClick={onClose} />}
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${danger ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-          <Icon name={icon} className="w-6 h-6" />
+          {busy ? <Icon name="refresh" className="w-6 h-6 animate-spin" /> : <Icon name={icon} className="w-6 h-6" />}
         </div>
         <div>
-          <h3 className="text-lg font-bold text-white">{title}</h3>
-          {message && <p className="text-xs text-slate-400 mt-1 whitespace-pre-line">{message}</p>}
-          {note && (
+          <h3 className="text-lg font-bold text-white">{busy ? 'Procesando…' : title}</h3>
+          {message && !busy && <p className="text-xs text-slate-400 mt-1 whitespace-pre-line">{message}</p>}
+          {note && !busy && (
             <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 mt-3 inline-block">
               {note}
             </p>
@@ -17363,18 +17439,21 @@ function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', 
         <div className="grid grid-cols-2 gap-3 pt-2">
           <button
             onClick={onClose}
-            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition-all"
+            disabled={busy}
+            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition-all disabled:opacity-60 disabled:pointer-events-none"
           >
             {cancelLabel}
           </button>
           <button
-            onClick={onConfirm}
-            className={`py-2.5 rounded-xl text-white font-bold text-xs shadow-lg transition-all ${
+            onClick={handleConfirm}
+            disabled={busy}
+            className={`py-2.5 rounded-xl text-white font-bold text-xs shadow-lg transition-all flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:pointer-events-none ${
               danger
                 ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20'
                 : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20'
             }`}
           >
+            {busy && <Icon name="refresh" className="w-3.5 h-3.5 animate-spin" />}
             {confirmLabel}
           </button>
         </div>
@@ -17385,30 +17464,48 @@ function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', 
 
 function DeleteConfirmModal({ product, onClose, onConfirm }) {
   useOverlay(true, onClose);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const handleConfirm = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
+      {!busy && <div className="absolute inset-0" onClick={onClose} />}
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-          <Icon name="alertTriangle" className="w-6 h-6" />
+          {busy ? <Icon name="refresh" className="w-6 h-6 animate-spin" /> : <Icon name="alertTriangle" className="w-6 h-6" />}
         </div>
         <div>
-          <h3 className="text-lg font-bold text-white">¿Eliminar producto?</h3>
-          <p className="text-xs text-slate-400 mt-1">
-            Estás a punto de borrar <strong className="text-slate-200">{product.name}</strong> del catálogo. Esta acción no se puede deshacer.
-          </p>
+          <h3 className="text-lg font-bold text-white">{busy ? 'Eliminando…' : '¿Eliminar producto?'}</h3>
+          {!busy && (
+            <p className="text-xs text-slate-400 mt-1">
+              Estás a punto de borrar <strong className="text-slate-200">{product.name}</strong> del catálogo. Esta acción no se puede deshacer.
+            </p>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3 pt-2">
           <button
             onClick={onClose}
-            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700"
+            disabled={busy}
+            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 disabled:opacity-60 disabled:pointer-events-none"
           >
             Cancelar
           </button>
           <button
-            onClick={onConfirm}
-            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20"
+            onClick={handleConfirm}
+            disabled={busy}
+            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20 flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:pointer-events-none"
           >
+            {busy && <Icon name="refresh" className="w-3.5 h-3.5 animate-spin" />}
             Sí, Eliminar
           </button>
         </div>
@@ -17419,30 +17516,48 @@ function DeleteConfirmModal({ product, onClose, onConfirm }) {
 
 function DeleteOrderModal({ order, onClose, onConfirm }) {
   useOverlay(true, onClose);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const handleConfirm = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
+      {!busy && <div className="absolute inset-0" onClick={onClose} />}
       <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-          <Icon name="trash" className="w-6 h-6" />
+          {busy ? <Icon name="refresh" className="w-6 h-6 animate-spin" /> : <Icon name="trash" className="w-6 h-6" />}
         </div>
         <div>
-          <h3 className="text-lg font-bold text-white">¿Eliminar pedido #{order.id}?</h3>
-          <p className="text-xs text-slate-400 mt-1">
-            Solo se eliminan pedidos <strong className="text-slate-200">cancelados</strong>. Esta acción no se puede deshacer y lo sacará de la lista de pedidos.
-          </p>
+          <h3 className="text-lg font-bold text-white">{busy ? 'Eliminando…' : `¿Eliminar pedido #${order.id}?`}</h3>
+          {!busy && (
+            <p className="text-xs text-slate-400 mt-1">
+              Solo se eliminan pedidos <strong className="text-slate-200">cancelados</strong>. Esta acción no se puede deshacer y lo sacará de la lista de pedidos.
+            </p>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3 pt-2">
           <button
             onClick={onClose}
-            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700"
+            disabled={busy}
+            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 disabled:opacity-60 disabled:pointer-events-none"
           >
             Cancelar
           </button>
           <button
-            onClick={onConfirm}
-            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20"
+            onClick={handleConfirm}
+            disabled={busy}
+            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20 flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:pointer-events-none"
           >
+            {busy && <Icon name="refresh" className="w-3.5 h-3.5 animate-spin" />}
             Sí, Eliminar
           </button>
         </div>

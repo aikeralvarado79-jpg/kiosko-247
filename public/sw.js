@@ -9,6 +9,10 @@
 // muestra el aviso con el botón "Actualizar" (ver src/main.jsx).
 const APP_VERSION = '__APP_VERSION__';
 const CACHE = 'kiosko-app-shell-v6';
+// Espejo del último /api/state conocido: permite mostrar el catálogo cuando
+// no hay conexión. La app también lo escribe desde api.js por si el SW aún
+// no controla la página.
+const STATE_CACHE = 'kiosko-state-v1';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -40,7 +44,8 @@ self.addEventListener('activate', (event) => {
     caches
       .keys()
       .then((keys) => {
-        const stale = keys.filter((k) => k !== CACHE);
+        const keep = [CACHE, STATE_CACHE];
+        const stale = keys.filter((k) => !keep.includes(k));
         return Promise.all(stale.map((k) => caches.delete(k))).then(() => {
           self.clients.claim();
           // Si había una versión de caché anterior, las pestañas abiertas pueden
@@ -60,6 +65,24 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   // Nunca cachear llamadas a la API ni métodos que no sean GET.
   if (url.pathname.startsWith('/api') || event.request.method !== 'GET') return;
+
+  // Excepción: /api/state GET se sirve primero de red y queda espejado en
+  // STATE_CACHE. Si la red falla, se responde con el último estado conocido
+  // (catálogo offline).
+  if (url.pathname.startsWith('/api/state')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(STATE_CACHE).then((cache) => cache.put(event.request, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(event.request).then((r) => r || Response.error()))
+    );
+    return;
+  }
 
   // Para navegaciones: red primero, caché como respaldo (offline).
   if (event.request.mode === 'navigate') {

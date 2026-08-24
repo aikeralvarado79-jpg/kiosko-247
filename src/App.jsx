@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
-import { api, getToken, setToken, clearToken, setRememberSession, getRememberSession } from './api.js';
+import { api, getToken, setToken, clearToken, setRememberSession, getRememberSession, outbox } from './api.js';
 import { ADMIN_PHONES } from './data.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -151,6 +151,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
        </>
       ),
       mic: <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />,
+      wifiOff: <><path d="m2 2 20 20" /><path d="M8.5 16.5a5 5 0 0 1 7 0" /><path d="M5 12.86a10 10 0 0 1 2.17-1.51" /><path d="M19 12.86a10 10 0 0 0-3.34-2.07" /><path d="M2 8.82A15 15 0 0 1 6.18 6.18" /><path d="M22 8.82a15 15 0 0 0-11.29-3.76c-.9.06-1.79.19-2.65.38" /><circle cx="12" cy="20" r="0.75" fill="currentColor" /></>,
       volume2: <path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6" />,
       share2: <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" />,
       barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
@@ -823,6 +824,368 @@ const haptic = (ms = 12) => {
   } catch {}
 };
 
+// ------------------------------------------------------------------
+//  Celebración breve del panel: evento global + capa de confeti.
+//  Se dispara al entregar un pedido o registrar una venta de mostrador.
+// ------------------------------------------------------------------
+const CELEBRATE_EVENT = 'kiosko:celebrate';
+const celebrate = () => {
+  try { window.dispatchEvent(new CustomEvent(CELEBRATE_EVENT)); } catch {}
+};
+
+// Siguiente estado natural del pedido (para la acción rápida de long-press).
+const nextOrderStatus = (order) => {
+  if (!order) return null;
+  const flow = order.type === 'delivery'
+    ? ['pendiente', 'en_preparacion', 'listo', 'en_camino', 'entregado']
+    : ['pendiente', 'en_preparacion', 'listo', 'entregado'];
+  const i = flow.indexOf(order.status);
+  return i >= 0 && i < flow.length - 1 ? flow[i + 1] : null;
+};
+
+// Transición suave entre pestañas con View Transitions API cuando existe
+// (Chrome/Edge/Safari 18+); en el resto, el cambio de estado es directo y las
+// vistas ya animan su montaje con animate-fade-in.
+const prefersReducedMotion = () => {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+};
+const withViewTransition = (update) => {
+  try {
+    if (!prefersReducedMotion() && typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
+      document.startViewTransition(() => { flushSync(update); });
+      return;
+    }
+  } catch {}
+  update();
+};
+
+// Swipe hacia abajo para cerrar bottom sheets (solo móvil). El gesto se toma
+// desde cualquier punto de la hoja salvo que haya scroll pendiente hacia
+// arriba dentro de [data-sheet-scroll]; arrastrar más de ~110px cierra.
+function useSwipeToClose(onClose, enabled = true) {
+  const sheetRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el || !enabled) return undefined;
+    let match;
+    try { match = window.matchMedia('(min-width: 640px)'); } catch { match = null; }
+    if (match && match.matches) return undefined;
+
+    let startX = 0;
+    let startY = 0;
+    let dy = 0;
+    let tracking = false;
+    let locked = false;
+    let scrollEl = null;
+    let closeTimer = null;
+
+    const onStart = (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      // No capturar gestos que empiezan sobre controles interactivos.
+      const t = e.target;
+      if (t && t.closest && t.closest('button, a, input, textarea, select, [data-no-swipe]')) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      dy = 0;
+      locked = false;
+      tracking = true;
+      scrollEl = t && t.closest ? t.closest('[data-sheet-scroll]') : null;
+    };
+
+    const onMove = (e) => {
+      if (!tracking || !e.touches || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - startX;
+      const ddy = e.touches[0].clientY - startY;
+      if (!locked) {
+        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(ddy)) { tracking = false; return; }
+        if (ddy > 10) {
+          if (scrollEl && scrollEl.scrollTop > 2) { tracking = false; return; }
+          locked = true;
+          el.style.transition = 'none';
+          // Las hojas entran con una animación de transform (fill-mode both)
+          // que pisaría el estilo inline del arrastre: se retira al empezar.
+          el.style.animation = 'none';
+        } else if (ddy < -10) {
+          tracking = false;
+          return;
+        } else {
+          return;
+        }
+      }
+      dy = Math.max(0, ddy);
+      el.style.transform = `translateY(${dy}px)`;
+      if (dy > 8) e.preventDefault();
+    };
+
+    const onEnd = () => {
+      if (!tracking) return;
+      tracking = false;
+      if (!locked) return;
+      locked = false;
+      el.style.transition = 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
+      if (dy > 110) {
+        el.style.transform = 'translateY(105%)';
+        haptic(10);
+        closeTimer = setTimeout(() => onCloseRef.current(), 200);
+      } else {
+        dy = 0;
+        el.style.transform = '';
+      }
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    el.addEventListener('touchcancel', onEnd, { passive: true });
+    return () => {
+      clearTimeout(closeTimer);
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, [enabled]);
+
+  return sheetRef;
+}
+
+// Número que "sube" animado entre valores (métricas del dashboard).
+function AnimatedNumber({ value, format = (v) => String(Math.round(v)), className }) {
+  const target = Number(value) || 0;
+  const [display, setDisplay] = useState(target);
+  const fromRef = useRef(target);
+
+  useEffect(() => {
+    const from = fromRef.current;
+    if (from === target) { setDisplay(target); return undefined; }
+    const dur = 650;
+    const t0 = performance.now();
+    let raf;
+    const step = (t) => {
+      const p = Math.min(1, (t - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setDisplay(from + (target - from) * eased);
+      if (p < 1) {
+        raf = requestAnimationFrame(step);
+      } else {
+        fromRef.current = target;
+        setDisplay(target);
+      }
+    };
+    raf = requestAnimationFrame(step);
+    return () => {
+      cancelAnimationFrame(raf);
+      fromRef.current = target;
+    };
+  }, [target]);
+
+  return <span className={className}>{format(display)}</span>;
+}
+
+// Capa de celebración: confeti de una pasada + check pop. Se monta una vez en
+// la raíz y reacciona al evento global CELEBRATE_EVENT.
+function CelebrationBurst() {
+  const [burstId, setBurstId] = useState(0);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    const onCelebrate = () => {
+      setBurstId((b) => b + 1);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setBurstId(0), 2200);
+    };
+    window.addEventListener(CELEBRATE_EVENT, onCelebrate);
+    return () => {
+      window.removeEventListener(CELEBRATE_EVENT, onCelebrate);
+      clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const confetti = useMemo(
+    () =>
+      Array.from({ length: 30 }).map((_, i) => ({
+        left: `${(i * 31 + 7) % 100}%`,
+        delay: `${((i % 7) * 0.06).toFixed(2)}s`,
+        dur: `${(1.3 + (i % 5) * 0.18).toFixed(2)}s`,
+        rot: `${360 + (i % 4) * 180}deg`,
+        x: `${((i % 2 === 0 ? 1 : -1) * (20 + (i % 6) * 22))}px`,
+        color: ['#2dd4bf', '#34d399', '#fbbf24', '#f472b6', '#818cf8', '#38bdf8'][i % 6]
+      })),
+    []
+  );
+
+  if (!burstId) return null;
+
+  return (
+    <div key={burstId} className="fixed inset-0 z-[95] pointer-events-none overflow-hidden" aria-hidden="true">
+      <div className="celebrate-check-pop absolute left-1/2 top-[24%]">
+        <span className="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xl shadow-emerald-500/40">
+          <Icon name="check" className="w-8 h-8" strokeWidth={3} />
+        </span>
+      </div>
+      {confetti.map((c, i) => (
+        <span
+          key={`${burstId}-${i}`}
+          className="confetti-piece confetti-once"
+          style={{
+            left: c.left,
+            background: c.color,
+            '--confetti-delay': c.delay,
+            '--confetti-dur': c.dur,
+            '--confetti-rot': c.rot,
+            '--confetti-x': c.x
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Área con detección de presión larga (touch): usada en tarjetas de pedido para
+// abrir acciones rápidas. Ignora gestos sobre controles interactivos.
+function LongPressArea({ onLongPress, children, ...rest }) {
+  const timer = useRef(null);
+  const start = useRef({ x: 0, y: 0 });
+
+  const clearTimer = () => {
+    clearTimeout(timer.current);
+    timer.current = null;
+  };
+
+  useEffect(() => clearTimer, []);
+
+  const handleStart = (e) => {
+    if (!onLongPress) return;
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.target;
+    if (t && t.closest && t.closest('button, a, input, textarea, select, [data-no-longpress]')) return;
+    start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    clearTimer();
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      haptic(16);
+      onLongPress();
+    }, 480);
+  };
+
+  const handleMove = (e) => {
+    if (!timer.current || !e.touches || !e.touches.length) return;
+    const dx = e.touches[0].clientX - start.current.x;
+    const dy = e.touches[0].clientY - start.current.y;
+    if (Math.hypot(dx, dy) > 12) clearTimer();
+  };
+
+  return (
+    <div
+      onTouchStart={handleStart}
+      onTouchMove={handleMove}
+      onTouchEnd={clearTimer}
+      onTouchCancel={clearTimer}
+      onContextMenu={(e) => { if (timer.current || onLongPress) e.preventDefault(); }}
+      {...rest}
+    >
+      {children}
+    </div>
+  );
+}
+
+// Toast deslizable: en móvil se descarta arrastrando hacia los lados.
+// El gesto sigue el dedo con fade; al superar ~72px sale volando y se remueve.
+function ToastItem({ toast, meta, onDismiss }) {
+  const ref = useRef(null);
+  const gesture = useRef({ x0: 0, y0: 0, dx: 0, locked: false, active: false });
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+
+    let flyTimer = null;
+    const finish = (dirX) => {
+      clearTimeout(flyTimer);
+      el.style.transition = 'transform 0.18s ease-in, opacity 0.18s ease-in';
+      el.style.transform = `translateX(${dirX * 120}%)`;
+      el.style.opacity = '0';
+      flyTimer = setTimeout(() => dismissRef.current(), 180);
+    };
+
+    const onStart = (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      gesture.current = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, dx: 0, locked: false, active: true };
+    };
+    const onMove = (e) => {
+      const g = gesture.current;
+      if (!g.active || !e.touches || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - g.x0;
+      const dy = e.touches[0].clientY - g.y0;
+      if (!g.locked) {
+        if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy)) g.locked = true;
+        else if (Math.abs(dy) > 14) { g.active = false; return; }
+        else return;
+      }
+      g.dx = dx;
+      el.style.transition = 'none';
+      el.style.transform = `translateX(${dx}px)`;
+      el.style.opacity = String(Math.max(0.25, 1 - Math.abs(dx) / 160));
+    };
+    const onEnd = () => {
+      const g = gesture.current;
+      if (!g.locked) { g.active = false; return; }
+      g.active = false;
+      if (Math.abs(g.dx) > 72) {
+        finish(Math.sign(g.dx) || 1);
+      } else {
+        el.style.transition = 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease';
+        el.style.transform = '';
+        el.style.opacity = '';
+      }
+      g.locked = false;
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: true });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    el.addEventListener('touchcancel', onEnd, { passive: true });
+    return () => {
+      clearTimeout(flyTimer);
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      role="status"
+      className="pointer-events-auto relative overflow-hidden rounded-xl bg-slate-950/90 backdrop-blur-xl border border-white/10 animate-toast-in cursor-grab active:cursor-grabbing select-none touch-pan-y"
+      style={{ boxShadow: `0 8px 32px -8px ${meta.glow}, 0 4px 16px rgba(0,0,0,0.5)` }}
+    >
+      <span className={`absolute top-0 left-0 h-full w-[3px] bg-gradient-to-b ${meta.progress} opacity-80`} />
+      <div className="flex items-center gap-2.5 py-2.5 pl-3.5 pr-2.5">
+        <span className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${meta.chip}`}>
+          <Icon name={meta.icon} className="w-4 h-4" />
+        </span>
+        <p className="flex-1 text-[13px] text-slate-100 leading-snug min-w-0">{toast.message}</p>
+        <button
+          onClick={() => dismissRef.current()}
+          aria-label="Cerrar notificación"
+          data-no-swipe
+          className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+        >
+          <Icon name="x" className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <span className={`absolute bottom-0 left-0 h-[2px] bg-gradient-to-r ${meta.progress} animate-toast-progress`} />
+    </div>
+  );
+}
+
 // Persistencia de favoritos del cliente (ids de productos, localStorage)
 const FAVORITES_KEY = 'kiosko_favorites';
 
@@ -1070,6 +1433,12 @@ export default function App() {
   // sin recargar) y estado de conexión para el badge "Modo sin conexión".
   const [updateReady, setUpdateReady] = useState(false);
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+  // Cola de acciones offline (pedidos pendientes de enviar al reconectar).
+  const [queuedCount, setQueuedCount] = useState(() => outbox.count());
+  // Refs puente: los listeners de conexión se registran antes de que existan
+  // loadState/flushOutbox; estos refs se actualizan cuando quedan definidos.
+  const flushOutboxRef = useRef(() => {});
+  const loadStateRef = useRef(() => {});
 
   // Tutorial de instalación PWA: notificación en cada recarga. Se respeta el
   // "no volver a preguntar" solo durante la sesión (al cerrar sesión se limpia
@@ -1150,8 +1519,13 @@ export default function App() {
 
   useEffect(() => {
     const onUpdate = () => setUpdateReady(true);
-    const onOnline = () => setIsOffline(false);
     const onOffline = () => setIsOffline(true);
+    // Al volver la conexión: reenvía la cola de pedidos offline y refresca datos.
+    const onOnline = () => {
+      setIsOffline(false);
+      flushOutboxRef.current();
+      loadStateRef.current({ silent: true });
+    };
     window.addEventListener('kiosko:sw-update', onUpdate);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
@@ -1164,15 +1538,47 @@ export default function App() {
 
   // Auxiliar para persistir el contraste/letra grande del cliente (fallback a tema simple)
 
-  // Alto del header sticky: se pasa a la tienda para anclar el buscador justo debajo
+  // Alto del header sticky: se pasa a la tienda para anclar el buscador justo debajo.
+  // Se mide también con ResizeObserver para que el modo colapsado (scroll) mantenga
+  // sincronizados los overlays que usan headerHeight (ficha, barras sticky).
   const headerRef = useRef(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
 
   useEffect(() => {
     const measure = () => setHeaderHeight(headerRef.current?.offsetHeight || 0);
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    let ro;
+    if (typeof ResizeObserver !== 'undefined' && headerRef.current) {
+      ro = new ResizeObserver(measure);
+      ro.observe(headerRef.current);
+    }
+    return () => {
+      window.removeEventListener('resize', measure);
+      if (ro) ro.disconnect();
+    };
+  }, []);
+
+  // Header colapsable + botón "volver arriba": un solo listener de scroll con rAF.
+  useEffect(() => {
+    let raf = null;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        const y = window.scrollY || 0;
+        setHeaderCollapsed(y > 64);
+        setShowScrollTop(y > 480);
+      });
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, []);
 
   // Server state
@@ -1263,7 +1669,21 @@ export default function App() {
       setIsLoading(true);
       setLoadError('');
     }
-    const res = await api.getState(clientId, { useEtag: hasDataRef.current });
+    let res;
+    try {
+      res = await api.getState(clientId, { useEtag: hasDataRef.current });
+    } catch {
+      // Sin conexión y sin copia local del catálogo: pantalla de error con
+      // reintento automático al volver la conexión.
+      if (!silent) {
+        setLoadError('No hay conexión a internet. Cargaremos todo automáticamente al reconectarte.');
+      }
+      setIsLoading(false);
+      return;
+    }
+    if (res.offline && !silent) {
+      addToast('Sin conexión: mostrando el último catálogo guardado', 'info');
+    }
     if (res.notModified) {
       setIsLoading(false);
       return;
@@ -1295,6 +1715,51 @@ export default function App() {
     hasDataRef.current = true;
     setIsLoading(false);
   }, [clientId, isAdminAuthed]);
+
+  // Puente para los listeners de conexión registrados antes de esta definición.
+  loadStateRef.current = loadState;
+
+  // Reenvía la cola de pedidos guardados sin conexión. Recorre en orden y se
+  // detiene ante la primera falla de red (se reintenta en el próximo "online").
+  const flushingOutboxRef = useRef(false);
+  const flushOutbox = useCallback(async () => {
+    if (flushingOutboxRef.current) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    flushingOutboxRef.current = true;
+    try {
+      for (const job of outbox.list()) {
+        if (job.kind !== 'createOrder') continue;
+        let res;
+        try {
+          res = await api.createOrder(job.payload);
+        } catch {
+          break; // sigue sin conexión
+        }
+        if (res.ok) {
+          outbox.remove(job.id);
+          setQueuedCount(outbox.count());
+          playChime();
+          addToast(`Pedido ${res.data.order?.id || ''} enviado (estaba en cola offline)`, 'success');
+        } else if (res.status >= 400 && res.status < 500) {
+          // Rechazado por el servidor (stock, validación): no reintentar eternamente.
+          outbox.remove(job.id);
+          setQueuedCount(outbox.count());
+          addToast('Un pedido de la cola fue rechazado por el servidor', 'warning');
+        } else {
+          break; // error de red/5xx: reintentar después
+        }
+      }
+    } finally {
+      flushingOutboxRef.current = false;
+      setQueuedCount(outbox.count());
+    }
+  }, []);
+  flushOutboxRef.current = flushOutbox;
+
+  // Al abrir la app con cola pendiente y conexión, se envía de inmediato.
+  useEffect(() => {
+    if (outbox.count() > 0) flushOutbox();
+  }, [flushOutbox]);
 
   // Costos de productos: solo para el admin (no viajan en /api/state público).
   const loadProductCosts = useCallback(async () => {
@@ -1988,10 +2453,12 @@ export default function App() {
   // Cambio de tab del admin desde la barra inferior: carga clientes/cobros
   // cuando hace falta (mismo comportamiento que las pestañas del panel).
   const handleAdminTabChange = (key) => {
-    setActiveView('admin');
     if (key === 'benefited' || key === 'blacklist') loadCustomers();
     if (key === 'blacklist') loadCollections();
-    setAdminTab(key);
+    withViewTransition(() => {
+      setActiveView('admin');
+      setAdminTab(key);
+    });
   };
 
   const handleToggleBenefited = async (phone, benefited) => {
@@ -2292,6 +2759,19 @@ export default function App() {
       addToast('¡Pedido realizado con éxito!', 'success');
     } catch (err) {
       console.error('[kiosko] Error al crear pedido:', err);
+      if ((err && err.offline) || typeof navigator !== 'undefined' && navigator.onLine === false || err instanceof TypeError) {
+        // Sin conexión: el pedido entra a la cola offline y se envía solo al
+        // reconectar. Se cierra el checkout y se libera el carrito para que no
+        // haya doble envío manual.
+        outbox.push({ kind: 'createOrder', payload: orderPayload });
+        setQueuedCount(outbox.count());
+        setCart([]);
+        setIsCheckoutOpen(false);
+        setIsCartOpen(false);
+        haptic([30, 50, 30]);
+        addToast('Sin conexión: tu pedido quedó en cola y se enviará automáticamente.', 'warning');
+        return;
+      }
       addToast('No se pudo enviar el pedido. Revisa tu conexión e intenta de nuevo.', 'error');
     } finally {
       setIsPlacingOrder(false);
@@ -2750,19 +3230,35 @@ export default function App() {
     setOrders(res.data.state.orders || []);
     if (res.data.state.customers) setAllCustomers(res.data.state.customers);
     await loadState({ silent: true });
+    playChime();
+    celebrate();
     addToast(`Venta registrada: ${formatUsd(total)}`, 'success');
     return { ok: true, order: res.data.order };
   };
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
+    // Optimistic UI: la tarjeta refleja el cambio al instante; si el servidor
+    // falla, se revierte al estado previo y se avisa con un toast.
+    const prevOrders = orders;
+    const changed = prevOrders.some((o) => o.id === orderId && o.status !== newStatus);
+    if (changed) {
+      setOrders(prevOrders.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o)));
+      haptic(newStatus === 'entregado' || newStatus === 'cancelado' ? [16, 40, 16] : 12);
+    }
     const res = await api.updateOrderStatus(orderId, newStatus);
     if (!res.ok) {
+      if (changed) setOrders(prevOrders);
       addToast(res.data.error || 'No se pudo actualizar el pedido', 'error');
       return;
     }
     setOrders(res.data.state.orders || []);
     // Actualizar también la lista de clientes (para que Lista Negra refleje el balance)
     if (res.data.state.customers) setAllCustomers(res.data.state.customers);
+    // Pedido entregado: chime + confeti breve en el panel.
+    if (newStatus === 'entregado') {
+      playChime();
+      celebrate();
+    }
     addToast(`Estado del pedido ${orderId} actualizado a ${STATUS_LABELS[newStatus] || newStatus}`);
     // Si el pedido pertenece al cliente actual, refrescar su perfil (balance actualizado)
     const updatedOrder = res.data.state.orders?.find((o) => o.id === orderId);
@@ -2930,28 +3426,12 @@ export default function App() {
         {toasts.map((toast) => {
           const meta = TOAST_META[toast.type] || TOAST_META.success;
           return (
-            <div
+            <ToastItem
               key={toast.id}
-              role="status"
-              className="pointer-events-auto relative overflow-hidden rounded-xl bg-slate-950/90 backdrop-blur-xl border border-white/10 animate-toast-in"
-              style={{ boxShadow: `0 8px 32px -8px ${meta.glow}, 0 4px 16px rgba(0,0,0,0.5)` }}
-            >
-              <span className={`absolute top-0 left-0 h-full w-[3px] bg-gradient-to-b ${meta.progress} opacity-80`} />
-              <div className="flex items-center gap-2.5 py-2.5 pl-3.5 pr-2.5">
-                <span className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${meta.chip}`}>
-                  <Icon name={meta.icon} className="w-4 h-4" />
-                </span>
-                <p className="flex-1 text-[13px] text-slate-100 leading-snug min-w-0">{toast.message}</p>
-                <button
-                  onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
-                  aria-label="Cerrar notificación"
-                  className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-                >
-                  <Icon name="x" className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <span className={`absolute bottom-0 left-0 h-[2px] bg-gradient-to-r ${meta.progress} animate-toast-progress`} />
-            </div>
+              toast={toast}
+              meta={meta}
+              onDismiss={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+            />
           );
         })}
       </div>
@@ -2987,7 +3467,12 @@ export default function App() {
       {isOffline && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[58] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/95 border border-slate-700 text-[11px] font-semibold text-slate-300 shadow-lg backdrop-blur-md animate-fade-in">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-          Modo sin conexión · datos locales
+          Modo sin conexión · catálogo guardado
+          {queuedCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black">
+              {queuedCount} en cola
+            </span>
+          )}
         </div>
       )}
 
@@ -3095,17 +3580,17 @@ export default function App() {
         </div>
       )}
 
-      {/* Modern Glassmorphic Top Navbar */}
-      <header ref={headerRef} style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top, 0px))' }} className="sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 transition-all">
+      {/* Modern Glassmorphic Top Navbar — colapsable al scrollear (móvil) */}
+      <header ref={headerRef} style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top, 0px))' }} className={`sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 transition-all duration-300 ${headerCollapsed ? 'py-1.5 sm:py-2' : 'py-2.5 sm:py-3'}`}>
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <BrandLogo className="w-10 h-10 sm:w-11 sm:h-11" />
-            <div className="min-w-0">
-              <h1 className="font-display text-lg sm:text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate">
+            <BrandLogo className={`transition-all duration-300 ${headerCollapsed ? 'w-8 h-8 sm:w-9 sm:h-9' : 'w-10 h-10 sm:w-11 sm:h-11'}`} />
+            <div className={`min-w-0 transition-all duration-300 ${headerCollapsed ? '-space-y-0.5' : ''}`}>
+              <h1 className={`font-display font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-teal-400 bg-clip-text text-transparent leading-tight truncate transition-all duration-300 ${headerCollapsed ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'}`}>
                 Empresas Alvarados
               </h1>
-              <span className="hidden sm:flex text-xs text-teal-400/90 font-medium items-center gap-1.5">
+              <span className={`text-xs text-teal-400/90 font-medium items-center gap-1.5 overflow-hidden transition-all duration-300 ${headerCollapsed ? 'hidden' : 'hidden sm:flex'}`}>
                 <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping inline-block" />
                 Abierto Ahora • Atención Rápida
               </span>
@@ -3115,7 +3600,7 @@ export default function App() {
           {/* Mode Switcher: Customer vs Admin Panel */}
           <div className="flex items-center gap-1 sm:gap-2 bg-slate-800/90 p-1 rounded-xl sm:p-1.5 sm:rounded-2xl border border-slate-700/60 shadow-inner shrink-0">
             <button
-              onClick={() => setActiveView('customer')}
+              onClick={() => withViewTransition(() => setActiveView('customer'))}
               className={`px-2.5 sm:px-4 py-2 rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 flex items-center gap-1.5 sm:gap-2 ${
                 activeView === 'customer'
                   ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-md shadow-teal-500/20'
@@ -3127,7 +3612,7 @@ export default function App() {
             </button>
             {(isCurrentAdmin || isAdminAuthed) && (
               <button
-                onClick={() => setActiveView('admin')}
+                onClick={() => withViewTransition(() => setActiveView('admin'))}
                 className={`px-2.5 sm:px-4 py-2 rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 flex items-center gap-1.5 sm:gap-2 ${
                   activeView === 'admin'
                     ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 shadow-md shadow-cyan-500/20'
@@ -3204,7 +3689,7 @@ export default function App() {
       {/* Main Container */}
       <main className={`flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 lg:p-6 ${activeView === 'customer' && cartCount > 0 ? 'pb-36 sm:pb-8' : 'pb-24 sm:pb-8'}`}>
         {isLoading ? (
-          <LoadingScreen />
+          <LoadingScreen variant={activeView === 'admin' && isAdminAuthed ? 'orders' : 'catalog'} />
         ) : loadError ? (
           <LoadErrorScreen error={loadError} onRetry={loadState} />
         ) : activeView === 'customer' ? (
@@ -3567,9 +4052,11 @@ onEditProduct={(product) => {
         activeView={activeView}
         customerTab={customerTab}
         onCustomerTab={(tab) => {
-          setActiveView('customer');
-          setCustomerTab(tab);
-          setFocusCustomerSection(null);
+          withViewTransition(() => {
+            setActiveView('customer');
+            setCustomerTab(tab);
+            setFocusCustomerSection(null);
+          });
           if (tab === 'orders') setIsOrdersDrawerOpen(true);
           if (tab === 'account') {
             setDebtDrawerMode('saldo');
@@ -3586,13 +4073,17 @@ onEditProduct={(product) => {
           setIsCartOpen(true);
         }}
         onGoAdmin={() => {
-          setIsIdentityOpen(false);
-          setActiveView('admin');
-          setAdminTab('inventory');
+          withViewTransition(() => {
+            setIsIdentityOpen(false);
+            setActiveView('admin');
+            setAdminTab('inventory');
+          });
         }}
         onGoStore={() => {
-          setActiveView('customer');
-          setCustomerTab('store');
+          withViewTransition(() => {
+            setActiveView('customer');
+            setCustomerTab('store');
+          });
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onCustomerLogout={openIdentityLogout}
@@ -3604,6 +4095,26 @@ onEditProduct={(product) => {
         onLogout={handleAdminLogout}
         isAdminAuthed={isAdminAuthed}
       />
+
+      {/* Botón flotante "volver arriba": aparece al scrollear; en el panel muestra
+          el badge de pedidos pendientes para no perderse novedades. */}
+      {showScrollTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="Volver arriba"
+          className="fixed right-3 sm:right-6 bottom-[calc(5rem+env(safe-area-inset-bottom))] sm:bottom-6 z-[45] w-11 h-11 rounded-full bg-slate-900/95 backdrop-blur-md border border-slate-700 shadow-xl shadow-black/40 text-slate-200 hover:text-teal-300 hover:border-teal-500/50 flex items-center justify-center animate-fade-in btn-sink transition-colors"
+        >
+          <Icon name="chevronUp" className="w-5 h-5" />
+          {activeView === 'admin' && isAdminAuthed && orders.some((o) => o.status === 'pendiente') && (
+            <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center animate-badge-pop">
+              {orders.filter((o) => o.status === 'pendiente').length}
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* Celebración global (confeti + check): la dispara el evento kiosko:celebrate */}
+      <CelebrationBurst />
 
       {/* Footer */}
       <footer
@@ -4218,21 +4729,35 @@ function OrderSuccessOverlay({ order, onClose, onTrack, onShare }) {
 }
 
 function LoadErrorScreen({ error, onRetry }) {
+  // Reintento automático: al volver la conexión se recarga el estado solo.
+  useEffect(() => {
+    if (typeof onRetry !== 'function') return undefined;
+    const onOnline = () => onRetry();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [onRetry]);
+
   return (
-    <div className="py-24 flex flex-col items-center justify-center text-center space-y-5 max-w-md mx-auto">
-      <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
-        <Icon name="alertTriangle" className="w-7 h-7" />
+    <div className="py-20 flex flex-col items-center justify-center text-center space-y-5 max-w-md mx-auto animate-fade-in">
+      <div className="relative">
+        <span className="absolute inset-0 rounded-3xl bg-amber-500/20 blur-xl animate-pulse" aria-hidden="true" />
+        <div className="relative w-16 h-16 rounded-3xl bg-slate-800 border border-amber-500/40 text-amber-300 flex items-center justify-center">
+          <Icon name="wifiOff" className="w-8 h-8" />
+        </div>
       </div>
-      <div>
-        <h2 className="text-lg font-bold text-white">No se pudo conectar</h2>
-        <p className="text-xs text-slate-400 mt-1 leading-relaxed">{error}</p>
+      <div className="space-y-1.5 px-4">
+        <h2 className="text-lg font-black text-white">Sin conexión</h2>
+        <p className="text-xs text-slate-400 leading-relaxed">{error}</p>
+        <p className="text-[11px] text-slate-500">
+          Reintentamos automáticamente apenas vuelva tu internet.
+        </p>
       </div>
       <button
         onClick={onRetry}
         className="px-5 py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
       >
         <Icon name="refresh" className="w-4 h-4" />
-        Reintentar
+        Reintentar ahora
       </button>
     </div>
   );
@@ -7196,6 +7721,8 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
   const [nowMs, setNowMs] = useState(Date.now());
 
   useOverlay(isOpen, onClose);
+  // Swipe hacia abajo para cerrar (solo móvil / bottom sheet).
+  const sheetRef = useSwipeToClose(onClose, isOpen);
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -7212,7 +7739,9 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+      <div ref={sheetRef} className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+        {/* Asa de arrastre (móvil): la hoja se cierra deslizando hacia abajo */}
+        <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-600/70 pointer-events-none z-20" aria-hidden="true" />
         {/* Drawer Header */}
         <div className="pt-[max(1rem,env(safe-area-inset-top))] p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
@@ -7237,7 +7766,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
         </div>
 
         {/* Drawer Body - Items list */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 sm:space-y-4">
+        <div data-sheet-scroll className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 sm:space-y-4">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-3 text-slate-500">
               <Icon name="shoppingBag" className="w-16 h-16 stroke-1 text-slate-700" />
@@ -7371,6 +7900,8 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
   const PAGE_SIZE = 6;
 
   useOverlay(isOpen, onClose);
+  // Swipe hacia abajo para cerrar (solo móvil / bottom sheet).
+  const sheetRef = useSwipeToClose(onClose, isOpen);
 
   const filtered = useMemo(() => {
     const now = new Date();
@@ -7406,7 +7937,9 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-slate-950/80 backdrop-blur-md animate-fade-in">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+      <div ref={sheetRef} className="relative w-full sm:max-w-md glass-strong bg-slate-900 sm:h-full h-[92dvh] sm:border-l border-t sm:border-t-0 border-slate-800 shadow-2xl flex flex-col z-10 sm:animate-slide-left animate-screen-up">
+        {/* Asa de arrastre (móvil): la hoja se cierra deslizando hacia abajo */}
+        <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-600/70 pointer-events-none z-20" aria-hidden="true" />
         {/* Drawer Header */}
         <div className="pt-[max(1rem,env(safe-area-inset-top))] p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
@@ -7427,7 +7960,7 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
         </div>
 
         {/* Drawer Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+        <div data-sheet-scroll className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
           {(!orders || orders.length === 0) ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-3 text-slate-500">
               <Icon name="package" className="w-16 h-16 stroke-1 text-slate-700" />
@@ -9709,12 +10242,16 @@ function AdminView({
   const [showStorePicker, setShowStorePicker] = useState(false);
   const [proofOrder, setProofOrder] = useState(null);
   const [fichaOrder, setFichaOrder] = useState(null);
+  // Acciones rápidas por long-press en la tarjeta de pedido (Activos).
+  const [quickMenuOrder, setQuickMenuOrder] = useState(null);
   const openFicha = (o) => {
     setFichaOrder(o);
   };
   const closeFicha = () => {
     setFichaOrder(null);
   };
+  // Swipe hacia abajo para cerrar la ficha (bottom sheet en móvil).
+  const fichaSheetRef = useSwipeToClose(closeFicha, Boolean(fichaOrder));
 
   // Mientras la ficha está abierta se bloquea el scroll de la página: solo se
   // desplaza el contenedor interno de la ficha.
@@ -10505,9 +11042,13 @@ function AdminView({
     const missingStock = lowStockInOrder(order);
     const isPinned = pinnedOrders.includes(order.id);
     const payPending = needsPaymentValidation(order);
+    // Long-press (touch) abre acciones rápidas solo en la lista, no en la ficha.
+    const CardShell = inFicha ? 'div' : LongPressArea;
+    const shellProps = inFicha ? {} : { onLongPress: () => setQuickMenuOrder(order) };
     return (
-      <div
+      <CardShell
         key={order.id}
+        {...shellProps}
         className={`p-4 sm:p-5 rounded-3xl bg-slate-800/80 border shadow-xl space-y-4 flex flex-col justify-between ${payPending ? 'border-amber-500/50' : st.ring}`}
       >
         <div className="space-y-3">
@@ -10836,7 +11377,7 @@ function AdminView({
           </>
           )}
         </div>
-      </div>
+      </CardShell>
     );
   };
 
@@ -10987,7 +11528,7 @@ function AdminView({
           </div>
           <div className="min-w-0">
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Total Productos</span>
-            <span className="text-xl sm:text-2xl font-black text-white">{products.length}</span>
+            <AnimatedNumber value={products.length} className="text-xl sm:text-2xl font-black text-white tabular-nums" />
           </div>
         </div>
 
@@ -10997,7 +11538,7 @@ function AdminView({
           </div>
           <div className="min-w-0">
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Stock Bajo</span>
-            <span className="text-xl sm:text-2xl font-black text-amber-400">{lowStockProducts.length}</span>
+            <AnimatedNumber value={lowStockProducts.length} className="text-xl sm:text-2xl font-black text-amber-400 tabular-nums" />
           </div>
         </div>
 
@@ -11007,7 +11548,7 @@ function AdminView({
           </div>
           <div className="min-w-0">
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Pedidos Activos</span>
-            <span className="text-xl sm:text-2xl font-black text-cyan-400">{pendingOrders.length}</span>
+            <AnimatedNumber value={pendingOrders.length} className="text-xl sm:text-2xl font-black text-cyan-400 tabular-nums" />
           </div>
         </div>
 
@@ -11017,14 +11558,16 @@ function AdminView({
           </div>
           <div className="min-w-0">
             <span className="text-[10px] sm:text-xs text-slate-400 font-medium block">Ingresos</span>
-            <span className="text-lg sm:text-2xl font-black text-emerald-400 truncate">
-              {formatUsd(totalRevenue)}
-              {rate?.rate > 0 && (
-                <span className="hidden sm:block text-[11px] text-slate-400 font-semibold">
-                  {formatBs(usdToBs(totalRevenue, rate.rate))}
-                </span>
-              )}
-            </span>
+            <AnimatedNumber
+              value={totalRevenue}
+              format={(v) => formatUsd(v)}
+              className="text-lg sm:text-2xl font-black text-emerald-400 truncate tabular-nums"
+            />
+            {rate?.rate > 0 && (
+              <span className="hidden sm:block text-[11px] text-slate-400 font-semibold">
+                {formatBs(usdToBs(totalRevenue, rate.rate))}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -13059,7 +13602,9 @@ function AdminView({
         >
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={closeFicha} />
           <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-            <div className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring flex flex-col max-h-full">
+            <div ref={fichaSheetRef} className="pointer-events-auto relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring flex flex-col max-h-full">
+              {/* Asa de arrastre: indica que la hoja se puede cerrar con swipe */}
+              <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-600/70 pointer-events-none z-20" aria-hidden="true" />
               <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900/95">
                 <div>
                   <h3 className="font-black text-white text-sm flex items-center gap-2">
@@ -13070,19 +13615,66 @@ function AdminView({
                 </div>
                 <button
                   onClick={closeFicha}
+                  data-no-swipe
                   className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-all shrink-0"
                   aria-label="Cerrar ficha"
                 >
                   <Icon name="x" className="w-4 h-4" />
                 </button>
               </div>
-              <div className="px-4 sm:px-5 pt-2 sm:pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-6 overflow-y-auto flex-1 min-h-0">
+              <div data-sheet-scroll className="px-4 sm:px-5 pt-2 sm:pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-6 overflow-y-auto flex-1 min-h-0">
                 <OrderStepsTimeline order={fichaOrder} />
                 <div className="mt-4">
                   {renderOrderCard(fichaOrder, { inFicha: true })}
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Acciones rápidas del pedido (long-press en la tarjeta en Activos) */}
+      {quickMenuOrder && (
+        <div className="fixed inset-0 z-[85] flex items-end sm:items-center justify-center pb-[calc(5rem+env(safe-area-inset-bottom))] sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="absolute inset-0" onClick={() => setQuickMenuOrder(null)} />
+          <div role="menu" aria-label={`Acciones rápidas del pedido ${quickMenuOrder.id}`} className="relative w-full sm:max-w-xs glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-4 space-y-2 z-10 animate-modal-spring">
+            <p className="text-[11px] uppercase tracking-wider text-slate-500 font-black px-1 pb-1">
+              Pedido {quickMenuOrder.id} · {STATUS_LABELS[quickMenuOrder.status] || quickMenuOrder.status}
+            </p>
+            {(() => {
+              const next = nextOrderStatus(quickMenuOrder);
+              if (!next || needsPaymentValidation(quickMenuOrder)) return null;
+              return (
+                <button
+                  onClick={() => {
+                    const n = next;
+                    setQuickMenuOrder(null);
+                    onUpdateOrderStatus(quickMenuOrder.id, n);
+                  }}
+                  className="w-full py-3 px-3 rounded-xl bg-teal-500/15 border border-teal-500/40 text-teal-300 font-bold text-sm flex items-center gap-2 hover:bg-teal-500/25 transition-all"
+                >
+                  <Icon name="arrowRight" className="w-4 h-4" />
+                  Avanzar a {STATUS_LABELS[next] || next}
+                </button>
+              );
+            })()}
+            <button
+              onClick={() => {
+                const o = quickMenuOrder;
+                setQuickMenuOrder(null);
+                openFicha(o);
+              }}
+              className="w-full py-3 px-3 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-200 font-bold text-sm flex items-center gap-2 hover:bg-slate-700 transition-all"
+            >
+              <Icon name="eye" className="w-4 h-4" />
+              Ver ficha completa
+            </button>
+            <button
+              onClick={() => setQuickMenuOrder(null)}
+              data-no-longpress
+              className="w-full py-2.5 rounded-xl bg-slate-800 text-slate-400 font-bold text-xs hover:text-white transition-all"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       )}
@@ -14632,6 +15224,8 @@ function DebtDetailModal({
 // a bolívares según la tasa del día.
 function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = 'deuda', headerHeight = 0 }) {
   useOverlay(true, onClose);
+  // Swipe hacia abajo para cerrar (solo móvil / bottom sheet).
+  const sheetRef = useSwipeToClose(onClose);
   const key = normalizePhoneDigits(customer.phone);
   const debtOrders = (orders || [])
     .filter((o) => normalizePhoneDigits(o.phone) === key && o.credit && o.status === 'entregado')
@@ -14770,7 +15364,9 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div ref={sheetRef} className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        {/* Asa de arrastre (móvil): la hoja se cierra deslizando hacia abajo */}
+        <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-600/70 pointer-events-none z-20" aria-hidden="true" />
         <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -14804,7 +15400,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+        <div data-sheet-scroll className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {isSaldoView ? (
             <div className="space-y-3">
               {walletAmount > 0 ? (
@@ -17095,6 +17691,8 @@ function FacturaQr360({ order, rate }) {
 
 function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast, headerHeight = 0 }) {
   useOverlay(true, onClose);
+  // Swipe hacia abajo para cerrar (solo móvil / bottom sheet).
+  const sheetRef = useSwipeToClose(onClose);
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
   const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
@@ -17102,7 +17700,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
     <div className="fixed inset-x-0 bottom-0 z-[70] overflow-hidden animate-fade-in" style={{ top: headerHeight }}>
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring max-h-full flex flex-col">
+        <div ref={sheetRef} className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden z-10 animate-modal-spring max-h-full flex flex-col">
+        {/* Asa de arrastre (móvil): la hoja se cierra deslizando hacia abajo */}
+        <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-600/70 pointer-events-none z-20" aria-hidden="true" />
         <div className="p-4 sm:p-6 border-b border-slate-800 shrink-0 bg-slate-900 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base sm:text-lg font-black text-white">
@@ -17113,12 +17713,12 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
               {needsPaymentValidation(order) ? 'Pago en revisión' : STATUS_LABELS[order.status] || 'Pendiente'}
             </span>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
+          <button onClick={onClose} data-no-swipe className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
             <Icon name="x" className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+        <div data-sheet-scroll className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {needsPaymentValidation(order) && (
             <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
               <Icon name="clock" className="w-4 h-4 shrink-0" />
@@ -17482,6 +18082,8 @@ function VoiceOrderModal({ items, onConfirm, onRetry, onClose, loading, listenin
 // productos favoritos, rachas y próximos pedidos activos.
 function MyKioskoModal({ customer, customerName, orders, products, rate, onClose, onRepeatLastOrder, headerHeight = 0 }) {
   useOverlay(true, onClose);
+  // Swipe hacia abajo para cerrar (solo móvil / bottom sheet).
+  const sheetRef = useSwipeToClose(onClose);
   const customerOrders = useMemo(() => {
     if (!customer?.phone) return [];
     const key = normalizePhoneDigits(customer.phone);
@@ -17525,7 +18127,9 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       <div className="relative h-full flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none">
-        <div className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        <div ref={sheetRef} className="pointer-events-auto relative w-full sm:max-w-lg glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up max-h-full flex flex-col">
+        {/* Asa de arrastre (móvil): la hoja se cierra deslizando hacia abajo */}
+        <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-600/70 pointer-events-none z-20" aria-hidden="true" />
 <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -17541,7 +18145,7 @@ function MyKioskoModal({ customer, customerName, orders, products, rate, onClose
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+        <div data-sheet-scroll className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Métricas principales */}
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700">

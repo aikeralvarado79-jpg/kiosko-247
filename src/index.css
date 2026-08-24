@@ -866,3 +866,33 @@ html[data-theme="light"] .shelf-product__shadow { background: radial-gradient(el
   100% { opacity: 1; transform: scale(1); }
 }
 .success-order-num { animation: success-order-num 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both; }
+
+/* ------------------------------------------------------------------ */
+/*  Celebración breve del panel admin (entrega / venta de mostrador)    */
+/* ------------------------------------------------------------------ */
+/* Variante de una sola pasada del confeti existente: cae y desaparece. */
+.confetti-once {
+  animation-iteration-count: 1;
+  animation-fill-mode: both;
+}
+
+@keyframes celebrate-check-pop {
+  0% { transform: translate(-50%, 0) scale(0); opacity: 0; }
+  40% { transform: translate(-50%, 0) scale(1.18); opacity: 1; }
+  65% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -14px) scale(1); opacity: 0; }
+}
+.celebrate-check-pop { animation: celebrate-check-pop 1.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Transición entre pestañas con View Transitions API (fallback: fade local). */
+::view-transition-old(root) { animation: kvt-out 0.16s ease both; }
+::view-transition-new(root) { animation: kvt-in 0.22s ease both; }
+@keyframes kvt-out { to { opacity: 0; } }
+@keyframes kvt-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti-once,
+  .celebrate-check-pop { animation: none !important; }
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none !important; }
+}

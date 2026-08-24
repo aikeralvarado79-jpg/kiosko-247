@@ -2828,6 +2828,9 @@ export default function App() {
 
   const handlePlaceOrder = async (formData) => {
     if (cart.length === 0 || isPlacingOrder) return;
+    // Garantía anti-doble-envío: aunque el estado tarde un tick, el módulo
+    // bloquea un segundo submit concurrente (evita cargos/pedidos duplicados).
+    return withInflightGuard('place-order', async () => {
     setIsPlacingOrder(true);
 
     const orderPayload = {
@@ -2935,6 +2938,7 @@ export default function App() {
     } finally {
       setIsPlacingOrder(false);
     }
+    });
   };
 
   // Desde el overlay de éxito: cierra la celebración y abre el detalle del
@@ -15840,6 +15844,9 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
       addToast('Adjunta el comprobante del abono', 'error');
       return;
     }
+    // Garantía anti-doble-envío de pagos: un solo submit concurrente por
+    // cliente aunque el estado tarde en refrescarse.
+    return withInflightGuard(`pago:${key}`, async () => {
     setSending(true);
     try {
       const res = await api.createPayment({
@@ -15865,6 +15872,7 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
     } finally {
       setSending(false);
     }
+    });
   };
 
   return (
@@ -16041,7 +16049,9 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                       className="py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
                     >
                       {sending ? (
-                        <Icon name="refresh" className="w-4 h-4 animate-spin" />
+                        <>
+                          <Icon name="refresh" className="w-4 h-4 animate-spin" /> Procesando…
+                        </>
                       ) : (
                         <>
                           <Icon name="check" className="w-4 h-4" /> Enviar depósito
@@ -16335,7 +16345,9 @@ function CustomerDebtModal({ customer, orders, rate, onClose, addToast, mode = '
                   className="py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
                 >
                   {sending ? (
-                    <Icon name="refresh" className="w-4 h-4 animate-spin" />
+                    <>
+                      <Icon name="refresh" className="w-4 h-4 animate-spin" /> Procesando…
+                    </>
                   ) : (
                     <>
                       <Icon name="check" className="w-4 h-4" /> Enviar abono

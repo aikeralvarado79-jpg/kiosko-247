@@ -11513,8 +11513,16 @@ function AdminView({
           <OrderChat order={order} />
         </div>
 
-        {/* Status Update Controls */}
-        <div className="pt-3 border-t border-slate-700/60 space-y-2">
+        {/* Status Update Controls — en la ficha queda pegado al pie del panel:
+            siempre visible sin depender del scroll */}
+        <div
+          data-no-swipe
+          className={`pt-3 border-t border-slate-700/60 space-y-2 ${
+            inFicha
+              ? 'sticky bottom-0 z-20 -mx-4 sm:-mx-5 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-3 bg-slate-900/95 backdrop-blur-md'
+              : ''
+          }`}
+        >
           {payPending ? (
             <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
               <Icon name="lock" className="w-3.5 h-3.5 shrink-0" />

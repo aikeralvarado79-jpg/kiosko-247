@@ -909,3 +909,103 @@ html[data-vt-dir='back']::view-transition-new(root) { animation-name: kvt-push-i
   ::view-transition-old(root),
   ::view-transition-new(root) { animation: none !important; }
 }
+
+/* ------------------------------------------------------------------ */
+/*  THEO — mascota perrito marrón (SVG animado por estados)            */
+/* ------------------------------------------------------------------ */
+.theo-tail { transform-origin: 88px 62px; animation: theo-wag 0.9s ease-in-out infinite; }
+@keyframes theo-wag {
+  0%, 100% { transform: rotate(-14deg); }
+  50% { transform: rotate(18deg); }
+}
+.theo-lids { transform-origin: center; animation: theo-blink 4.2s infinite; }
+@keyframes theo-blink {
+  0%, 94%, 100% { transform: scaleY(0); }
+  96% { transform: scaleY(1); }
+}
+.theo-sleep .theo-lids { animation: none; transform: scaleY(1); }
+.theo-happy { animation: theo-hop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.theo-celebrate { animation: theo-celebrate 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) infinite; }
+.theo-pull { animation: theo-squash 0.5s ease-out; transform-origin: bottom center; }
+@keyframes theo-hop {
+  0% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-10px) scale(1.05, 0.95); }
+  70% { transform: translateY(2px) scale(0.97, 1.03); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes theo-celebrate {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-12px) rotate(3deg); }
+}
+@keyframes theo-squash {
+  0% { transform: scale(1, 1); }
+  50% { transform: scale(1.15, 0.8); }
+  100% { transform: scale(1, 1); }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Isla Dinera — píldora flotante de rastreo en vivo                  */
+/* ------------------------------------------------------------------ */
+.order-island {
+  position: fixed;
+  z-index: 46;
+  touch-action: none;
+  transition: left 0.3s cubic-bezier(0.22, 1, 0.36, 1), right 0.3s cubic-bezier(0.22, 1, 0.36, 1), top 0.25s ease;
+  animation: island-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes island-pop {
+  0% { transform: translateY(24px) scale(0.6); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.island-dot {
+  width: 8px; height: 8px; border-radius: 999px; background: #34d399;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5);
+  animation: island-ping 1.6s ease-out infinite;
+}
+@keyframes island-ping {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45); }
+  70% { box-shadow: 0 0 0 9px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tilt 3D de fotos de producto (giroscopio/puntero vía CSS vars)     */
+/* ------------------------------------------------------------------ */
+.prod-photo {
+  transform: perspective(700px)
+    rotateX(calc(var(--tilt-y, 0) * -5deg))
+    rotateY(calc(var(--tilt-x, 0) * 7deg))
+    scale(1.02);
+  transition: transform 0.18s ease-out;
+  will-change: transform;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Estante virtual: madera + productos apoyados                       */
+/* ------------------------------------------------------------------ */
+.shelf-plank {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18)),
+    repeating-linear-gradient(90deg, #6b4a2b 0 26px, #7a5633 26px 54px, #5f4124 54px 80px);
+  border-radius: 6px;
+  box-shadow: 0 10px 18px -6px rgba(0,0,0,0.55), inset 0 2px 0 rgba(255,255,255,0.08);
+}
+.shelf-item img { filter: drop-shadow(0 8px 8px rgba(0,0,0,0.35)); }
+
+/* ------------------------------------------------------------------ */
+/*  Odometer de dígitos para totales                                   */
+/* ------------------------------------------------------------------ */
+.odo-digit { display: inline-block; height: 1em; overflow: hidden; line-height: 1em; vertical-align: baseline; }
+.odo-stack { display: flex; flex-direction: column; transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1); }
+.odo-stack > span { height: 1em; line-height: 1em; }
+
+/* ------------------------------------------------------------------ */
+/*  Salida de overlays (back predictivo / ESC): encoge y desvanece      */
+/* ------------------------------------------------------------------ */
+.overlay-exit { animation: overlay-exit 0.16s ease-in both; }
+@keyframes overlay-exit {
+  to { opacity: 0; transform: scale(0.95) translateY(8px); }
+}
+
+/* Pull-to-refresh con Theo: sin overscroll nativo del navegador */
+html { overscroll-behavior-y: contain; }

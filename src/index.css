@@ -914,7 +914,7 @@ html[data-vt-dir='back']::view-transition-new(root) { animation-name: kvt-push-i
 /*  THEO — mascota perrito marrón (SVG animado por estados)            */
 /* ------------------------------------------------------------------ */
 .theo-tail { transform-origin: 136px 120px; animation: theo-wag 0.9s ease-in-out infinite; }
-.theo-happy .theo-tail { animation-duration: 0.4s; }
+.theo-happy .theo-tail, .theo-petting .theo-tail { animation-duration: 0.32s; }
 @keyframes theo-wag {
   0%, 100% { transform: rotate(-14deg); }
   50% { transform: rotate(18deg); }
@@ -932,6 +932,25 @@ html[data-vt-dir='back']::view-transition-new(root) { animation-name: kvt-push-i
   50% { transform: scale(1.02, 0.97); }
 }
 .theo-inner { transform-origin: bottom center; }
+/* Orejas con vaivén sutil desfasado */
+.theo-ear-l { transform-origin: 64px 30px; animation: theo-ear-l 3.4s ease-in-out infinite; }
+.theo-ear-r { transform-origin: 136px 30px; animation: theo-ear-r 3.8s ease-in-out infinite; }
+@keyframes theo-ear-l {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(2.6deg); }
+}
+@keyframes theo-ear-r {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-2.6deg); }
+}
+/* Corazoncitos al acariciar */
+.theo-heart { animation: theo-heart-rise 0.95s ease-out forwards; will-change: transform, opacity; }
+@keyframes theo-heart-rise {
+  0% { opacity: 0; }
+  18% { opacity: 0.95; }
+  100% { opacity: 0; }
+}
+.theo-boop { animation: theo-hop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .theo-happy { animation: theo-hop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .theo-celebrate { animation: theo-celebrate 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) infinite; }
 .theo-pull { animation: theo-squash 0.5s ease-out; transform-origin: bottom center; }

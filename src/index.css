@@ -913,7 +913,8 @@ html[data-vt-dir='back']::view-transition-new(root) { animation-name: kvt-push-i
 /* ------------------------------------------------------------------ */
 /*  THEO — mascota perrito marrón (SVG animado por estados)            */
 /* ------------------------------------------------------------------ */
-.theo-tail { transform-origin: 88px 62px; animation: theo-wag 0.9s ease-in-out infinite; }
+.theo-tail { transform-origin: 136px 120px; animation: theo-wag 0.9s ease-in-out infinite; }
+.theo-happy .theo-tail { animation-duration: 0.4s; }
 @keyframes theo-wag {
   0%, 100% { transform: rotate(-14deg); }
   50% { transform: rotate(18deg); }
@@ -924,6 +925,13 @@ html[data-vt-dir='back']::view-transition-new(root) { animation-name: kvt-push-i
   96% { transform: scaleY(1); }
 }
 .theo-sleep .theo-lids { animation: none; transform: scaleY(1); }
+.theo-sleep { transform: rotate(-4deg); }
+.theo-sleep .theo-inner { animation: theo-breathe 3.2s ease-in-out infinite; transform-origin: bottom center; }
+@keyframes theo-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.02, 0.97); }
+}
+.theo-inner { transform-origin: bottom center; }
 .theo-happy { animation: theo-hop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .theo-celebrate { animation: theo-celebrate 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) infinite; }
 .theo-pull { animation: theo-squash 0.5s ease-out; transform-origin: bottom center; }

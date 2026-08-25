@@ -1090,40 +1090,134 @@ function AnimatedNumber({ value, format = (v) => String(Math.round(v)), classNam
 // moods: idle (parpadea y mueve la cola) · happy · celebrate · sleep · pull
 function Theo({ mood = 'idle', className = 'w-20 h-16' }) {
   const happy = mood === 'happy' || mood === 'celebrate';
+  const asleep = mood === 'sleep';
   return (
-    <svg viewBox="0 0 120 100" className={`${className} ${mood === 'happy' ? 'theo-happy' : ''} ${mood === 'celebrate' ? 'theo-celebrate' : ''} ${mood === 'sleep' ? 'theo-sleep' : ''}`} aria-hidden="true">
-      {/* cola */}
-      <path className="theo-tail" d="M88 62 Q104 56 100 42" stroke="#6b4226" strokeWidth="7" fill="none" strokeLinecap="round" />
-      {/* orejas caídas */}
-      <path d="M30 26 Q18 40 26 58 Q34 52 38 38 Z" fill="#5d3a1f" />
-      <path d="M74 26 Q86 40 78 58 Q70 52 66 38 Z" fill="#5d3a1f" />
-      {/* cabeza */}
-      <circle cx="52" cy="46" r="26" fill="#8b5e34" />
-      {/* hocico */}
-      <ellipse cx="52" cy="58" rx="14" ry="11" fill="#c99b62" />
-      <ellipse cx="52" cy="52" rx="5" ry="4" fill="#2b1a0e" />
-      {happy && <path d="M45 60 Q52 68 59 60 Z" fill="#e2637a" />}
-      {/* ojos + párpados */}
-      <g>
-        <circle cx="41" cy="40" r={mood === 'sleep' ? 1.4 : 3.4} fill="#241505" />
-        <circle cx="63" cy="40" r={mood === 'sleep' ? 1.4 : 3.4} fill="#241505" />
-        {!happy && mood !== 'sleep' && (
-          <g className="theo-lids">
-            <rect x="36" y="36" width="10" height="8" rx="4" fill="#8b5e34" />
-            <rect x="58" y="36" width="10" height="8" rx="4" fill="#8b5e34" />
+    <svg viewBox="0 0 200 170" className={`${className} ${mood === 'happy' ? 'theo-happy' : ''} ${mood === 'celebrate' ? 'theo-celebrate' : ''} ${mood === 'sleep' ? 'theo-sleep' : ''} ${mood === 'pull' ? 'theo-pull' : ''}`} aria-hidden="true">
+      <defs>
+        <radialGradient id="theoFur" cx="35%" cy="28%" r="85%">
+          <stop offset="0%" stopColor="#b98254" />
+          <stop offset="55%" stopColor="#8f5f33" />
+          <stop offset="100%" stopColor="#6e4523" />
+        </radialGradient>
+        <radialGradient id="theoBody" cx="42%" cy="26%" r="88%">
+          <stop offset="0%" stopColor="#9a6a3d" />
+          <stop offset="70%" stopColor="#7d5228" />
+          <stop offset="100%" stopColor="#63401f" />
+        </radialGradient>
+        <linearGradient id="theoEar" x1="0" y1="0" x2="0.4" y2="1">
+          <stop offset="0%" stopColor="#7a4c26" />
+          <stop offset="100%" stopColor="#4a2d14" />
+        </linearGradient>
+        <radialGradient id="theoCream" cx="50%" cy="38%" r="78%">
+          <stop offset="0%" stopColor="#f6e3c3" />
+          <stop offset="100%" stopColor="#dfbd8b" />
+        </radialGradient>
+        <linearGradient id="theoCollar" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#2dd4bf" />
+          <stop offset="100%" stopColor="#0f766e" />
+        </linearGradient>
+        <filter id="theoSoft" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="1.8" />
+        </filter>
+      </defs>
+
+      {/* Sombra en el suelo */}
+      <ellipse cx="100" cy="160" rx="54" ry="8.5" fill="#000000" opacity="0.22" filter="url(#theoSoft)" />
+
+      <g className={asleep ? 'theo-inner theo-breathe' : 'theo-inner'}>
+        {/* Cola esponjosa detrás del cuerpo */}
+        <g className="theo-tail">
+          <path d="M136 120 Q158 112 166 92" stroke="#5f3c1e" strokeWidth="13" fill="none" strokeLinecap="round" />
+          <path d="M140 116 Q156 108 163 94" stroke="#a9744a" strokeWidth="6.5" fill="none" strokeLinecap="round" opacity="0.85" />
+        </g>
+
+        {/* Cuerpo sentado */}
+        <ellipse cx="100" cy="120" rx="43" ry="37" fill="url(#theoBody)" />
+        {/* Anca trasera */}
+        <circle cx="127" cy="127" r="25" fill="url(#theoBody)" />
+        {/* Pecho crema */}
+        <ellipse cx="96" cy="128" rx="23" ry="25" fill="url(#theoCream)" />
+        {/* Patas delanteras + pies */}
+        <rect x="74" y="132" width="15" height="27" rx="7.5" fill="url(#theoBody)" />
+        <rect x="106" y="132" width="15" height="27" rx="7.5" fill="url(#theoBody)" />
+        <ellipse cx="81.5" cy="157" rx="10.5" ry="6" fill="url(#theoCream)" />
+        <ellipse cx="113.5" cy="157" rx="10.5" ry="6" fill="url(#theoCream)" />
+
+        {/* Collar de la marca + chapita */}
+        <rect x="70" y="99" width="60" height="10" rx="5" fill="url(#theoCollar)" />
+        <circle cx="100" cy="113" r="5" fill="#fbbf24" stroke="#b45309" strokeWidth="1.2" />
+
+        {/* Orejas caídas (detrás de la cabeza) */}
+        <path d="M66 32 C50 26 34 40 36 64 C37 80 47 90 54 85 C61 79 64 56 68 46 Z" fill="url(#theoEar)" />
+        <path d="M134 32 C150 26 166 40 164 64 C163 80 153 90 146 85 C139 79 136 56 132 46 Z" fill="url(#theoEar)" />
+        <path d="M62 40 C52 40 44 52 46 66" stroke="#a9744a" strokeWidth="3" fill="none" opacity="0.5" strokeLinecap="round" />
+        <path d="M138 40 C148 40 156 52 154 66" stroke="#a9744a" strokeWidth="3" fill="none" opacity="0.5" strokeLinecap="round" />
+
+        {/* Cabeza con volumen */}
+        <circle cx="100" cy="61" r="36" fill="url(#theoFur)" />
+        {/* Mechones de frente */}
+        <path d="M92 30 Q100 24 108 30 M86 34 Q96 28 104 33" stroke="#a9744a" strokeWidth="2.2" fill="none" opacity="0.55" strokeLinecap="round" />
+
+        {/* Hocico */}
+        <ellipse cx="100" cy="77" rx="20" ry="15" fill="url(#theoCream)" />
+        {/* Nariz con brillo */}
+        <path d="M92 69 Q100 65 108 69 Q106 76 100 78 Q94 76 92 69 Z" fill="#2b1a0e" />
+        <circle cx="97" cy="69.5" r="1.6" fill="#ffffff" opacity="0.85" />
+        {/* Boca: W sutil o sonrisa abierta con lengua */}
+        {happy ? (
+          <g>
+            <path d="M89 82 Q100 93 111 82 Z" fill="#7c2d3e" />
+            <ellipse cx="100" cy="88.5" rx="6" ry="4.6" fill="#ef8ba0" />
+            <path d="M100 84 L100 91" stroke="#b04a63" strokeWidth="1.4" />
+          </g>
+        ) : (
+          <path d="M100 78 Q100 84 95 85 M100 78 Q100 84 105 85" stroke="#4a2d16" strokeWidth="2" fill="none" strokeLinecap="round" />
+        )}
+
+        {/* Ojos realistas (iris+pupila+brillos) o cerrados/felices */}
+        {happy ? (
+          <g stroke="#241505" strokeWidth="3.2" fill="none" strokeLinecap="round">
+            <path d="M75 54 Q83 47 91 54" />
+            <path d="M109 54 Q117 47 125 54" />
+          </g>
+        ) : asleep ? (
+          <g stroke="#241505" strokeWidth="2.6" fill="none" strokeLinecap="round">
+            <path d="M76 54 Q83 58 90 54" />
+            <path d="M110 54 Q117 58 124 54" />
+          </g>
+        ) : (
+          <g>
+            <circle cx="83" cy="53" r="6.4" fill="#2f1c0d" />
+            <circle cx="117" cy="53" r="6.4" fill="#2f1c0d" />
+            <circle cx="83" cy="53" r="3" fill="#120a03" />
+            <circle cx="117" cy="53" r="3" fill="#120a03" />
+            <circle cx="80.8" cy="50.6" r="2" fill="#ffffff" opacity="0.9" />
+            <circle cx="114.8" cy="50.6" r="2" fill="#ffffff" opacity="0.9" />
+            <circle cx="85" cy="55.4" r="1" fill="#ffffff" opacity="0.55" />
+            <circle cx="119" cy="55.4" r="1" fill="#ffffff" opacity="0.55" />
+            <g className="theo-lids">
+              <rect x="75.5" y="46" width="15" height="14" rx="7" fill="#8f5f33" />
+              <rect x="109.5" y="46" width="15" height="14" rx="7" fill="#8f5f33" />
+            </g>
           </g>
         )}
+        {/* Rubor al celebrar */}
+        {mood === 'celebrate' && (
+          <g fill="#e2637a" opacity="0.35">
+            <ellipse cx="72" cy="68" rx="6" ry="3.6" />
+            <ellipse cx="128" cy="68" rx="6" ry="3.6" />
+          </g>
+        )}
+        {mood === 'celebrate' && (
+          <g stroke="#fbbf24" strokeWidth="3" strokeLinecap="round">
+            <path d="M28 18 L36 26 M172 18 L164 26" />
+            <path d="M14 48 L24 50 M186 48 L176 50" />
+          </g>
+        )}
+        {mood === 'pull' && (
+          <path d="M62 16 Q100 -2 138 16" stroke="#5eead4" strokeWidth="4.5" fill="none" strokeLinecap="round" />
+        )}
       </g>
-      {/* brillo de ojo feliz :) */}
-      {happy && <path d="M37 39 Q41 35 45 39" stroke="#241505" strokeWidth="2.4" fill="none" strokeLinecap="round" />}
-      {happy && <path d="M59 39 Q63 35 67 39" stroke="#241505" strokeWidth="2.4" fill="none" strokeLinecap="round" />}
-      {mood === 'celebrate' && (
-        <g stroke="#fbbf24" strokeWidth="2.6" strokeLinecap="round">
-          <path d="M20 22 L26 28 M84 22 L78 28" />
-          <path d="M12 44 L20 46 M108 44 L100 46" />
-        </g>
-      )}
-      {mood === 'pull' && <path d="M30 20 Q52 6 74 20" stroke="#5eead4" strokeWidth="3.5" fill="none" strokeLinecap="round" />}
     </svg>
   );
 }
@@ -4623,8 +4717,8 @@ onEditProduct={(product) => {
       {/* Tour tutorial para usuarios nuevos */}
       {showTour && <NewUserTour onClose={() => setShowTour(false)} />}
 
-      {/* Botón flotante del Asistente IA "Don Aiker" */}
-      {activeView === 'customer' && (
+      {/* Botón flotante del Asistente IA "Don Aiker" — oculto con el carrito abierto */}
+      {activeView === 'customer' && !isCartOpen && (
         <button
           onClick={() => setIsAikerOpen(true)}
           className={`fixed right-3 sm:right-5 z-[55] p-3 sm:p-3.5 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white shadow-2xl shadow-indigo-500/40 border border-white/20 hover:scale-110 hover:shadow-indigo-500/60 active:scale-95 transition-all animate-glow-pulse ${
@@ -5111,7 +5205,7 @@ function OrderSuccessOverlay({ order, onClose, onTrack, onShare }) {
         <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight">¡Gracias por tu compra!</h2>
 
         {/* THEO celebra la compra */}
-        <Theo mood="celebrate" className="w-28 h-24 mt-6" />
+        <Theo mood="celebrate" className="w-36 h-32 mt-6" />
 
         <div className="success-order-num mt-8 px-8 py-5 rounded-3xl bg-white/10 border border-white/20 backdrop-blur-md">
           <span className="block text-[11px] font-bold uppercase tracking-widest text-white/60 mb-1">Tu número de pedido</span>
@@ -5179,7 +5273,7 @@ function LoadErrorScreen({ error, onRetry }) {
       <div className="relative">
         <span className="absolute inset-0 rounded-3xl bg-amber-500/20 blur-xl animate-pulse" aria-hidden="true" />
         <div className="relative rounded-3xl bg-slate-800 border border-amber-500/40 flex items-end justify-center px-4 pt-2">
-          <Theo mood="sleep" className="w-24 h-20" />
+          <Theo mood="sleep" className="w-28 h-24" />
           <span className="absolute -top-1 right-1 text-[11px] font-black text-slate-400 animate-pulse">z z z</span>
         </div>
       </div>
@@ -6043,7 +6137,7 @@ function CustomerView({
           className="fixed top-[calc(env(safe-area-inset-top,0px)+0.75rem)] left-1/2 -translate-x-1/2 z-[60] pointer-events-none flex flex-col items-center"
           style={{ transform: `translate(-50%, ${Math.min(ptrPull, 96)}px)` }}
         >
-          <Theo mood="pull" className="w-16 h-14" />
+          <Theo mood="pull" className="w-20 h-16" />
           <span className="text-[10px] font-black text-teal-300 mt-0.5">
             {ptrPull >= 60 ? '¡Suelta para actualizar!' : 'Tira para actualizar'}
           </span>
@@ -8332,7 +8426,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
         <div data-sheet-scroll className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 sm:space-y-4">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-3 text-slate-500">
-              <Theo mood="idle" className="w-28 h-24" />
+              <Theo mood="idle" className="w-36 h-32" />
               <p className="font-semibold text-slate-400">Theo cuida tu carrito… está vacío</p>
               <p className="text-xs">Agrega algunos productos del catálogo para comenzar.</p>
             </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, Component, Fragment 
 import { createPortal, flushSync } from 'react-dom';
 import { startRegistration, startAuthentication, browserSupportsWebAuthn, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api, getToken, setToken, clearToken, setRememberSession, getRememberSession, outbox } from './api.js';
+import { sfx, isSoundOn, setSoundOn, hapticTicks, distanceMeters, dominantColorFromUrl } from './experience.js';
 import { ADMIN_PHONES } from './data.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -151,6 +152,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
        </>
       ),
       mic: <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />,
+      volumeX: <><path d="M11 5 6 9H2v6h4l5 4z" /><path d="m23 9-6 6" /><path d="m17 9 6 6" /></>,
       wifiOff: <><path d="m2 2 20 20" /><path d="M8.5 16.5a5 5 0 0 1 7 0" /><path d="M5 12.86a10 10 0 0 1 2.17-1.51" /><path d="M19 12.86a10 10 0 0 0-3.34-2.07" /><path d="M2 8.82A15 15 0 0 1 6.18 6.18" /><path d="M22 8.82a15 15 0 0 0-11.29-3.76c-.9.06-1.79.19-2.65.38" /><circle cx="12" cy="20" r="0.75" fill="currentColor" /></>,
       volume2: <path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6" />,
       share2: <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" />,
@@ -792,35 +794,32 @@ const categoryIdentity = (name) => {
   return CATEGORY_IDENTITY[key] || CATEGORY_FALLBACK;
 };
 
-const playChime = (() => {
-  let ctx = null;
-  const note = (freq, start, dur, type = 'sine', gain = 0.12) => {
-    if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    g.gain.setValueAtTime(0, ctx.currentTime + start);
-    g.gain.linearRampToValueAtTime(gain, ctx.currentTime + start + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
-    osc.connect(g).connect(ctx.destination);
-    osc.start(ctx.currentTime + start);
-    osc.stop(ctx.currentTime + start + dur + 0.05);
-  };
-  return () => {
-    try {
-      if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-      if (ctx.state === 'suspended') ctx.resume();
-      note(880, 0, 0.22, 'sine', 0.1);
-      note(1320, 0.16, 0.3, 'sine', 0.08);
-    } catch {}
-  };
-})();
+// Chime clásico de la marca = arpegio de éxito del paquete de sonido.
+const playChime = () => sfx.success();
 
-// Vibración sutil en dispositivos móviles (no soportada en iOS Safari: no-op).
-const haptic = (ms = 12) => {
+// Lenguaje táctil (#18): cada momento tiene su patrón. En iOS (sin
+// navigator.vibrate) el patrón se traduce a ráfagas de ticks de audio.
+const HAPTIC_LANG = {
+  tap: 12,
+  added: [12, 30, 12],
+  success: [15, 40, 15],
+  warn: [30, 50, 30],
+  deliver: [16, 45, 16],
+  error: [40, 60, 40]
+};
+
+// Vibración sutil en dispositivos móviles; en iPhone usa ticks sonoros
+// cortos como sustituto háptico.
+const haptic = (pattern = 12) => {
+  const seq = typeof pattern === 'string' ? (HAPTIC_LANG[pattern] ?? 12) : pattern;
   try {
-    if (navigator.vibrate) navigator.vibrate(ms);
+    if (navigator.vibrate) {
+      navigator.vibrate(seq);
+      return;
+    }
+  } catch {}
+  try {
+    if (window.matchMedia('(pointer: coarse)').matches) hapticTicks(seq);
   } catch {}
 };
 
@@ -932,7 +931,7 @@ const withViewTransition = (update, dir = 'forward') => {
 // Swipe hacia abajo para cerrar bottom sheets (solo móvil). El gesto se toma
 // desde cualquier punto de la hoja salvo que haya scroll pendiente hacia
 // arriba dentro de [data-sheet-scroll]; arrastrar más de ~110px cierra.
-function useSwipeToClose(onClose, enabled = true) {
+function useSwipeToClose(onClose, enabled = true, { detents = false } = {}) {
   const sheetRef = useRef(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -948,7 +947,9 @@ function useSwipeToClose(onClose, enabled = true) {
     let startY = 0;
     let dy = 0;
     let tracking = false;
-    let locked = false;
+    let locked = false;   // arrastre hacia abajo (cerrar)
+    let growing = false;  // arrastre hacia arriba (#6 detents: expandir hoja)
+    let baseH = 0;
     let scrollEl = null;
     let closeTimer = null;
 
@@ -961,6 +962,8 @@ function useSwipeToClose(onClose, enabled = true) {
       startY = e.touches[0].clientY;
       dy = 0;
       locked = false;
+      growing = false;
+      baseH = 0;
       tracking = true;
       scrollEl = t && t.closest ? t.closest('[data-sheet-scroll]') : null;
     };
@@ -969,21 +972,34 @@ function useSwipeToClose(onClose, enabled = true) {
       if (!tracking || !e.touches || e.touches.length !== 1) return;
       const dx = e.touches[0].clientX - startX;
       const ddy = e.touches[0].clientY - startY;
-      if (!locked) {
+      if (!locked && !growing) {
         if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(ddy)) { tracking = false; return; }
-        if (ddy > 10) {
+        // Detents (#6): tirar hacia arriba con la lista en el tope expande.
+        if (detents && ddy < -22 && (!scrollEl || scrollEl.scrollTop <= 2)) {
+          growing = true;
+          baseH = el.offsetHeight;
+          el.style.transition = 'none';
+          el.style.animation = 'none';
+          haptic(8);
+        } else if (ddy > 10) {
           if (scrollEl && scrollEl.scrollTop > 2) { tracking = false; return; }
           locked = true;
           el.style.transition = 'none';
           // Las hojas entran con una animación de transform (fill-mode both)
           // que pisaría el estilo inline del arrastre: se retira al empezar.
           el.style.animation = 'none';
-        } else if (ddy < -10) {
-          tracking = false;
-          return;
         } else {
           return;
         }
+      }
+      if (growing) {
+        const target = Math.min(
+          window.innerHeight * 0.94,
+          Math.max(baseH, baseH + (-ddy))
+        );
+        el.style.height = `${target}px`;
+        if (e.cancelable) e.preventDefault();
+        return;
       }
       dy = Math.max(0, ddy);
       el.style.transform = `translateY(${dy}px)`;
@@ -993,6 +1009,19 @@ function useSwipeToClose(onClose, enabled = true) {
     const onEnd = () => {
       if (!tracking) return;
       tracking = false;
+      if (growing) {
+        growing = false;
+        const grownPx = parseFloat(el.style.height) || baseH;
+        el.style.transition = 'height 0.3s cubic-bezier(0.22, 1, 0.36, 1)';
+        if (grownPx > baseH * 1.08) {
+          el.style.height = `${Math.round(window.innerHeight * 0.92)}px`;
+          haptic('tap');
+        } else {
+          el.style.height = '';
+        }
+        baseH = 0;
+        return;
+      }
       if (!locked) return;
       locked = false;
       el.style.transition = 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
@@ -1017,7 +1046,7 @@ function useSwipeToClose(onClose, enabled = true) {
       el.removeEventListener('touchend', onEnd);
       el.removeEventListener('touchcancel', onEnd);
     };
-  }, [enabled]);
+  }, [enabled, detents]);
 
   return sheetRef;
 }
@@ -1057,6 +1086,80 @@ function AnimatedNumber({ value, format = (v) => String(Math.round(v)), classNam
 
 // Capa de celebración: confeti de una pasada + check pop. Se monta una vez en
 // la raíz y reacciona al evento global CELEBRATE_EVENT.
+// THEO — mascota de la marca: perrito marrón SVG animado por estados.
+// moods: idle (parpadea y mueve la cola) · happy · celebrate · sleep · pull
+function Theo({ mood = 'idle', className = 'w-20 h-16' }) {
+  const happy = mood === 'happy' || mood === 'celebrate';
+  return (
+    <svg viewBox="0 0 120 100" className={`${className} ${mood === 'happy' ? 'theo-happy' : ''} ${mood === 'celebrate' ? 'theo-celebrate' : ''} ${mood === 'sleep' ? 'theo-sleep' : ''}`} aria-hidden="true">
+      {/* cola */}
+      <path className="theo-tail" d="M88 62 Q104 56 100 42" stroke="#6b4226" strokeWidth="7" fill="none" strokeLinecap="round" />
+      {/* orejas caídas */}
+      <path d="M30 26 Q18 40 26 58 Q34 52 38 38 Z" fill="#5d3a1f" />
+      <path d="M74 26 Q86 40 78 58 Q70 52 66 38 Z" fill="#5d3a1f" />
+      {/* cabeza */}
+      <circle cx="52" cy="46" r="26" fill="#8b5e34" />
+      {/* hocico */}
+      <ellipse cx="52" cy="58" rx="14" ry="11" fill="#c99b62" />
+      <ellipse cx="52" cy="52" rx="5" ry="4" fill="#2b1a0e" />
+      {happy && <path d="M45 60 Q52 68 59 60 Z" fill="#e2637a" />}
+      {/* ojos + párpados */}
+      <g>
+        <circle cx="41" cy="40" r={mood === 'sleep' ? 1.4 : 3.4} fill="#241505" />
+        <circle cx="63" cy="40" r={mood === 'sleep' ? 1.4 : 3.4} fill="#241505" />
+        {!happy && mood !== 'sleep' && (
+          <g className="theo-lids">
+            <rect x="36" y="36" width="10" height="8" rx="4" fill="#8b5e34" />
+            <rect x="58" y="36" width="10" height="8" rx="4" fill="#8b5e34" />
+          </g>
+        )}
+      </g>
+      {/* brillo de ojo feliz :) */}
+      {happy && <path d="M37 39 Q41 35 45 39" stroke="#241505" strokeWidth="2.4" fill="none" strokeLinecap="round" />}
+      {happy && <path d="M59 39 Q63 35 67 39" stroke="#241505" strokeWidth="2.4" fill="none" strokeLinecap="round" />}
+      {mood === 'celebrate' && (
+        <g stroke="#fbbf24" strokeWidth="2.6" strokeLinecap="round">
+          <path d="M20 22 L26 28 M84 22 L78 28" />
+          <path d="M12 44 L20 46 M108 44 L100 46" />
+        </g>
+      )}
+      {mood === 'pull' && <path d="M30 20 Q52 6 74 20" stroke="#5eead4" strokeWidth="3.5" fill="none" strokeLinecap="round" />}
+    </svg>
+  );
+}
+
+// Money: total con dígitos que ruedan como odómetro (#12). El símbolo y los
+// decimales van fijos; la parte entera sube dígito por dígito al cambiar.
+function Money({ value, className = '' }) {
+  const str = formatUsd(value);
+  const intPart = str.replace(/[^0-9]/g, '').slice(0, -2) || '0';
+  const tail = str.slice(str.indexOf(intPart.slice(-Math.max(intPart.length, 1))) + intPart.length);
+  const symbol = str.startsWith('$') ? '$' : '';
+  const digits = String(intPart).split('');
+  return (
+    <span className={`inline-flex items-baseline tabular-nums ${className}`}>
+      {symbol}
+      {digits.map((d, i) => (
+        <span key={`${i}-${digits.length}`} className="odo-digit">
+          <span className="odo-stack" style={{ transform: `translateY(-${Number(d)}em)` }}>
+            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => <span key={n}>{n}</span>)}
+          </span>
+        </span>
+      ))}
+      {tail}
+    </span>
+  );
+}
+
+// Cierra un overlay con animación de salida (#11): encoge/desvanece el panel
+// y luego ejecuta el cierre real. Respeta prefers-reduced-motion.
+const exitThen = (ref, cb) => () => {
+  const el = ref?.current;
+  if (!el || prefersReducedMotion()) return cb();
+  el.classList.add('overlay-exit');
+  setTimeout(cb, 150);
+};
+
 function CelebrationBurst() {
   const [burstId, setBurstId] = useState(0);
   const timerRef = useRef(null);
@@ -1110,6 +1213,90 @@ function CelebrationBurst() {
           }}
         />
       ))}
+    </div>
+  );
+}
+
+// ── Isla Dinera (#1): píldora flotante de rastreo en vivo ────────────────
+// Aparece cuando hay un delivery en camino que el cliente está siguiendo.
+// Se arrastra verticalmente y se pega al borde izquierdo/derecho; muestra la
+// distancia del repartidor en vivo y al tocarla abre el mapa completo.
+const ISLAND_POS_KEY = 'kiosko_island_pos';
+function OrderIslandTracker({ order, onOpen }) {
+  const [pos, setPos] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ISLAND_POS_KEY) || '{}');
+      return { side: saved.side === 'left' ? 'left' : 'right', yPct: Number(saved.yPct) || 62 };
+    } catch { return { side: 'right', yPct: 62 }; }
+  });
+  const drag = useRef({ active: false, startY: 0, startYPct: 0, moved: false });
+  const [distLabel, setDistLabel] = useState('En camino');
+
+  const courierOk = order && order.courier_lat != null && order.courier_lng != null;
+  const destOk = order && order.lat != null && order.lng != null;
+
+  useEffect(() => {
+    if (!courierOk) { setDistLabel('En camino'); return undefined; }
+    const calc = () => {
+      try {
+        const from = { lat: Number(order.courier_lat), lng: Number(order.courier_lng) };
+        const to = destOk
+          ? { lat: Number(order.lat), lng: Number(order.lng) }
+          : null;
+        if (!to) return setDistLabel('En camino');
+        const m = distanceMeters(from, to);
+        setDistLabel(m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.max(20, Math.round(m / 10) * 10)} m`);
+      } catch { setDistLabel('En camino'); }
+    };
+    calc();
+    return undefined;
+  }, [order?.courier_lat, order?.courier_lng, destOk]);
+
+  // Persistencia de posición
+  useEffect(() => {
+    try { localStorage.setItem(ISLAND_POS_KEY, JSON.stringify(pos)); } catch {}
+  }, [pos]);
+
+  const onTouchStart = (e) => {
+    drag.current = { active: true, startY: e.touches[0].clientY, startYPct: pos.yPct, moved: false };
+  };
+  const onTouchMove = (e) => {
+    if (!drag.current.active) return;
+    const dy = e.touches[0].clientY - drag.current.startY;
+    if (Math.abs(dy) > 6) drag.current.moved = true;
+    const vh = window.innerHeight || 1;
+    let pct = drag.current.startYPct + (dy / vh) * 100;
+    pct = Math.max(18, Math.min(78, pct));
+    setPos((p) => ({ ...p, yPct: pct }));
+    if (e.cancelable) e.preventDefault();
+  };
+  const onTouchEnd = () => {
+    drag.current.active = false;
+  };
+
+  if (!order) return null;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="order-island flex items-center gap-2.5 pl-3 pr-4 py-2.5 rounded-full bg-slate-950/95 border border-teal-500/40 shadow-2xl shadow-teal-500/20 backdrop-blur-xl select-none cursor-pointer"
+      style={{
+        top: `${pos.yPct}vh`,
+        [pos.side]: '0.75rem',
+        transform: 'translateY(-50%)'
+      }}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onClick={() => { if (!drag.current.moved) { haptic('tap'); onOpen(order); } }}
+      onKeyDown={(e) => { if (e.key === 'Enter') onOpen(order); }}
+      aria-label="Ver seguimiento en vivo del pedido"
+    >
+      <span className="island-dot" />
+      <span className="text-[11px] font-black text-white">#{order.id}</span>
+      <span className="text-[11px] font-bold text-teal-300 tabular-nums">{distLabel}</span>
+      <Icon name="navigation" className="w-3.5 h-3.5 text-slate-400" />
     </div>
   );
 }
@@ -1599,6 +1786,34 @@ export default function App() {
   const flushOutboxRef = useRef(() => {});
   const loadStateRef = useRef(() => {});
 
+  // Sonido de marca (#15): interruptor persistente.
+  const [soundOn, setSoundState] = useState(() => isSoundOn());
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    setSoundState(next);
+    if (next) sfx.ready();
+  };
+
+  // Shared Element Transition producto→detalle (#2): el id activo lleva el
+  // view-transition-name solo en la tarjeta tocada para evitar colisiones.
+  const [vtProdId, setVtProdId] = useState(null);
+  const openProductWithVT = (product) => {
+    setVtProdId(product?.id ?? null);
+    const run = () => flushSync(() => setProductDetailModal(product));
+    try {
+      if (!prefersReducedMotion() && typeof document.startViewTransition === 'function') {
+        document.startViewTransition(run);
+        return;
+      }
+    } catch {}
+    run();
+  };
+  const closeProductDetail = () => {
+    setProductDetailModal(null);
+    requestAnimationFrame(() => setVtProdId(null));
+  };
+
   // Tutorial de instalación PWA: notificación en cada recarga. Se respeta el
   // "no volver a preguntar" solo durante la sesión (al cerrar sesión se limpia
   // y vuelve a aparecer) y nunca se muestra si el dispositivo ya instaló la app.
@@ -1688,10 +1903,14 @@ export default function App() {
     window.addEventListener('kiosko:sw-update', onUpdate);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
+    // Pull-to-refresh de marca (#14): la vista cliente pide recargar datos.
+    const onPtrRefresh = () => loadStateRef.current({ silent: true });
+    window.addEventListener('kiosko:ptr-refresh', onPtrRefresh);
     return () => {
       window.removeEventListener('kiosko:sw-update', onUpdate);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      window.removeEventListener('kiosko:ptr-refresh', onPtrRefresh);
     };
   }, []);
 
@@ -1877,6 +2096,21 @@ export default function App() {
 
   // Puente para los listeners de conexión registrados antes de esta definición.
   loadStateRef.current = loadState;
+
+  // Badge en el ícono de la app instalada (#9): pedidos pendientes del panel.
+  useEffect(() => {
+    try {
+      if (!('setAppBadge' in navigator)) return undefined;
+      if (activeView === 'admin' && isAdminAuthed) {
+        const n = orders.filter((o) => o.status === 'pendiente').length;
+        if (n > 0) navigator.setAppBadge(Math.min(n, 99));
+        else navigator.clearAppBadge();
+      } else {
+        navigator.clearAppBadge();
+      }
+    } catch {}
+    return undefined;
+  }, [orders, activeView, isAdminAuthed]);
 
   // Reenvía la cola de pedidos guardados sin conexión. Recorre en orden y se
   // detiene ante la primera falla de red (se reintenta en el próximo "online").
@@ -2438,6 +2672,7 @@ export default function App() {
 
   const addToast = (message, type = 'success') => {
     const id = Date.now() + Math.random();
+    if (type === 'error') sfx.error();
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -2687,7 +2922,8 @@ export default function App() {
       setCart([...cart, { product, quantity: quantityToAdd }]);
     }
 
-    haptic(12);
+    haptic('added');
+    sfx.added();
     if (sourceRect) flyToCart(product, sourceRect);
     addToast(`Agregado: ${product.name} (x${quantityToAdd})`);
   };
@@ -3803,6 +4039,16 @@ export default function App() {
             )}
           </div>
 
+          {/* Sound toggle: paquete de sonidos de marca on/off */}
+          <button
+            onClick={toggleSound}
+            className="p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 shrink-0 btn-sink"
+            aria-label={soundOn ? 'Silenciar sonidos' : 'Activar sonidos'}
+            title={soundOn ? 'Silenciar sonidos de la app' : 'Activar sonidos de la app'}
+          >
+            <Icon name={soundOn ? 'volume2' : 'volumeX'} className="w-5 h-5" />
+          </button>
+
           {/* Theme toggle: dark → light → neon */}
           <button
             onClick={toggleTheme}
@@ -3880,7 +4126,8 @@ export default function App() {
             rate={rate}
             promos={promos}
             onAddToCart={handleAddToCart}
-            onOpenProductModal={(product) => setProductDetailModal(product)}
+            onOpenProductModal={openProductWithVT}
+          vtProductId={vtProdId}
             currentOrderTracking={trackedOrder}
             setCurrentOrderTracking={setCurrentOrderTracking}
             savedCustomer={savedCustomer}
@@ -4076,7 +4323,7 @@ onEditProduct={(product) => {
           isFavorite={favorites.includes(productDetailModal.id)}
           onToggleFavorite={() => toggleFavorite(productDetailModal.id)}
           onNavigate={(p) => setProductDetailModal(p)}
-          onClose={() => setProductDetailModal(null)}
+          onClose={closeProductDetail}
           onAddToCart={(qty, rect) => {
             addToCart(productDetailModal, qty, rect);
           }}
@@ -4288,6 +4535,20 @@ onEditProduct={(product) => {
 
       {/* Celebración global (confeti + check): la dispara el evento kiosko:celebrate */}
       <CelebrationBurst />
+
+      {/* Isla Dinera (#1): rastreo en vivo flotante para delivery en camino */}
+      {(() => {
+        if (activeView !== 'customer' || liveTrackingOrder) return null;
+        const caminos = orders.filter((o) => o.type === 'delivery' && o.status === 'en_camino');
+        const target = caminos.find((o) => o.id === currentOrderTracking) || caminos[caminos.length - 1];
+        if (!target) return null;
+        return (
+          <OrderIslandTracker
+            order={target}
+            onOpen={(o) => { setLiveTrackingOrder(o); setCurrentOrderTracking(o.id); }}
+          />
+        );
+      })()}
 
       {/* Footer */}
       <footer
@@ -4849,6 +5110,9 @@ function OrderSuccessOverlay({ order, onClose, onTrack, onShare }) {
         <span className="text-[11px] font-bold uppercase tracking-[0.3em] text-teal-200/80 mb-3">Pedido confirmado</span>
         <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight">¡Gracias por tu compra!</h2>
 
+        {/* THEO celebra la compra */}
+        <Theo mood="celebrate" className="w-28 h-24 mt-6" />
+
         <div className="success-order-num mt-8 px-8 py-5 rounded-3xl bg-white/10 border border-white/20 backdrop-blur-md">
           <span className="block text-[11px] font-bold uppercase tracking-widest text-white/60 mb-1">Tu número de pedido</span>
           <span className="block font-display text-5xl sm:text-7xl font-black text-white tracking-tight">#{orderNum}</span>
@@ -4914,15 +5178,16 @@ function LoadErrorScreen({ error, onRetry }) {
     <div className="py-20 flex flex-col items-center justify-center text-center space-y-5 max-w-md mx-auto animate-fade-in">
       <div className="relative">
         <span className="absolute inset-0 rounded-3xl bg-amber-500/20 blur-xl animate-pulse" aria-hidden="true" />
-        <div className="relative w-16 h-16 rounded-3xl bg-slate-800 border border-amber-500/40 text-amber-300 flex items-center justify-center">
-          <Icon name="wifiOff" className="w-8 h-8" />
+        <div className="relative rounded-3xl bg-slate-800 border border-amber-500/40 flex items-end justify-center px-4 pt-2">
+          <Theo mood="sleep" className="w-24 h-20" />
+          <span className="absolute -top-1 right-1 text-[11px] font-black text-slate-400 animate-pulse">z z z</span>
         </div>
       </div>
       <div className="space-y-1.5 px-4">
         <h2 className="text-lg font-black text-white">Sin conexión</h2>
         <p className="text-xs text-slate-400 leading-relaxed">{error}</p>
         <p className="text-[11px] text-slate-500">
-          Reintentamos automáticamente apenas vuelva tu internet.
+          Theo duerme hasta que vuelva tu internet — reintentamos automáticamente.
         </p>
       </div>
       <button
@@ -5519,13 +5784,14 @@ function CustomerView({
   storeLocation,
   favorites,
   onToggleFavorite,
-  focusSection,
-  onOpenDebt,
-  onOpenMyKiosko,
-  onOpenVoice,
-  guestShare,
-  guestAdded
-}) {
+   focusSection,
+   onOpenDebt,
+   onOpenMyKiosko,
+   onOpenVoice,
+   guestShare,
+   guestAdded,
+   vtProductId
+ }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [promoIdx, setPromoIdx] = useState(0);
   // Recorrido Horizontal: apagado por defecto; el usuario lo enciende con el switch.
@@ -5574,7 +5840,94 @@ function CustomerView({
         (c) => c.product.runOutDays != null && c.product.runOutDays > 0 && c.product.runOutDays <= 2
       )?.product || null
     );
-  }, [customerOrders, allProducts, savedCustomer?.customerName]);
+   }, [customerOrders, allProducts, savedCustomer?.customerName]);
+
+  // Tilt 3D (#13): variables CSS globales alimentadas por giroscopio
+  // (Android directo; iOS pide permiso en el primer toque) o puntero en desktop.
+  const tiltRootRef = useRef(null);
+  useEffect(() => {
+    const el = tiltRootRef.current;
+    if (!el) return undefined;
+    let raf = 0;
+    let tx = 0, ty = 0;
+    const apply = () => {
+      raf = 0;
+      el.style.setProperty('--tilt-x', tx.toFixed(3));
+      el.style.setProperty('--tilt-y', ty.toFixed(3));
+    };
+    const setTilt = (nx, ny) => { tx = nx; ty = ny; if (!raf) raf = requestAnimationFrame(apply); };
+    const onOrient = (e) => {
+      const gamma = e.gamma ?? 0;
+      const beta = e.beta ?? 0;
+      setTilt(Math.max(-1, Math.min(1, gamma / 25)), Math.max(-1, Math.min(1, (beta - 40) / 30)));
+    };
+    const onMouse = (e) => {
+      const r = el.getBoundingClientRect();
+      setTilt(((e.clientX - r.left) / r.width - 0.5) * 2, ((e.clientY - r.top) / r.height - 0.5) * 2);
+    };
+    let listeningOri = false;
+    let once = null;
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // iOS: requiere gesto del usuario; se intenta una sola vez.
+      once = () => {
+        DeviceOrientationEvent.requestPermission()
+          .then((s) => {
+            if (s === 'granted') { window.addEventListener('deviceorientation', onOrient); listeningOri = true; }
+          })
+          .catch(() => {});
+      };
+      window.addEventListener('touchend', once, { once: true });
+    } else if (typeof DeviceOrientationEvent !== 'undefined') {
+      window.addEventListener('deviceorientation', onOrient);
+      listeningOri = true;
+    }
+    el.addEventListener('mousemove', onMouse);
+    return () => {
+      if (listeningOri) window.removeEventListener('deviceorientation', onOrient);
+      if (once) window.removeEventListener('touchend', once);
+      el.removeEventListener('mousemove', onMouse);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  // ── Pull-to-refresh de marca (#14): Theo se estira; al soltar recarga ──
+  const [ptrPull, setPtrPull] = useState(0);
+  const ptrPullRef = useRef(0);
+  const ptrState = useRef({ startY: null, firing: false });
+  const setPull = (v) => { ptrPullRef.current = v; setPtrPull(v); };
+  useEffect(() => {
+    const onStart = (e) => {
+      ptrState.current.startY = (window.scrollY || 0) <= 2 && e.touches?.length ? e.touches[0].clientY : null;
+    };
+    const onMove = (e) => {
+      if (ptrState.current.startY == null || !e.touches?.length) return;
+      const dy = e.touches[0].clientY - ptrState.current.startY;
+      if (dy <= 0) { setPull(0); return; }
+      setPull(Math.min(96, dy * 0.55));
+      if (e.cancelable && dy > 8) e.preventDefault();
+    };
+    const onEnd = () => {
+      const pull = ptrPullRef.current;
+      ptrState.current.startY = null;
+      if (pull >= 60 && !ptrState.current.firing) {
+        ptrState.current.firing = true;
+        haptic('success');
+        sfx.ready();
+        try { window.dispatchEvent(new CustomEvent('kiosko:ptr-refresh')); } catch {}
+        setTimeout(() => { ptrState.current.firing = false; setPull(0); }, 900);
+      } else {
+        setPull(0);
+      }
+    };
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+    };
+  }, []);
 
   // Radar de Ofertas "Novedades": combina productos nuevos, por agotarse
   // y los más pedidos por este cliente, sin repetir, en orden de prioridad.
@@ -5683,7 +6036,19 @@ function CustomerView({
   }, [focusSection, onOpenDebt]);
 
   return (
-    <div className="space-y-6 sm:space-y-8 animate-fade-in">
+    <div ref={tiltRootRef} className="space-y-6 sm:space-y-8 animate-fade-in">
+      {/* Pull-to-refresh de marca (#14): indicador con Theo */}
+      {ptrPull > 2 && (
+        <div
+          className="fixed top-[calc(env(safe-area-inset-top,0px)+0.75rem)] left-1/2 -translate-x-1/2 z-[60] pointer-events-none flex flex-col items-center"
+          style={{ transform: `translate(-50%, ${Math.min(ptrPull, 96)}px)` }}
+        >
+          <Theo mood="pull" className="w-16 h-14" />
+          <span className="text-[10px] font-black text-teal-300 mt-0.5">
+            {ptrPull >= 60 ? '¡Suelta para actualizar!' : 'Tira para actualizar'}
+          </span>
+        </div>
+      )}
       {/* Hero editorial: foto real del producto estrella con efecto parallax */}
       <RevealOnScroll>
       <div
@@ -6378,9 +6743,10 @@ function CustomerView({
                 rate={rate}
                 isFavorite={favorites.includes(product.id)}
                 onToggleFavorite={() => onToggleFavorite(product.id)}
-                onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
-                onOpenDetail={() => onOpenProductModal(product)}
-              />
+                 onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
+                 onOpenDetail={() => onOpenProductModal(product)}
+                 vtActive={vtProductId === product.id}
+               />
             </RevealOnScroll>
           ))}
         </div>
@@ -6949,7 +7315,7 @@ function MathCalculator({ rate }) {
   );
 }
 
-function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite }) {
+function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite, vtActive = false }) {
   const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
   const isOut = avail <= 0;
   const isLow = avail > 0 && avail <= 5;
@@ -6968,11 +7334,15 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
       className="group bg-slate-800/70 border border-slate-700/60 rounded-2xl sm:rounded-3xl hover:border-teal-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1 flex flex-col justify-between backdrop-blur-sm"
     >
       <div className="flex flex-col flex-1 overflow-hidden rounded-2xl sm:rounded-3xl">
-      <div onClick={onOpenDetail} className="cursor-pointer relative overflow-hidden aspect-square sm:aspect-[4/3] bg-slate-900">
+      <div
+        onClick={onOpenDetail}
+        className="cursor-pointer relative overflow-hidden aspect-square sm:aspect-[4/3] bg-slate-900"
+        style={vtActive ? { viewTransitionName: 'active-product-photo' } : undefined}
+      >
         <ProductImg
           product={product}
           alt={product.name}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          className="prod-photo w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
         />
         <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1">
@@ -7086,16 +7456,28 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [touchX, setTouchX] = useState(null);
   const [slideDir, setSlideDir] = useState('right');
+  // Paleta reactiva (#17): color dominante de la foto tiñe los acentos.
+  const [accent, setAccent] = useState(null);
   const isOut = product.stock <= 0 || product.reserved >= product.stock;
   const unitBs = usdToBs(product.price, rate?.rate);
   const lineTotal = product.price * quantity;
 
+  useEffect(() => {
+    let dead = false;
+    setAccent(null);
+    dominantColorFromUrl(product?.image).then((rgb) => { if (!dead && rgb) setAccent(rgb); });
+    return () => { dead = true; };
+  }, [product?.id]);
+
   // Cierra con botón "atrás"/ESC y bloquea el scroll del fondo. En pantalla
   // completa cierra primero la imagen antes de cerrar el modal (como antes).
-  useOverlay(true, () => {
+  // Salida animada (#11): el panel se encoge antes de desmontarse.
+  const panelExitRef = useRef(null);
+  const requestClose = () => {
     if (showFullscreen) setShowFullscreen(false);
-    else onClose();
-  });
+    else exitThen(panelExitRef, onClose)();
+  };
+  useOverlay(true, requestClose);
 
   const currentIndex = useMemo(() => {
     const idx = (sameBrandProducts || []).findIndex((p) => p.id === product.id);
@@ -7140,15 +7522,15 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
       {/* Backdrop Click */}
-      <div className="absolute inset-0" onClick={onClose} />
+      <div className="absolute inset-0" onClick={requestClose} />
 
-      <div className="relative w-full sm:max-w-2xl max-h-[92vh] glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
+      <div ref={panelExitRef} className="relative w-full sm:max-w-2xl max-h-[92vh] glass-strong bg-slate-900 border border-slate-700 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden z-10 animate-screen-up flex flex-col mx-auto">
       {/* Handle visual para indicar arrastre en móvil */}
       <div className="sm:hidden absolute top-2.5 left-1/2 -translate-x-1/2 z-20 w-12 h-1.5 rounded-full bg-slate-700" />
 
       {/* Close Button */}
       <button
-        onClick={onClose}
+        onClick={requestClose}
         className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-950/60 text-slate-300 hover:text-white backdrop-blur-md hover:bg-slate-800 transition-all"
       >
         <Icon name="x" className="w-5 h-5" />
@@ -7169,10 +7551,18 @@ function ProductDetailModal({ product, sameBrandProducts = [], rate, onClose, on
       {/* Imagen + full screen + paginación de la marca */}
       <div
         key={`img-${product.id}`}
+        style={{ viewTransitionName: 'active-product-photo', ...(accent ? { '--accent': accent } : {}) }}
         className={`relative h-40 sm:h-56 bg-slate-950 shrink-0 ${slideDir === 'right' ? 'animate-brand-slide-right' : 'animate-brand-slide-left'}`}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
+          {/* Halo del color dominante de la foto (#17) */}
+          {accent && (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: 'radial-gradient(circle at 72% 18%, rgba(var(--accent), 0.4), transparent 62%)' }}
+            />
+          )}
           <ProductImg product={product} alt={product.name} className="w-full h-full object-cover" />
           <div className="absolute top-4 left-4 sm:left-4">
             <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-xl ${categoryIdentity(product.category).chip} backdrop-blur-md text-xs font-bold border shadow-sm`}>
@@ -7894,8 +8284,8 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
   const [nowMs, setNowMs] = useState(Date.now());
 
   useOverlay(isOpen, onClose);
-  // Swipe hacia abajo para cerrar (solo móvil / bottom sheet).
-  const sheetRef = useSwipeToClose(onClose, isOpen);
+  // Swipe-down cierra + detents (#6): tirar hacia arriba expande a pantalla.
+  const sheetRef = useSwipeToClose(onClose, isOpen, { detents: true });
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -7942,8 +8332,8 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
         <div data-sheet-scroll className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 sm:space-y-4">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-3 text-slate-500">
-              <Icon name="shoppingBag" className="w-16 h-16 stroke-1 text-slate-700" />
-              <p className="font-semibold text-slate-400">Tu carrito está vacío</p>
+              <Theo mood="idle" className="w-28 h-24" />
+              <p className="font-semibold text-slate-400">Theo cuida tu carrito… está vacío</p>
               <p className="text-xs">Agrega algunos productos del catálogo para comenzar.</p>
             </div>
           ) : (
@@ -8029,7 +8419,7 @@ function CartDrawer({ isOpen, onClose, cart, cartTotal, rate, onUpdateQty, onRem
               <div className="flex justify-between text-base font-black text-white pt-2 border-t border-slate-800">
                 <span>Total a Pagar</span>
                 <span className="text-teal-400 text-right">
-                  {formatUsd(cartTotal)}
+                  <Money value={cartTotal} />
                   {rate?.rate > 0 && (
                     <span className="block text-[11px] text-teal-300/90">
                       {formatBs(usdToBs(cartTotal, rate.rate))}
@@ -8312,7 +8702,7 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
             {cartCount} {cartCount === 1 ? 'producto' : 'productos'}
           </span>
           <span className="block text-base sm:text-lg font-black text-white truncate">
-            {formatUsd(cartTotal)}
+            <Money value={cartTotal} />
             {rate?.rate > 0 && (
               <span className="text-[10px] sm:text-[11px] font-bold text-teal-300/90 ml-1.5 sm:ml-2">
                 {formatBs(usdToBs(cartTotal, rate.rate))}
@@ -9801,7 +10191,7 @@ function CheckoutModal({ onClose, cart, cartTotal, rate, isPlacingOrder, onSubmi
             <div className="text-xs text-slate-300 flex justify-between border-t border-slate-800 pt-2">
               <span>Subtotal ({cart.reduce((acc, i) => acc + i.quantity, 0)} artículos)</span>
               <span className="font-bold text-white text-right">
-                {formatUsd(cartTotal)}
+                <Money value={cartTotal} />
                 {rate?.rate > 0 && (
                   <span className="block text-[11px] text-teal-300/90">
                     {formatBs(usdToBs(cartTotal, rate.rate))}
@@ -17856,7 +18246,10 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
 // Confirmación genérica con el lenguaje visual de la app (reemplaza el
 // window.confirm del navegador). Muestra título, mensaje y botones estilizados.
 function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', tone = 'danger', icon = 'alertTriangle', onConfirm, onClose }) {
-  useOverlay(true, onClose);
+  // Salida animada (#11): atrás/ESC/click fuera encogen el panel antes de irse.
+  const panelRef = useRef(null);
+  const closeWithExit = exitThen(panelRef, onClose);
+  useOverlay(true, closeWithExit);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const danger = tone === 'danger';
@@ -17875,8 +18268,8 @@ function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', 
   };
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center pb-[calc(5rem+env(safe-area-inset-bottom))] sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      {!busy && <div className="absolute inset-0" onClick={onClose} />}
-      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
+      {!busy && <div className="absolute inset-0" onClick={closeWithExit} />}
+      <div ref={panelRef} className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${danger ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
           {busy ? <Icon name="refresh" className="w-6 h-6 animate-spin" /> : <Icon name={icon} className="w-6 h-6" />}
         </div>
@@ -17891,7 +18284,7 @@ function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', 
         </div>
         <div className="grid grid-cols-2 gap-3 pt-2">
           <button
-            onClick={onClose}
+            onClick={closeWithExit}
             disabled={busy}
             className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition-all disabled:opacity-60 disabled:pointer-events-none"
           >

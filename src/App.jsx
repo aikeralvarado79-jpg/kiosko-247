@@ -4011,10 +4011,14 @@ onEditProduct={(product) => {
 
       {/* 5. Delete Confirm Modal */}
       {deleteConfirmProduct && (
-        <DeleteConfirmModal
-          product={deleteConfirmProduct}
-          onClose={() => setDeleteConfirmProduct(null)}
+        <ConfirmActionModal
+          title="¿Eliminar producto?"
+          message={`Estás a punto de borrar ${deleteConfirmProduct.name} del catálogo. Esta acción no se puede deshacer.`}
+          confirmLabel="Sí, Eliminar"
+          tone="danger"
+          icon="alertTriangle"
           onConfirm={() => handleDeleteProduct(deleteConfirmProduct.id)}
+          onClose={() => setDeleteConfirmProduct(null)}
         />
       )}
 
@@ -4054,22 +4058,31 @@ onEditProduct={(product) => {
 
       {/* 5c. Cancel Order Confirm Modal */}
       {cancelConfirmOrder && (
-        <CancelOrderModal
-          order={cancelConfirmOrder}
-          onClose={() => setCancelConfirmOrder(null)}
+        <ConfirmActionModal
+          title={`¿Cancelar pedido #${cancelConfirmOrder.id}?`}
+          message="El pedido quedará anulado y el stock de sus artículos se devolverá al inventario."
+          confirmLabel="Sí, Cancelar"
+          cancelLabel="Volver"
+          tone="danger"
+          icon="alertTriangle"
           onConfirm={() => {
             const key = `${savedCustomer?.phoneCode || ''}${savedCustomer?.phoneNumber || ''}`.replace(/\D/g, '').slice(-11);
             handleCancelOrder(cancelConfirmOrder.id, key);
           }}
+          onClose={() => setCancelConfirmOrder(null)}
         />
       )}
 
       {/* 5d. Delete Order Confirm Modal (Admin) */}
       {deleteOrderTarget && (
-        <DeleteOrderModal
-          order={deleteOrderTarget}
-          onClose={() => setDeleteOrderTarget(null)}
+        <ConfirmActionModal
+          title={`¿Eliminar pedido #${deleteOrderTarget.id}?`}
+          message="Solo se eliminan pedidos cancelados. Esta acción no se puede deshacer y lo sacará de la lista de pedidos."
+          confirmLabel="Sí, Eliminar"
+          tone="danger"
+          icon="trash"
           onConfirm={() => handleDeleteOrder(deleteOrderTarget.id)}
+          onClose={() => setDeleteOrderTarget(null)}
         />
       )}
 
@@ -18150,110 +18163,6 @@ function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', 
   );
 }
 
-function DeleteConfirmModal({ product, onClose, onConfirm }) {
-  useOverlay(true, onClose);
-  const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
-  const handleConfirm = async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      await onConfirm();
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      {!busy && <div className="absolute inset-0" onClick={onClose} />}
-      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
-        <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-          {busy ? <Icon name="refresh" className="w-6 h-6 animate-spin" /> : <Icon name="alertTriangle" className="w-6 h-6" />}
-        </div>
-        <div>
-          <h3 className="text-lg font-bold text-white">{busy ? 'Eliminando…' : '¿Eliminar producto?'}</h3>
-          {!busy && (
-            <p className="text-xs text-slate-400 mt-1">
-              Estás a punto de borrar <strong className="text-slate-200">{product.name}</strong> del catálogo. Esta acción no se puede deshacer.
-            </p>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-3 pt-2">
-          <button
-            onClick={onClose}
-            disabled={busy}
-            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 disabled:opacity-60 disabled:pointer-events-none"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={busy}
-            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20 flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:pointer-events-none"
-          >
-            {busy && <Icon name="refresh" className="w-3.5 h-3.5 animate-spin" />}
-            Sí, Eliminar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DeleteOrderModal({ order, onClose, onConfirm }) {
-  useOverlay(true, onClose);
-  const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
-  const handleConfirm = async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      await onConfirm();
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      {!busy && <div className="absolute inset-0" onClick={onClose} />}
-      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
-        <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-          {busy ? <Icon name="refresh" className="w-6 h-6 animate-spin" /> : <Icon name="trash" className="w-6 h-6" />}
-        </div>
-        <div>
-          <h3 className="text-lg font-bold text-white">{busy ? 'Eliminando…' : `¿Eliminar pedido #${order.id}?`}</h3>
-          {!busy && (
-            <p className="text-xs text-slate-400 mt-1">
-              Solo se eliminan pedidos <strong className="text-slate-200">cancelados</strong>. Esta acción no se puede deshacer y lo sacará de la lista de pedidos.
-            </p>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-3 pt-2">
-          <button
-            onClick={onClose}
-            disabled={busy}
-            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 disabled:opacity-60 disabled:pointer-events-none"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={busy}
-            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20 flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:pointer-events-none"
-          >
-            {busy && <Icon name="refresh" className="w-3.5 h-3.5 animate-spin" />}
-            Sí, Eliminar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Burbuja de chat compartida por cliente y admin: separa los mensajes a lados
 // opuestos según quién los envió, con avatar (inicial del nombre), nombre y hora.
 function ChatBubble({ m, order, perspective = 'customer' }) {
@@ -18659,40 +18568,6 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
         </div>
       </div>
       {showTicket && <ThermalTicketModal order={order} rate={rate} onClose={() => setShowTicket(false)} />}
-    </div>
-  );
-}
-
-function CancelOrderModal({ order, onClose, onConfirm }) {
-  useOverlay(true, onClose);
-  return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md glass-strong bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl z-10 text-center space-y-4 animate-modal-spring">
-        <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-          <Icon name="alertTriangle" className="w-6 h-6" />
-        </div>
-        <div>
-          <h3 className="text-lg font-bold text-white">¿Cancelar pedido #{order.id}?</h3>
-          <p className="text-xs text-slate-400 mt-1">
-            El pedido quedará anulado y el stock de sus artículos se devolverá al inventario.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-3 pt-2">
-          <button
-            onClick={onClose}
-            className="py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700"
-          >
-            Volver
-          </button>
-          <button
-            onClick={onConfirm}
-            className="py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 shadow-lg shadow-rose-500/20"
-          >
-            Sí, Cancelar
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

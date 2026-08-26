@@ -1036,3 +1036,89 @@ html[data-vt-dir='back']::view-transition-new(root) { animation-name: kvt-push-i
 
 /* Pull-to-refresh con Theo: sin overscroll nativo del navegador */
 html { overscroll-behavior-y: contain; }
+
+/* ------------------------------------------------------------------ */
+/*  Tema AMOLED: negro puro verdadero                                  */
+/* ------------------------------------------------------------------ */
+html[data-theme="amoled"] body,
+html[data-theme="amoled"] .bg-slate-900 { background-color: #000000; }
+html[data-theme="amoled"] .bg-slate-900\/80,
+html[data-theme="amoled"] .bg-slate-900\/90,
+html[data-theme="amoled"] .bg-slate-900\/95 { background-color: rgba(0, 0, 0, 0.88); }
+html[data-theme="amoled"] .bg-slate-900\/60 { background-color: rgba(0, 0, 0, 0.62); }
+html[data-theme="amoled"] .bg-slate-800\/60,
+html[data-theme="amoled"] .bg-slate-800\/70,
+html[data-theme="amoled"] .bg-slate-800\/80 { background-color: rgba(9, 9, 11, 0.72); }
+html[data-theme="amoled"] .bg-slate-800\/90 { background-color: rgba(9, 9, 11, 0.85); }
+html[data-theme="amoled"] .glass-strong,
+html[data-theme="amoled"] .glass { background-color: rgba(0, 0, 0, 0.82); }
+html[data-theme="amoled"] .border-slate-800\/80,
+html[data-theme="amoled"] .border-slate-800 { border-color: rgba(255, 255, 255, 0.09); }
+
+/* ------------------------------------------------------------------ */
+/*  Liquid glass en headers (#14): reflejo especular al scrollear      */
+/* ------------------------------------------------------------------ */
+.liquid-glass { backdrop-filter: blur(18px) saturate(160%); }
+.liquid-glass::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0; height: 60%;
+  pointer-events: none;
+  background: linear-gradient(105deg,
+    transparent 34%,
+    rgba(255, 255, 255, 0.13) 47%,
+    rgba(255, 255, 255, 0.03) 57%,
+    transparent 72%);
+  transform: translateX(var(--sheen, -130%));
+  will-change: transform;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Resaltado vivo de búsqueda (#12)                                   */
+/* ------------------------------------------------------------------ */
+mark.search-hit {
+  background: #fde047;
+  color: #0f172a;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Ticket térmico (#2)                                                */
+/* ------------------------------------------------------------------ */
+.thermal-ticket {
+  background: #ffffff;
+  color: #111827;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ticket-jag-top,
+.ticket-jag-bottom {
+  left: 0; right: 0; height: 12px;
+  background-image:
+    linear-gradient(45deg, #ffffff 25%, transparent 25%),
+    linear-gradient(-45deg, #ffffff 25%, transparent 25%);
+  background-size: 16px 16px;
+  background-repeat: repeat-x;
+}
+.ticket-jag-top { top: -11px; transform: rotate(180deg); }
+.ticket-jag-bottom { bottom: -11px; }
+.ticket-print { animation: ticket-print 1.15s cubic-bezier(0.2, 0.85, 0.25, 1) both; }
+@keyframes ticket-print {
+  0% { transform: translateY(-108%); }
+  100% { transform: translateY(0); }
+}
+
+/* Latido de proximidad (#4): el ping se reinicia por JS con duración dinámica */
+.island-dot.beat { animation-name: island-beat; }
+@keyframes island-beat {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); transform: scale(1); }
+  35% { box-shadow: 0 0 0 10px rgba(52, 211, 153, 0); transform: scale(1.35); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); transform: scale(1); }
+}
+
+/* Modo TV Mostrador (#15) */
+.tv-card {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.7);
+}

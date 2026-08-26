@@ -1084,6 +1084,28 @@ function AnimatedNumber({ value, format = (v) => String(Math.round(v)), classNam
   return <span className={className}>{format(display)}</span>;
 }
 
+const normHi = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+function splitHi(text, q) {
+  const t = String(text ?? '');
+  const query = normHi(q).trim();
+  if (!query) return [{ t }];
+  const nt = normHi(t);
+  const out = [];
+  let i = 0;
+  while (i <= nt.length) {
+    const idx = nt.indexOf(query, i);
+    if (idx === -1) { if (i < nt.length) out.push({ t: t.slice(i) }); break; }
+    if (idx > i) out.push({ t: t.slice(i, idx) });
+    out.push({ t: t.slice(idx, idx + query.length), hit: true });
+    i = idx + query.length;
+    if (i >= nt.length) break;
+  }
+  return out;
+}
+function Hi({ text, q }) {
+  return <>{splitHi(text, q).map((p, i) => p.hit ? <mark key={i} className="search-hit">{p.t}</mark> : <span key={i}>{p.t}</span>)}</>;
+}
+
 // Capa de celebración: confeti de una pasada + check pop. Se monta una vez en
 // la raíz y reacciona al evento global CELEBRATE_EVENT.
 // THEO — mascota de la marca: perrito marrón SVG animado por estados.
@@ -1453,26 +1475,43 @@ function OrderIslandTracker({ order, onOpen }) {
   });
   const drag = useRef({ active: false, startY: 0, startYPct: 0, moved: false });
   const [distLabel, setDistLabel] = useState('En camino');
+  // Latido de proximidad (#4): el ping late más rápido cuanto más cerca está
+  // el repartidor; a menos de 400 m vibra en cada segundo latido.
+  const [distM, setDistM] = useState(null);
+  const [beatTick, setBeatTick] = useState(0);
+  const beatCountRef = useRef(0);
 
   const courierOk = order && order.courier_lat != null && order.courier_lng != null;
   const destOk = order && order.lat != null && order.lng != null;
 
   useEffect(() => {
-    if (!courierOk) { setDistLabel('En camino'); return undefined; }
+    if (!courierOk) { setDistLabel('En camino'); setDistM(null); return undefined; }
     const calc = () => {
       try {
         const from = { lat: Number(order.courier_lat), lng: Number(order.courier_lng) };
-        const to = destOk
-          ? { lat: Number(order.lat), lng: Number(order.lng) }
-          : null;
-        if (!to) return setDistLabel('En camino');
+        if (!destOk) return setDistLabel('En camino');
+        const to = { lat: Number(order.lat), lng: Number(order.lng) };
         const m = distanceMeters(from, to);
+        setDistM(m);
         setDistLabel(m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.max(20, Math.round(m / 10) * 10)} m`);
       } catch { setDistLabel('En camino'); }
     };
     calc();
     return undefined;
   }, [order?.courier_lat, order?.courier_lng, destOk]);
+
+  const beatPeriod = distM == null ? 1600 : Math.max(450, Math.min(2200, distM));
+  useEffect(() => {
+    if (distM == null) return undefined;
+    const id = setInterval(() => {
+      setBeatTick((t) => t + 1);
+      if (distM < 400) {
+        beatCountRef.current += 1;
+        if (beatCountRef.current % 2 === 1) haptic('tap');
+      }
+    }, beatPeriod);
+    return () => clearInterval(id);
+  }, [beatPeriod, distM]);
 
   // Persistencia de posición
   useEffect(() => {
@@ -1515,7 +1554,7 @@ function OrderIslandTracker({ order, onOpen }) {
       onKeyDown={(e) => { if (e.key === 'Enter') onOpen(order); }}
       aria-label="Ver seguimiento en vivo del pedido"
     >
-      <span className="island-dot" />
+      <span key={beatTick} className={`island-dot beat`} style={{ animationDuration: `${beatPeriod}ms` }} />
       <span className="text-[11px] font-black text-white">#{order.id}</span>
       <span className="text-[11px] font-bold text-teal-300 tabular-nums">{distLabel}</span>
       <Icon name="navigation" className="w-3.5 h-3.5 text-slate-400" />
@@ -1993,7 +2032,7 @@ export default function App() {
     localStorage.setItem('kiosko_theme', theme);
   }, [theme]);
 
-  const THEME_ORDER = ['dark', 'light', 'neon'];
+  const THEME_ORDER = ['dark', 'light', 'neon', 'amoled'];
   const toggleTheme = () =>
     setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length]);
 
@@ -2171,6 +2210,8 @@ export default function App() {
         const y = window.scrollY || 0;
         setHeaderCollapsed(y > 64);
         setShowScrollTop(y > 480);
+        const sheen = -130 + Math.min(y, 700) / 700 * 260;
+        document.documentElement.style.setProperty('--sheen', `${sheen.toFixed(1)}%`);
       });
     };
     onScroll();
@@ -4212,7 +4253,7 @@ export default function App() {
       )}
 
       {/* Modern Glassmorphic Top Navbar — colapsable al scrollear (móvil) */}
-      <header ref={headerRef} style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top, 0px))' }} className={`sticky top-0 z-30 glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 transition-all duration-300 ${headerCollapsed ? 'py-1.5 sm:py-2' : 'py-2.5 sm:py-3'}`}>
+      <header ref={headerRef} style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top, 0px))' }} className={`sticky top-0 z-30 glass liquid-glass bg-slate-900/80 backdrop-blur-lg border-b border-slate-800/80 px-3 sm:px-4 lg:px-8 transition-all duration-300 ${headerCollapsed ? 'py-1.5 sm:py-2' : 'py-2.5 sm:py-3'}`}>
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -4276,9 +4317,9 @@ export default function App() {
             onClick={toggleTheme}
             className="p-2 sm:p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/50 hover:bg-slate-800 transition-all text-slate-200 hover:text-teal-400 shrink-0 btn-sink"
             aria-label="Cambiar tema"
-            title={theme === 'dark' ? 'Cambiar a modo claro' : theme === 'light' ? 'Cambiar a modo neón' : 'Cambiar a modo oscuro'}
+            title={theme === 'dark' ? 'Cambiar a modo claro' : theme === 'light' ? 'Cambiar a modo neón' : theme === 'neon' ? 'Cambiar a AMOLED (negro puro)' : 'Cambiar a modo oscuro'}
           >
-            <Icon name={theme === 'dark' ? 'sun' : theme === 'light' ? 'moon' : 'zap'} className="w-5 h-5" />
+            <Icon name={theme === 'dark' || theme === 'amoled' ? 'sun' : theme === 'light' ? 'moon' : 'zap'} className="w-5 h-5" />
           </button>
 
           {/* Customer identity chip */}
@@ -4654,6 +4695,7 @@ onEditProduct={(product) => {
           cartCount={cartCount}
           cartTotal={cartTotal}
           rate={rate}
+          holdDeadline={holdDeadline}
           onOpen={() => setIsCartOpen(true)}
         />
       )}
@@ -6607,7 +6649,7 @@ function CustomerView({
 
       {/* Search Bar & Category Filter Bar (fija debajo del header) */}
       <div
-        className="sticky z-20 -mx-3 sm:-mx-6 lg:-mx-8 px-3 sm:px-6 lg:px-8 py-2 sm:py-3 bg-slate-900/95 backdrop-blur-lg border-b border-slate-800/60 space-y-4"
+        className="sticky z-20 -mx-3 sm:-mx-6 lg:-mx-8 px-3 sm:px-6 lg:px-8 py-2 sm:py-3 bg-slate-900/95 liquid-glass border-b border-slate-800/60 space-y-4"
         style={{ top: stickyTop }}
       >
         {/* Banner de invitado: el usuario está sumando al carrito compartido de un dueño */}
@@ -6674,7 +6716,7 @@ function CustomerView({
                 >
                   <ProductImg product={p} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-800 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <span className="block text-xs font-semibold text-slate-200 truncate">{p.name}</span>
+                    <span className="block text-xs font-semibold text-slate-200 truncate">{searchQuery ? <Hi text={p.name} q={searchQuery} /> : p.name}</span>
                     <span className="text-[11px] text-teal-400 font-bold">{formatUsd(p.price)}</span>
                   </div>
                   <Icon name="arrowRight" className="w-4 h-4 text-slate-500" />
@@ -6968,6 +7010,7 @@ function CustomerView({
                  onAddToCart={(e) => onAddToCart(product, 1, e.currentTarget.getBoundingClientRect())}
                  onOpenDetail={() => onOpenProductModal(product)}
                  vtActive={vtProductId === product.id}
+                 highlight={searchQuery}
                />
             </RevealOnScroll>
           ))}
@@ -7537,7 +7580,7 @@ function MathCalculator({ rate }) {
   );
 }
 
-function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite, vtActive = false }) {
+function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onToggleFavorite, vtActive = false, highlight = '' }) {
   const avail = Math.max(0, (Number(product.stock) || 0) - (Number(product.reserved) || 0));
   const isOut = avail <= 0;
   const isLow = avail > 0 && avail <= 5;
@@ -7631,7 +7674,7 @@ function ProductCard({ product, rate, onAddToCart, onOpenDetail, isFavorite, onT
             onClick={onOpenDetail}
             className="font-display text-sm sm:text-base text-slate-100 group-hover:text-teal-300 transition-colors cursor-pointer line-clamp-1"
           >
-            {product.name}
+            {highlight ? <Hi text={product.name} q={highlight} /> : product.name}
           </h3>
           {formatSize(product) && (
             <span className="inline-block mt-1 px-1.5 sm:px-2 py-0.5 rounded-lg bg-slate-900/80 border border-slate-700/60 text-[10px] sm:text-[11px] font-bold text-teal-300">
@@ -8904,7 +8947,21 @@ function OrdersDrawer({ isOpen, onClose, orders, rate, onViewOrderDetail, onTrac
   );
 }
 
-function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
+function CartFloatBar({ cartCount, cartTotal, rate, holdDeadline, onOpen }) {
+  const HOLD_MS = 5 * 60 * 1000;
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!holdDeadline) return undefined;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [holdDeadline]);
+  const holdLeft = holdDeadline ? Math.max(0, holdDeadline - Date.now()) : 0;
+  const holdPct = holdLeft > 0 ? holdLeft / HOLD_MS : 0;
+  const RING_COLOR = holdLeft > 60000 ? '#2dd4bf' : holdLeft > 20000 ? '#fbbf24' : '#fb7185';
+  const RING_C = 2 * Math.PI * 20;
+  const holdMM = Math.floor(holdLeft / 60000);
+  const holdSS = Math.floor((holdLeft % 60000) / 1000);
+
   return (
     <button
       data-cart-target
@@ -8914,6 +8971,11 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
     >
       <div className="flex items-center gap-2.5 sm:gap-3">
         <span className="relative p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-teal-500/15 text-teal-400">
+          {holdLeft > 0 && (
+            <svg viewBox="0 0 44 44" className="absolute -inset-1 w-[calc(100%+8px)] h-[calc(100%+8px)] pointer-events-none" style={{ transform: 'rotate(-90deg)' }}>
+              <circle cx="22" cy="22" r="20" fill="none" stroke={RING_COLOR} strokeWidth="3" strokeLinecap="round" strokeDasharray={RING_C} strokeDashoffset={RING_C * (1 - holdPct)} style={{ transition: 'stroke-dashoffset .6s linear, stroke .4s' }} />
+            </svg>
+          )}
           <Icon key={`bag-${cartCount}`} name="shoppingBag" className="w-5 h-5 animate-cart-bounce" />
           <span key={`badge-${cartCount}`} className="absolute -top-1 -right-1 bg-teal-400 text-slate-950 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-badge-spring">
             {cartCount}
@@ -8921,7 +8983,7 @@ function CartFloatBar({ cartCount, cartTotal, rate, onOpen }) {
         </span>
         <div className="text-left min-w-0">
           <span className="block text-[11px] text-slate-400 font-semibold">
-            {cartCount} {cartCount === 1 ? 'producto' : 'productos'}
+            {holdLeft > 0 ? `${holdMM}:${String(holdSS).padStart(2, '0')} de reserva` : `${cartCount} ${cartCount === 1 ? 'producto' : 'productos'}`}
           </span>
           <span className="block text-base sm:text-lg font-black text-white truncate">
             <Money value={cartTotal} />
@@ -11031,15 +11093,23 @@ function AdminView({
   const [quickMenuOrder, setQuickMenuOrder] = useState(null);
   // Verificación de código de retiro antes de marcar entregado (#11).
   const [retiroVerifyOrder, setRetiroVerifyOrder] = useState(null);
+  const [tvMode, setTvMode] = useState(false);
+  // Bloquear scroll del body en modo TV
+  useEffect(() => {
+    if (!tvMode) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [tvMode]);
   // Reloj vivo de la vista Mostrador: los cronómetros de espera tickean 1/s
   // solo mientras la vista está visible.
   const [mostradorNow, setMostradorNow] = useState(() => Date.now());
   useEffect(() => {
-    if (adminTab !== 'orders' || ordersView !== 'mostrador') return undefined;
+    if ((adminTab !== 'orders' || ordersView !== 'mostrador') && !tvMode) return undefined;
     setMostradorNow(Date.now());
     const id = setInterval(() => setMostradorNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [adminTab, ordersView]);
+  }, [adminTab, ordersView, tvMode]);
   // Feedback "procesando" por botón: deshabilita el control y muestra spinner
   // mientras su acción corre. Claves: st:/pay:/del:/gps: + id del pedido.
   const [busyActions, setBusyActions] = useState({});
@@ -12267,6 +12337,9 @@ function AdminView({
               {c.label} · {c.n}
             </span>
           ))}
+          <button onClick={() => setTvMode(true)} className="px-3 py-1.5 rounded-xl bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 text-[11px] font-black whitespace-nowrap shrink-0 flex items-center gap-1">
+            <Icon name="maximize" className="w-3.5 h-3.5" /> TV
+          </button>
           <span className="ml-auto text-[10px] text-slate-500 font-semibold whitespace-nowrap shrink-0">
             → desliza tarjeta para avanzar
           </span>
@@ -14812,6 +14885,86 @@ function AdminView({
           </div>
         </div>
       )}
+      {/* Modo TV Mostrador (#15): vista fullscreen para tablet en counter/ventas */}
+      {tvMode && (() => {
+        const active = (orders || []).filter(o => !['entregado', 'cancelado'].includes(o.status));
+        const q = active.map(o => {
+          const d = parseOrderDate(o);
+          const waitMs = isNaN(d) ? 0 : Math.max(0, mostradorNow - d.getTime());
+          return { o, waitMs };
+        }).sort((a, b) => b.waitMs - a.waitMs);
+        return (
+          <div className="fixed inset-0 z-[96] bg-slate-950 overflow-y-auto p-5 sm:p-8" role="dialog" aria-label="Modo TV Mostrador">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <Icon name="store" className="w-7 h-7 text-teal-400" />
+                <h2 className="font-display text-2xl font-black text-white">Mostrador · Modo TV</h2>
+                <span className="text-xs text-slate-500 font-semibold tabular-nums">{new Date().toLocaleTimeString('es-VE')}</span>
+              </div>
+              <button onClick={() => setTvMode(false)} className="px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 font-bold text-sm hover:bg-slate-700 transition-all flex items-center gap-2">
+                <Icon name="minimize" className="w-4 h-4" /> Salir
+              </button>
+            </div>
+            {q.length === 0 ? (
+              <div className="py-24 text-center text-4xl text-slate-400">🎉 Sin pedidos activos</div>
+            ) : (
+              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                {q.map(({ o, waitMs }) => {
+                  const mm = Math.floor(waitMs / 60000);
+                  const ss = Math.floor((waitMs % 60000) / 1000);
+                  const timerColor = waitMs > 1800000 ? 'text-rose-400' : waitMs > 600000 ? 'text-amber-400' : 'text-teal-300';
+                  const needsPay = needsPaymentAttention(o);
+                  const items = o.items || [];
+                  return (
+                    <div key={o.id} className="tv-card rounded-3xl p-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-3xl font-mono font-black text-teal-400">#{o.id}</span>
+                        <span className={`px-3 py-1 rounded-full border text-xs font-bold ${needsPay ? 'bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-700 border-slate-600 text-slate-200'}`}>
+                          {needsPay ? 'Por validar' : STATUS_LABELS[o.status] || o.status}
+                        </span>
+                      </div>
+                      <div className={`text-6xl font-black tabular-nums ${timerColor}`}>
+                        {mm}:{String(ss).padStart(2, '0')}
+                      </div>
+                      <p className="text-lg text-slate-300 font-semibold truncate">{o.customerName || 'Cliente'}</p>
+                      {o.note && <p className="text-amber-400 text-base font-semibold truncate">📝 {o.note}</p>}
+                      <div className="space-y-1.5 text-xl leading-relaxed">
+                        {items.map((it, i) => (
+                          <div key={i} className="flex justify-between gap-2">
+                            <span className="truncate">{it.quantity || 1}× <span className="font-black text-white">{it.name}</span></span>
+                          </div>
+                        ))}
+                      </div>
+                      {needsPay ? (
+                        <div className="space-y-2 pt-2">
+                          <p className="text-[11px] text-amber-300 font-bold text-center uppercase">Comprobante de pago pendiente</p>
+                          {o.payment_proof_url && (
+                            <a href={o.payment_proof_url} target="_blank" rel="noopener noreferrer" className="block py-3 rounded-xl bg-slate-800 border border-slate-700 text-center text-sm font-bold text-teal-300 hover:bg-slate-700 transition-all">
+                              📷 Ver comprobante
+                            </a>
+                          )}
+                          <div className="grid grid-cols-2 gap-2">
+                            <button onClick={() => runExclusive(`pay:${o.id}`, async () => { await onUpdateOrderStatus(o.id, 'en_preparacion'); })} disabled={Boolean(busyActions[`pay:${o.id}`])} className="py-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-base transition-all disabled:opacity-60">
+                              {busyActions[`pay:${o.id}`] ? '…' : '✅ Confirmar'}
+                            </button>
+                            <button onClick={() => runExclusive(`pay:${o.id}`, async () => { await onUpdateOrderStatus(o.id, 'cancelado'); })} disabled={Boolean(busyActions[`pay:${o.id}`])} className="py-4 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold text-base hover:bg-rose-500/30 transition-all disabled:opacity-60">
+                              {busyActions[`pay:${o.id}`] ? '…' : '❌ Rechazar'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button onClick={() => runExclusive(`tv:${o.id}`, async () => { const next = STATUS_FLOW[o.status]; if (next) await onUpdateOrderStatus(o.id, next); })} disabled={Boolean(busyActions[`tv:${o.id}`])} className="w-full py-5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-black text-xl shadow-lg shadow-teal-500/20 hover:from-teal-400 hover:to-emerald-400 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                          {busyActions[`tv:${o.id}`] ? <><Icon name="refresh" className="w-5 h-5 animate-spin" /> Procesando…</> : <><Icon name="arrowRight" className="w-5 h-5" /> Avanzar</>}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
       {showAdminProfile && (
         <AdminProfileModal
           phone={adminPhone}
@@ -18465,6 +18618,124 @@ function ProductFormModal({ productToEdit, categories, products = [], onClose, o
   );
 }
 
+// Ticket térmico animado (#2): recibo estilo thermal printer con efecto de
+// impresión, borde dentado, código de barras y opción de compartir como imagen.
+function ThermalTicketModal({ order, rate, onClose }) {
+  useOverlay(true, onClose);
+  useEffect(() => { sfx.tick(); const t1 = setTimeout(sfx.tick, 200); const t2 = setTimeout(sfx.tick, 450); return () => { clearTimeout(t1); clearTimeout(t2); }; }, []);
+
+  const created = order?.createdAt || order?.timestamp;
+  const dateStr = created ? new Date(created).toLocaleString('es-VE', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+  const items = order?.items || [];
+  const total = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
+  const totalBs = rate?.rate > 0 ? formatBs(usdToBs(total, rate.rate)) : null;
+  const barcode = [...String(order?.id ?? '0')].map((ch) => 2 + (ch.charCodeAt(0) % 4));
+
+  const shareImg = async () => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = 640; c.height = items.length * 24 + 280;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.fillStyle = '#111'; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('KIOSKO 24/7', c.width / 2, 36);
+      ctx.font = '13px monospace'; ctx.fillText('Empresas Alvarados', c.width / 2, 56);
+      ctx.font = '13px monospace'; ctx.textAlign = 'left'; ctx.fillText(dateStr, 24, 86);
+      ctx.fillText(`Pedido #${order?.id}`, 24, 112);
+      ctx.fillText(`Cliente: ${order?.customerName || '—'}`, 24, 134);
+      ctx.strokeStyle = '#ccc'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(24, 148); ctx.lineTo(c.width - 24, 148); ctx.stroke(); ctx.setLineDash([]);
+      let y = 172;
+      items.forEach((it) => {
+        ctx.fillStyle = '#111'; ctx.font = '14px monospace';
+        ctx.fillText(`${it.quantity || 1}× ${it.name}`, 24, y);
+        ctx.textAlign = 'right'; ctx.fillText(formatUsd((Number(it.price) || 0) * (Number(it.quantity) || 1)), c.width - 24, y);
+        ctx.textAlign = 'left'; y += 24;
+      });
+      ctx.strokeStyle = '#ccc'; ctx.beginPath(); ctx.moveTo(24, y); ctx.lineTo(c.width - 24, y); ctx.stroke(); y += 20;
+      ctx.font = 'bold 18px monospace'; ctx.fillText(`Total: ${formatUsd(total)}`, 24, y);
+      if (totalBs) { ctx.font = '13px monospace'; ctx.fillText(totalBs, 24, y + 20); y += 20; }
+      y += 24;
+      if (order?.pickup_code) {
+        ctx.font = 'bold 26px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(`Código: ${order.pickup_code}`, c.width / 2, y); y += 32;
+      }
+      ctx.textAlign = 'left';
+      let bx = 24;
+      barcode.forEach((w) => { ctx.fillStyle = '#111'; ctx.fillRect(bx, y, w, 40); bx += w + 2; });
+      const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+      if (!blob) return;
+      const file = new File([blob], `pedido-${order?.id}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `Pedido ${order?.id}`, text: 'Mi pedido en Kiosko 24/7 🛒' });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = file.name; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }
+    } catch { /* noop */ }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-start sm:items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in" role="dialog" aria-label="Ticket de compra">
+      <div className="max-w-sm w-full space-y-3 relative">
+        <div className="relative overflow-hidden">
+          <div className="ticket-jag-top" />
+          <div className="thermal-ticket ticket-print rounded-lg px-5 py-6 shadow-2xl space-y-3">
+            <div className="text-center space-y-0.5">
+              <p className="text-sm font-black tracking-widest text-gray-900">KIOSKO 24/7</p>
+              <p className="text-[10px] text-gray-500">Empresas Alvarados</p>
+            </div>
+            <p className="text-[11px] text-gray-500 text-center">{dateStr}</p>
+            <hr className="border-dashed border-gray-300" />
+            <div className="text-[11px] leading-relaxed flex justify-between"><span>Pedido #{order?.id}</span></div>
+            <div className="text-[11px] leading-relaxed flex justify-between"><span>Cliente</span><span className="font-bold">{order?.customerName || '—'}</span></div>
+            {order?.type && <div className="text-[11px] leading-relaxed flex justify-between"><span>Tipo</span><span className="uppercase font-bold">{order.type}</span></div>}
+            <hr className="border-dashed border-gray-300" />
+            <div className="space-y-1.5">
+              {items.map((it, i) => (
+                <div key={i} className="text-[11px] leading-relaxed flex justify-between gap-2">
+                  <span className="truncate">{it.quantity || 1}× {it.name}</span>
+                  <span className="font-bold shrink-0">{formatUsd((Number(it.price) || 0) * (Number(it.quantity) || 1))}</span>
+                </div>
+              ))}
+            </div>
+            <hr className="border-dashed border-gray-300" />
+            <div className="flex justify-between items-baseline">
+              <span className="text-[11px] font-bold">Total</span>
+              <div className="text-right">
+                <span className="text-sm font-black">{formatUsd(total)}</span>
+                {totalBs && <span className="block text-[10px] text-gray-500">{totalBs}</span>}
+              </div>
+            </div>
+            <div className="flex justify-between text-[10px] text-gray-500">
+              <span>Método</span><span className="font-bold">{order?.paymentMethod || 'Efectivo'}</span>
+            </div>
+            {order?.pickup_code && (
+              <div className="text-center pt-1">
+                <p className="text-[10px] text-gray-400 mb-1">Código de retiro</p>
+                <p className="text-lg font-black tracking-[0.35em] text-gray-900">{order.pickup_code}</p>
+              </div>
+            )}
+            <div className="flex gap-0.5 h-8 items-stretch pt-1">
+              {barcode.map((w, i) => <div key={i} className="bg-gray-900" style={{ width: w }} />)}
+            </div>
+            <p className="text-center text-[9px] text-gray-400 italic">¡Gracias por tu compra!</p>
+          </div>
+          <div className="ticket-jag-bottom" />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={shareImg} className="flex-1 py-2.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 hover:bg-teal-400 transition-all">
+            <Icon name="download" className="w-4 h-4" /> Compartir imagen
+          </button>
+          <button onClick={onClose} className="py-2.5 px-4 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-xs hover:bg-slate-700 transition-all">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Confirmación genérica con el lenguaje visual de la app (reemplaza el
 // window.confirm del navegador). Muestra título, mensaje y botones estilizados.
 function ConfirmActionModal({ title, message, note, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', tone = 'danger', icon = 'alertTriangle', onConfirm, onClose }) {
@@ -18890,8 +19161,8 @@ function FacturaQr360({ order, rate }) {
 
 function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCancelOrder, isBenefited, onOrderUpdated, addToast, headerHeight = 0 }) {
   useOverlay(true, onClose);
-  // Swipe hacia abajo para cerrar (solo móvil / bottom sheet).
   const sheetRef = useSwipeToClose(onClose);
+  const [showTicket, setShowTicket] = useState(false);
   const style = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
   const cancellable = order.status === 'pendiente' || order.status === 'en_preparacion';
   const trackable = order.type === 'delivery' && order.status !== 'cancelado' && order.status !== 'entregado';
@@ -18927,6 +19198,9 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
               <p className="text-[11px] text-slate-400 mt-1">Mostralo al retirar tu pedido</p>
             </div>
           )}
+          <button onClick={() => setShowTicket(true)} className="w-full py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-teal-300 font-bold text-xs flex items-center justify-center gap-2 hover:bg-slate-700 transition-all">
+            <Icon name="list" className="w-4 h-4" /> Ver ticket de compra
+          </button>
           {needsPaymentValidation(order) && (
             <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300 font-semibold">
               <Icon name="clock" className="w-4 h-4 shrink-0" />
@@ -19035,6 +19309,7 @@ function OrderDetailModal({ order, rate, onClose, onTrackLiveOrder, onRequestCan
         </div>
         </div>
       </div>
+      {showTicket && <ThermalTicketModal order={order} rate={rate} onClose={() => setShowTicket(false)} />}
     </div>
   );
 }

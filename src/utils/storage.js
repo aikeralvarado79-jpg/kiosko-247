@@ -52,7 +52,7 @@ export const buildKnownCustomers = (orders, saved) => {
   return Array.from(map.values());
 };
 
-const FAVORITES_KEY = 'kiosko_favorites';
+export const FAVORITES_KEY = 'kiosko_favorites';
 export const loadFavorites = () => {
   try {
     const raw = localStorage.getItem(FAVORITES_KEY);

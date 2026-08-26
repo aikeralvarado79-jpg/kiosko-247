@@ -4,6 +4,11 @@ import { startRegistration, startAuthentication, browserSupportsWebAuthn } from 
 import { api, getToken, setToken, clearToken, setRememberSession, getRememberSession, outbox } from './api.js';
 import { sfx, isSoundOn, setSoundOn, distanceMeters, dominantColorFromUrl } from './experience.js';
 import { ADMIN_PHONES } from './data.js';
+import BrandLogo from './components/ui/BrandLogo.jsx';
+import Money from './components/ui/Money.jsx';
+import AnimatedNumber from './components/ui/AnimatedNumber.jsx';
+import RevealOnScroll from './components/ui/RevealOnScroll.jsx';
+import ProductImg from './components/ui/ProductImg.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BrowserMultiFormatReader } from '@zxing/browser';
@@ -218,60 +223,8 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
 // Logo de marca: carrito de compras de kiosko (venta y entrega) sobre un sello
 // redondeado con gradiente propio (no depende del tema) para que el logo se
 // reconozca igual en modo claro y oscuro.
-const BrandLogo = ({ className = 'w-9 h-9' }) => (
-  <span
-    className={`inline-flex items-center justify-center rounded-2xl bg-gradient-to-tr from-teal-500 via-emerald-500 to-cyan-400 shadow-lg shadow-teal-500/25 ring-2 ring-white/15 shrink-0 select-none ${className}`}
-    aria-hidden="true"
-  >
-    <svg viewBox="0 0 24 24" className="w-[66%] h-[66%] fill-slate-950" xmlns="http://www.w3.org/2000/svg">
-      <path d="M2 3h2.5l2.4 12.2a2 2 0 0 0 1.98 1.62h9.8a2 2 0 0 0 1.97-1.6L22 7H5.6M9 20a1.4 1.4 0 1 0 0-2.8A1.4 1.4 0 0 0 9 20zM17 20a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8z" />
-    </svg>
-  </span>
-);
-
 // Reveal on scroll: aplica reveal-on-scroll al envolver un bloque y activa la
 // clase is-revealed cuando entra al viewport. Respeto total a prefers-reduced-motion.
-const RevealOnScroll = ({ children, className = '', delay = 0, as: Tag = 'div', ...props }) => {
-  const ref = useRef(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    if (
-      typeof matchMedia !== 'undefined' &&
-      matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      setVisible(true);
-      return undefined;
-    }
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            setVisible(true);
-            io.disconnect();
-          }
-        });
-      },
-      { threshold: 0.1, rootMargin: '0px 0px -36px 0px' }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-
-  return (
-    <Tag
-      ref={ref}
-      className={`reveal-on-scroll ${visible ? 'is-revealed' : ''} ${className}`.trim()}
-      style={{ '--reveal-delay': `${delay}ms`, ...props.style }}
-      {...props}
-    >
-      {children}
-    </Tag>
-  );
-};
-
 // Precio con count-up: anima el número del valor anterior al nuevo en ~0.5s.
 // Sin animación si el usuario prefiere reducir el movimiento del sistema.
 const useCountUp = (value, duration = 500) => {
@@ -601,38 +554,6 @@ function useSwipeToClose(onClose, enabled = true, { detents = false } = {}) {
 }
 
 // Número que "sube" animado entre valores (métricas del dashboard).
-function AnimatedNumber({ value, format = (v) => String(Math.round(v)), className }) {
-  const target = Number(value) || 0;
-  const [display, setDisplay] = useState(target);
-  const fromRef = useRef(target);
-
-  useEffect(() => {
-    const from = fromRef.current;
-    if (from === target) { setDisplay(target); return undefined; }
-    const dur = 650;
-    const t0 = performance.now();
-    let raf;
-    const step = (t) => {
-      const p = Math.min(1, (t - t0) / dur);
-      const eased = 1 - Math.pow(1 - p, 3);
-      setDisplay(from + (target - from) * eased);
-      if (p < 1) {
-        raf = requestAnimationFrame(step);
-      } else {
-        fromRef.current = target;
-        setDisplay(target);
-      }
-    };
-    raf = requestAnimationFrame(step);
-    return () => {
-      cancelAnimationFrame(raf);
-      fromRef.current = target;
-    };
-  }, [target]);
-
-  return <span className={className}>{format(display)}</span>;
-}
-
 const normHi = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 function splitHi(text, q) {
   const t = String(text ?? '');
@@ -923,27 +844,6 @@ function Theo({ mood = 'idle', className = 'w-20 h-16' }) {
 
 // Money: total con dígitos que ruedan como odómetro (#12). El símbolo y los
 // decimales van fijos; la parte entera sube dígito por dígito al cambiar.
-function Money({ value, className = '' }) {
-  const str = formatUsd(value);
-  const intPart = str.replace(/[^0-9]/g, '').slice(0, -2) || '0';
-  const tail = str.slice(str.indexOf(intPart.slice(-Math.max(intPart.length, 1))) + intPart.length);
-  const symbol = str.startsWith('$') ? '$' : '';
-  const digits = String(intPart).split('');
-  return (
-    <span className={`inline-flex items-baseline tabular-nums ${className}`}>
-      {symbol}
-      {digits.map((d, i) => (
-        <span key={`${i}-${digits.length}`} className="odo-digit">
-          <span className="odo-stack" style={{ transform: `translateY(-${Number(d)}em)` }}>
-            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => <span key={n}>{n}</span>)}
-          </span>
-        </span>
-      ))}
-      {tail}
-    </span>
-  );
-}
-
 // Cierra un overlay con animación de salida (#11): encoge/desvanece el panel
 // y luego ejecuta el cierre real. Respeta prefers-reduced-motion.
 const exitThen = (ref, cb) => () => {
@@ -6507,41 +6407,6 @@ function CustomerView({
 // Imagen de producto con fallback: si la URL falla o está vacía muestra el logo
 // de marca + nombre (mismo fallback que usa KAPSULA AR) en vez del rompecabezas
 // roto del navegador. Aplica fade al cargar en todas las superficies.
-function ProductImg({ product, image, name, brand, alt, className = '', loading = 'lazy', onLoad, imgProps }) {
-  const [errored, setErrored] = useState(false);
-  const src = product?.image ?? image;
-  const label = product?.brand?.trim() || product?.name || brand || name || 'Producto';
-
-  if (!src || errored) {
-    return (
-      <div
-        className={`flex flex-col items-center justify-center gap-1.5 select-none ${className || ''}`}
-        style={{ background: 'linear-gradient(135deg, #0f172a, #1e293b)' }}
-        aria-hidden="true"
-      >
-        <BrandLogo className="w-6 h-6 !rounded-lg shrink-0" />
-        <span className="w-full truncate px-1.5 text-center text-[10px] font-bold text-slate-400">{label}</span>
-      </div>
-    );
-  }
-
-  return (
-    <img
-      src={src}
-      alt={alt || label}
-      loading={loading}
-      draggable={false}
-      onError={() => setErrored(true)}
-      onLoad={(e) => {
-        e.currentTarget.classList.add('is-loaded');
-        onLoad?.(e);
-      }}
-      className={`img-load-fade ${className || ''}`}
-      {...imgProps}
-    />
-  );
-}
-
 // Estante interactivo: un anaquel (categoría) con los productos "de pie" sobre
 // el borde, en fila horizontal scrolleable con leve 3D al pasar el cursor.
 // Tocar el producto abre el detalle; el botón lo suma al carrito al instante.

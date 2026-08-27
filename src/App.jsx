@@ -14,6 +14,7 @@ import OrdersDrawer from './components/views/OrdersDrawer.jsx';
 import ProductDetailModal from './components/views/ProductDetailModal.jsx';
 import IdentityModal from './components/views/IdentityModal.jsx';
 import CheckoutModal from './components/views/CheckoutModal.jsx';
+import AdminOrderCard from './components/views/AdminOrderCard.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BrowserMultiFormatReader } from '@zxing/browser';
@@ -491,143 +492,6 @@ function OrderIslandTracker({ order, onOpen }) {
       <span className="text-[11px] font-black text-white">#{order.id}</span>
       <span className="text-[11px] font-bold text-teal-300 tabular-nums">{distLabel}</span>
       <Icon name="navigation" className="w-3.5 h-3.5 text-slate-400" />
-    </div>
-  );
-}
-
-// Contenedor de tarjeta de pedido con gestos táctiles combinados:
-//  · Press largo (~480ms) → acciones rápidas.
-//  · Swipe horizontal: derecha = avanzar estado · izquierda = ver ficha,
-//    con pista de color mientras se arrastra y deslizamiento fuera al soltar.
-//  · El scroll vertical nunca se interrumpe: si el gesto arranca vertical,
-//    el componente suelta el control y la lista scrollea normal.
-function OrderCardGestures({ onLongPress, onSwipeRight, onSwipeLeft, children, ...rest }) {
-  const wrapRef = useRef(null);
-  const cardRef = useRef(null);
-  const cbRef = useRef({});
-  cbRef.current = { onLongPress, onSwipeRight, onSwipeLeft };
-
-  useEffect(() => {
-    const el = wrapRef.current;
-    const card = cardRef.current;
-    if (!el || !card) return undefined;
-
-    let sx = 0;
-    let sy = 0;
-    let dx = 0;
-    let mode = null; // null | 'h' | 'v' | 'done'
-    let longTimer = null;
-
-    const clearLong = () => { clearTimeout(longTimer); longTimer = null; };
-    const springBack = () => {
-      card.style.transition = 'transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
-      card.style.transform = 'translateX(0)';
-      setTimeout(() => { el.dataset.hint = ''; }, 220);
-    };
-
-    const onStart = (e) => {
-      if (!e.touches || e.touches.length !== 1) return;
-      const t = e.target;
-      if (t && t.closest && t.closest('button, a, input, textarea, select, [data-no-swipe]')) return;
-      sx = e.touches[0].clientX;
-      sy = e.touches[0].clientY;
-      dx = 0;
-      mode = null;
-      card.style.transition = 'none';
-      if (cbRef.current.onLongPress) {
-        clearTimeout(longTimer);
-        longTimer = setTimeout(() => {
-          if (mode === null && Math.abs(dx) < 8) {
-            haptic(16);
-            mode = 'done';
-            cbRef.current.onLongPress();
-          }
-        }, 480);
-      }
-    };
-
-    const onMove = (e) => {
-      if (mode === 'done' || !e.touches || e.touches.length !== 1) return;
-      const tx = e.touches[0].clientX - sx;
-      const ty = e.touches[0].clientY - sy;
-      if (mode === null) {
-        if (Math.abs(tx) > 18 && Math.abs(tx) > Math.abs(ty) * 1.15) {
-          mode = 'h';
-          clearLong();
-        } else if (Math.abs(ty) > 14) {
-          mode = 'v';
-          clearLong();
-        } else {
-          return;
-        }
-      }
-      if (mode !== 'h') return;
-      dx = tx;
-      // Resistencia más allá del límite para que "frene" al final del recorrido.
-      const limit = 150;
-      const shown = Math.abs(dx) > limit
-        ? Math.sign(dx) * (limit + (Math.abs(dx) - limit) * 0.35)
-        : dx;
-      card.style.transition = 'none';
-      card.style.transform = `translateX(${shown}px)`;
-      el.dataset.hint = dx > 6 ? 'right' : dx < -6 ? 'left' : '';
-      if (Math.abs(dx) > 12) e.preventDefault();
-    };
-
-    const onEnd = () => {
-      if (mode === 'h') {
-        const dir = dx > 0 ? 'right' : 'left';
-        const action = dir === 'right' ? cbRef.current.onSwipeRight : cbRef.current.onSwipeLeft;
-        if (action && Math.abs(dx) > 96) {
-          haptic(12);
-          card.style.transition = 'transform 0.16s ease-in';
-          card.style.transform = `translateX(${dir === 'right' ? 120 : -120}%)`;
-          setTimeout(() => action(), 110);
-          setTimeout(() => springBack(), 240);
-          mode = 'done';
-          return;
-        }
-      }
-      if (mode === 'h') springBack();
-      clearLong();
-      mode = null;
-      dx = 0;
-    };
-
-    el.addEventListener('touchstart', onStart, { passive: true });
-    el.addEventListener('touchmove', onMove, { passive: false });
-    el.addEventListener('touchend', onEnd, { passive: true });
-    el.addEventListener('touchcancel', onEnd, { passive: true });
-    return () => {
-      clearLong();
-      el.removeEventListener('touchstart', onStart);
-      el.removeEventListener('touchmove', onMove);
-      el.removeEventListener('touchend', onEnd);
-      el.removeEventListener('touchcancel', onEnd);
-    };
-  }, []);
-
-  return (
-    <div ref={wrapRef} data-order-card className="group relative overflow-hidden rounded-3xl" {...rest}>
-      {/* Pistas de acción detrás de la tarjeta */}
-      <span
-        aria-hidden="true"
-        className="absolute left-3 top-1/2 -translate-y-1/2 z-0 px-3 py-2 rounded-2xl bg-emerald-500 text-slate-950 text-xs font-black flex items-center gap-1.5 opacity-0 transition-opacity duration-150 group-data-[hint=right]:opacity-100"
-      >
-        <Icon name="check" className="w-4 h-4" /> Avanzar
-      </span>
-      <span
-        aria-hidden="true"
-        className="absolute right-3 top-1/2 -translate-y-1/2 z-0 px-3 py-2 rounded-2xl bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 opacity-0 transition-opacity duration-150 group-data-[hint=left]:opacity-100"
-      >
-        Ficha <Icon name="eye" className="w-4 h-4" />
-      </span>
-      <div
-        ref={cardRef}
-        className={`relative z-10 ${rest.className || ''}`}
-      >
-        {children}
-      </div>
     </div>
   );
 }
@@ -8361,398 +8225,6 @@ function AdminView({
     return lines.join('\n');
   }, [finDash, totalFiado]);
 
-  const renderOrderCard = (order, { inFicha = false } = {}) => {
-    const st = STATUS_STYLES[order.status] || STATUS_STYLES.pendiente;
-    const wa = formatPhoneWhatsApp(order.phone);
-    const sem = semaforoOf(order);
-    const missingStock = lowStockInOrder(order);
-    const isPinned = pinnedOrders.includes(order.id);
-    const payPending = needsPaymentValidation(order);
-    // Estados "procesando" de los botones de esta tarjeta.
-    const stBusy = Boolean(busyActions[`st:${order.id}`]);
-    const payBusy = Boolean(busyActions[`pay:${order.id}`]);
-    const delBusy = Boolean(busyActions[`del:${order.id}`]);
-    const gpsBusy = Boolean(busyActions[`gps:${order.id}`]);
-    // Tarjeta que envejece (#6): el tono sigue al semáforo de espera.
-    const isActiveStatus = ['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status);
-    const agingClass = !payPending && isActiveStatus && sem.tone !== 'emerald'
-      ? (sem.tone === 'rose'
-        ? 'border-rose-500/60 bg-rose-950/40 shadow-rose-900/20 animate-pulse'
-        : 'border-amber-500/50 bg-amber-950/30')
-      : '';
-    // Gestos (#3): swipe derecha avanza · izquierda abre ficha · press largo = menú.
-    const swipeNext = !payPending ? nextOrderStatus(order) : null;
-    const CardShell = inFicha ? 'div' : OrderCardGestures;
-    const shellProps = inFicha ? {} : {
-      onLongPress: () => setQuickMenuOrder(order),
-      onSwipeRight: swipeNext ? () => runExclusive(`st:${order.id}`, () => onUpdateOrderStatus(order.id, swipeNext)) : null,
-      onSwipeLeft: () => openFicha(order)
-    };
-    return (
-      <CardShell
-        key={order.id}
-        {...shellProps}
-        className={`p-4 sm:p-5 space-y-4 flex flex-col justify-between shadow-xl ${payPending ? 'bg-slate-800/80 border border-amber-500/50' : agingClass || `bg-slate-800/80 border ${st.ring}`}`}
-      >
-        <div className="space-y-3">
-          {/* Notas del cliente arriba y destacadas (#7): lo primero que se lee */}
-          {order.notes && (
-            <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-400/15 border border-amber-400/50 text-amber-200 text-xs font-bold">
-              <Icon name="edit" className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              <span className="min-w-0 flex-1">{order.notes}</span>
-            </div>
-          )}
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="font-mono text-xs font-bold text-teal-400">{order.id}</span>
-              {!payPending && ['pendiente', 'en_preparacion', 'listo', 'en_camino'].includes(order.status) && (
-                <span className={`px-2 py-0.5 rounded-full border text-[11px] font-black flex items-center gap-1 shrink-0 tabular-nums ${SEM_TONES[sem.tone]} ${sem.tone === 'rose' ? 'animate-pulse' : ''}`}>
-                  <Icon name="clock" className="w-3 h-3" />
-                  {sem.text}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 flex-wrap justify-end">
-              {payPending ? (
-                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-400/40 bg-amber-500/15 text-amber-300 text-[11px] font-bold">
-                  <Icon name="clock" className="w-3 h-3" />
-                  Pago en revisión
-                </span>
-              ) : (
-              <span
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${st.badge}`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${st.dot} animate-pulse`} />
-                {({ pendiente: 'Pendiente', en_preparacion: 'En Preparación', listo: 'Listo', en_camino: 'En Camino', entregado: 'Entregado', cancelado: 'Cancelado' })[order.status]}
-              </span>
-              )}
-              {(order.paymentMethod === 'cartera' || Number(order.walletApplied) > 0) && (
-                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-[11px] font-bold">
-                  <Icon name="wallet" className="w-3 h-3" />
-                  Pagado con cartera
-                  {Number(order.walletApplied) > 0 && <span className="text-[10px] opacity-80">({formatUsd(Number(order.walletApplied))})</span>}
-                </span>
-              )}
-              {order.paymentMethod && order.paymentMethod !== 'efectivo' && order.paymentMethod !== 'cartera' && (
-                <span
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold ${
-                    order.paymentStatus === 'confirmado'
-                      ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
-                      : order.paymentStatus === 'rechazado'
-                        ? 'border-rose-400/40 bg-rose-500/15 text-rose-300'
-                        : 'border-amber-400/40 bg-amber-500/15 text-amber-300'
-                  }`}
-                >
-                  <Icon name="creditCard" className="w-3 h-3" />
-                  {({ pago_movil: 'Pago Móvil', transferencia: 'Transferencia' })[order.paymentMethod] || 'Pago'} ·{' '}
-                  {({ pendiente: 'En revisión', confirmado: 'Confirmado', rechazado: 'Rechazado' })[order.paymentStatus] || 'Pendiente'}
-                </span>
-              )}
-              {order.credit && (
-                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/15 text-indigo-300 text-[11px] font-bold">
-                  <Icon name="creditCard" className="w-3 h-3" />
-                  A cuenta
-                </span>
-              )}
-              {order.type !== 'delivery' && ['en_preparacion', 'listo'].includes(order.status) && (
-                <span
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-teal-400/40 bg-teal-500/10 text-teal-300 text-[11px] font-black font-mono tabular-nums"
-                  title="Código de retiro: verificalo con el que muestra el cliente"
-                >
-                  🔑 {pickupCodeOf(order.id)}
-                </span>
-              )}
-              <button
-                onClick={() => togglePin(order.id)}
-                className={`p-1.5 rounded-lg border transition-all ${
-                  isPinned
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                    : 'bg-slate-900/60 text-slate-500 border-slate-700 hover:text-amber-300'
-                }`}
-                title={isPinned ? 'Quitar de fijados' : 'Fijar pedido arriba'}
-              >
-                <Icon name="pin" className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <h4 className="font-bold text-white text-base">{order.customerName}</h4>
-            <div className="flex items-center gap-2 mt-1">
-              <p className="text-xs text-slate-300 flex items-center gap-1">
-                <Icon name="phone" className="w-3.5 h-3.5 text-slate-400" />
-                {order.phone}
-              </p>
-              {wa && (
-                <a
-                  href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${order.customerName}, sobre tu pedido ${order.id} en Kiosko 247`)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold hover:bg-emerald-500/25 transition-all"
-                >
-                  <Icon name="whatsapp" className="w-3.5 h-3.5" />
-                  WhatsApp
-                </a>
-              )}
-            </div>
-            {order.type === 'delivery' ? (
-              inFicha ? (
-                <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-300 text-xs font-semibold">
-                  <Icon name="mapPin" className="w-3 h-3" />
-                  Entrega a Domicilio
-                </span>
-              ) : (
-                <p className="text-xs text-amber-300 flex items-center gap-1 mt-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
-                  <Icon name="mapPin" className="w-3.5 h-3.5 flex-shrink-0" />
-                  <span>Entrega: {order.address}</span>
-                  {order.lat != null && order.lng != null && (
-                    <a
-                      href={`https://www.google.com/maps?q=${order.lat},${order.lng}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[10px] font-bold hover:bg-sky-500/25 transition-all"
-                    >
-                      <Icon name="mapPin" className="w-3 h-3" />
-                      Abrir en Maps
-                    </a>
-                  )}
-                  {order.courier_lat != null && order.courier_lng != null && (
-                    <span className="text-[10px] font-bold text-emerald-300 ml-auto">
-                      Repartidor en vivo
-                    </span>
-                  )}
-                </p>
-              )
-            ) : (
-              <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-teal-500/10 text-teal-300 text-xs font-semibold">
-                <Icon name="store" className="w-3 h-3" />
-                Retiro por Mostrador
-              </span>
-            )}
-          </div>
-
-          {/* Order Line Items */}
-          <div className="p-3 rounded-2xl bg-slate-900/80 space-y-1.5 text-xs text-slate-300">
-            {order.items.map((it, idx) => (
-              <div key={idx} className="flex justify-between">
-                <span>{it.quantity}x {it.name}</span>
-                <span className="font-bold text-white">
-                  {formatUsd(it.price * it.quantity)}
-                  {rate?.rate > 0 && (
-                    <span className="block text-[10px] text-slate-500 text-right">
-                      {formatBs(usdToBs(it.price * it.quantity, rate.rate))}
-                    </span>
-                  )}
-                </span>
-              </div>
-            ))}
-            <div className="pt-2 border-t border-slate-800 flex justify-between font-bold text-white text-sm">
-              <span>Total</span>
-              <span className="text-teal-400 text-right">
-                {formatUsd(order.total)}
-                {rate?.rate > 0 && (
-                  <span className="block text-[10px] text-teal-300/90">
-                    {formatBs(usdToBs(order.total, rate.rate))}
-                  </span>
-                )}
-              </span>
-            </div>
-          </div>
-
-          {missingStock.length > 0 && (
-            <div className="flex items-start gap-1.5 p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] font-semibold">
-              <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <span>
-                Sin stock suficiente: {missingStock.map((m) => `${m.name} (${m.have}/${m.need})`).join(', ')}
-              </span>
-            </div>
-          )}
-          {sem.tone === 'rose' && sem.label === 'Supera lo estimado' && (
-            <div className="flex items-center gap-1.5 p-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px] font-bold">
-              <Icon name="alertTriangle" className="w-3.5 h-3.5 shrink-0" />
-              Lleva más del tiempo estimado
-            </div>
-          )}
-
-          {/* Pago digital: comprobante y estado */}
-          {order.paymentMethod === 'cartera' || Number(order.walletApplied || 0) > 0 ? (
-            <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
-              <Icon name="wallet" className="w-4 h-4 shrink-0" />
-              Pagado con cartera — saldo a favor del cliente
-              {Number(order.walletApplied || 0) > 0 && <span className="text-[10px] opacity-80">({formatUsd(Number(order.walletApplied))})</span>}
-            </div>
-          ) : order.paymentMethod && order.paymentMethod !== 'efectivo' ? (
-            <div className="space-y-2">
-              {order.paymentReference && (
-                <p className="text-xs text-slate-300 bg-slate-900/40 p-2 rounded-xl">
-                  Ref: <span className="font-mono font-bold text-white">{order.paymentReference}</span>
-                </p>
-              )}
-              {order.hasProof ? (
-                <button
-                  onClick={() => setProofOrder(order)}
-                  className="w-full flex items-center gap-3 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
-                >
-                  <span className="w-14 h-14 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-                    <Icon name="image" className="w-5 h-5 text-teal-400" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-bold text-white">Ver comprobante</span>
-                    <span className="block text-[11px] text-slate-400">Toca para ampliar</span>
-                  </span>
-                  <Icon name="eye" className="w-4 h-4 text-teal-400 ml-auto shrink-0" />
-                </button>
-              ) : (
-                <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
-                  <Icon name="alertTriangle" className="w-3.5 h-3.5" />
-                  Pago digital sin comprobante adjunto
-                </p>
-              )}
-              {order.paymentStatus === 'rechazado' && (
-                <p className="text-xs text-rose-300/90 bg-rose-500/10 border border-rose-500/30 p-2 rounded-xl flex items-start gap-1.5">
-                  <Icon name="alertTriangle" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                  Pago rechazado: el cliente debe subir otro comprobante o
-                  pasar el pedido a cuenta (si es beneficiado) antes de avanzar.
-                </p>
-              )}
-              {order.paymentStatus === 'pendiente' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => runExclusive(`pay:${order.id}`, () => onUpdateOrderPayment(order.id, 'confirmado'))}
-                    disabled={payBusy}
-                    className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
-                  >
-                    <Icon name={payBusy ? 'refresh' : 'check'} className={`w-3.5 h-3.5 ${payBusy ? 'animate-spin' : ''}`} />
-                    {payBusy ? 'Procesando…' : 'Confirmar pago'}
-                  </button>
-                  <button
-                    onClick={() => runExclusive(`pay:${order.id}`, () => onUpdateOrderPayment(order.id, 'rechazado'))}
-                    disabled={payBusy}
-                    className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
-                  >
-                    <Icon name={payBusy ? 'refresh' : 'x'} className={`w-3.5 h-3.5 ${payBusy ? 'animate-spin' : ''}`} />
-                    {payBusy ? 'Procesando…' : 'Rechazar pago'}
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {/* Chat con el cliente */}
-          <OrderChat order={order} />
-        </div>
-
-        {/* Status Update Controls — en la ficha queda pegado al pie del panel:
-            siempre visible sin depender del scroll */}
-        <div
-          data-no-swipe
-          className={`pt-3 border-t border-slate-700/60 space-y-2 ${
-            inFicha
-              ? 'sticky bottom-0 z-20 -mx-4 sm:-mx-5 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-3 bg-slate-900/95 backdrop-blur-md'
-              : ''
-          }`}
-        >
-          {payPending ? (
-            <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl flex items-center gap-1.5">
-              <Icon name="lock" className="w-3.5 h-3.5 shrink-0" />
-              Confirma o rechaza el pago arriba para poder avanzar el estado del pedido.
-            </p>
-          ) : (
-          <>
-          <span className="text-[11px] text-slate-400 font-semibold block">Cambiar Estado:</span>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { key: 'pendiente', label: 'Pendiente' },
-              { key: 'en_preparacion', label: 'En Prep.' },
-              { key: 'listo', label: 'Listo' },
-              ...(order.type === 'delivery' ? [{ key: 'en_camino', label: 'En Camino' }] : []),
-              { key: 'entregado', label: 'Entregado' },
-              { key: 'cancelado', label: 'Cancelado' }
-            ].map((stBtn) => (
-              <button
-                key={stBtn.key}
-                onClick={() => runExclusive(`st:${order.id}`, () => {
-                  if (stBtn.key === 'cancelado') setConfirmCancelOrder(order);
-                  else onUpdateOrderStatus(order.id, stBtn.key);
-                })}
-                disabled={stBusy}
-                className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none ${
-                  order.status === stBtn.key
-                    ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
-                    : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:text-white'
-                }`}
-              >
-                {stBusy && <Icon name="refresh" className="w-3 h-3 animate-spin" />}
-                {stBtn.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Modo Repartidor: comparte el GPS mientras el pedido va en camino */}
-          {order.type === 'delivery' && order.status === 'en_camino' && (
-            <div className="pt-1">
-              {courierOrderId === order.id && courierActive ? (
-                <button
-                  onClick={() => runExclusive(`gps:${order.id}`, () => stopCourierTracking())}
-                  disabled={gpsBusy}
-                  className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
-                >
-                  <Icon name={gpsBusy ? 'refresh' : 'mapPin'} className={`w-3.5 h-3.5 ${gpsBusy ? 'animate-spin' : ''}`} />
-                  {gpsBusy ? 'Deteniendo…' : 'Detener rastreo en vivo'}
-                </button>
-              ) : (
-                <button
-                  onClick={() => runExclusive(`gps:${order.id}`, () => startCourierTracking(order.id))}
-                  disabled={gpsBusy}
-                  className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
-                >
-                  <Icon name={gpsBusy ? 'refresh' : 'mapPin'} className={`w-3.5 h-3.5 ${gpsBusy ? 'animate-spin' : ''}`} />
-                  {gpsBusy ? 'Iniciando…' : 'Comenzar entrega (GPS en vivo)'}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Aprobar / Rechazar pedido a crédito (solo pendiente) */}
-          {order.credit && order.status === 'pendiente' && (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => runExclusive(`st:${order.id}`, () => onUpdateOrderStatus(order.id, 'en_preparacion'))}
-                disabled={stBusy}
-                className="py-2 px-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
-              >
-                <Icon name={stBusy ? 'refresh' : 'check'} className={`w-3.5 h-3.5 ${stBusy ? 'animate-spin' : ''}`} />
-                {stBusy ? 'Procesando…' : 'Aceptar y preparar'}
-              </button>
-              <button
-                onClick={() => runExclusive(`st:${order.id}`, () => setConfirmCancelOrder(order))}
-                disabled={stBusy}
-                className="py-2 px-2 rounded-xl text-xs font-bold bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
-              >
-                <Icon name="x" className="w-3.5 h-3.5" />
-                Rechazar
-              </button>
-            </div>
-          )}
-
-          {/* Eliminar pedido cancelado (para no acumular en la lista) */}
-          {order.status === 'cancelado' && (
-            <button
-              onClick={() => runExclusive(`del:${order.id}`, () => onDeleteOrder(order))}
-              disabled={delBusy}
-              className="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:pointer-events-none"
-            >
-              <Icon name={delBusy ? 'refresh' : 'trash'} className={`w-3.5 h-3.5 ${delBusy ? 'animate-spin' : ''}`} />
-              {delBusy ? 'Eliminando…' : 'Eliminar pedido'}
-            </button>
-          )}
-          </>
-          )}
-        </div>
-      </CardShell>
-    );
-  };
-
   // ── Vista Mostrador (#1): armado de pedidos en modo foco ────────────────
   // Tarjetas XXL ordenadas por espera, cronómetro vivo y UN botón contextual
   // por pedido (Aceptar → Listo → Despachar/Entregado). Los pagos digitales
@@ -9699,7 +9171,29 @@ function AdminView({
                 <p className="font-bold text-slate-400">No hay pedidos con este estado</p>
               </div>
             ) : (
-              filteredOrders.map((order) => renderOrderCard(order))
+              filteredOrders.map((order) => (
+                <AdminOrderCard
+                  key={order.id}
+                  order={order}
+                  rate={rate}
+                  products={products}
+                  pinnedOrders={pinnedOrders}
+                  busyActions={busyActions}
+                  courierOrderId={courierOrderId}
+                  courierActive={courierActive}
+                  onRunExclusive={runExclusive}
+                  onUpdateOrderStatus={onUpdateOrderStatus}
+                  onUpdateOrderPayment={onUpdateOrderPayment}
+                  onDeleteOrder={onDeleteOrder}
+                  onTogglePin={togglePin}
+                  onOpenFicha={openFicha}
+                  onSetQuickMenu={setQuickMenuOrder}
+                  onSetProofOrder={setProofOrder}
+                  onSetConfirmCancel={setConfirmCancelOrder}
+                  onStopCourierTracking={stopCourierTracking}
+                  onStartCourierTracking={startCourierTracking}
+                />
+              ))
             )}
           </div>
           </>
@@ -11230,7 +10724,27 @@ function AdminView({
               <div data-sheet-scroll className="px-4 sm:px-5 pt-2 sm:pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-6 overflow-y-auto flex-1 min-h-0">
                 <OrderStepsTimeline order={fichaOrder} />
                 <div className="mt-4">
-                  {renderOrderCard(fichaOrder, { inFicha: true })}
+                  <AdminOrderCard
+                    order={fichaOrder}
+                    inFicha={true}
+                    rate={rate}
+                    products={products}
+                    pinnedOrders={pinnedOrders}
+                    busyActions={busyActions}
+                    courierOrderId={courierOrderId}
+                    courierActive={courierActive}
+                    onRunExclusive={runExclusive}
+                    onUpdateOrderStatus={onUpdateOrderStatus}
+                    onUpdateOrderPayment={onUpdateOrderPayment}
+                    onDeleteOrder={onDeleteOrder}
+                    onTogglePin={togglePin}
+                    onOpenFicha={openFicha}
+                    onSetQuickMenu={setQuickMenuOrder}
+                    onSetProofOrder={setProofOrder}
+                    onSetConfirmCancel={setConfirmCancelOrder}
+                    onStopCourierTracking={stopCourierTracking}
+                    onStartCourierTracking={startCourierTracking}
+                  />
                 </div>
               </div>
             </div>
@@ -11805,101 +11319,6 @@ function AdminProfileView({ onBack, ...rest }) {
 
 // Chat interno de un pedido para el admin: consulta y envía mensajes con el
 // cliente (el cliente responde desde el rastreo del pedido). Se actualiza cada 5s.
-function OrderChat({ order }) {
-  const [messages, setMessages] = useState([]);
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-  const listRef = useRef(null);
-
-  const load = async () => {
-    const res = await api.getOrderMessages(order.id, order.phone);
-    if (res.ok && Array.isArray(res.data.messages)) setMessages(res.data.messages);
-  };
-
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 5000);
-    return () => clearInterval(timer);
-  }, [order.id]);
-
-  useEffect(() => {
-    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages]);
-
-  const send = async (valueOverride) => {
-    const value = String(valueOverride ?? text).trim();
-    if (!value || sending) return;
-    setSending(true);
-    const res = await api.sendOrderMessage(order.id, order.phone, value);
-    setSending(false);
-    if (res.ok) {
-      setText('');
-      load();
-    }
-  };
-
-  const TEMPLATES = [
-    { label: 'Listo 👍', text: (n, id) => `Hola ${n}, tu pedido ${id} está listo para retirar en Kiosko 24/7. ¡Te esperamos! 😊` },
-    { label: 'En camino 🛵', text: (n, id) => `Hola ${n}, tu pedido ${id} ya va en camino. ¡Pronto llega! 🙌` },
-    { label: 'Llegó el repartidor 📦', text: (n, id) => `Hola ${n}, el repartidor llegó con tu pedido ${id}. ¡Que lo disfrutes! 🎉` },
-    { label: 'En preparación', text: (n, id) => `Hola ${n}, estamos preparando tu pedido ${id}. Cualquier cambio te avisamos ✋` },
-    { label: 'Confirmar pago', text: (n, id) => `Hola ${n}, sobre el pago de tu pedido ${id}. ¿Necesitas ayuda? 🙏` }
-  ];
-
-  return (
-    <div className="rounded-2xl bg-slate-900/60 border border-slate-700 overflow-hidden">
-      <div className="p-2.5 border-b border-slate-700/70 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
-          <Icon name="whatsapp" className="w-3.5 h-3.5 text-emerald-400" />
-          Chat con el cliente
-        </span>
-        <span className="text-[9px] text-slate-500">se actualiza solo</span>
-      </div>
-      <div ref={listRef} className="p-2.5 space-y-2 max-h-44 overflow-y-auto">
-        {messages.length === 0 && (
-          <p className="text-[11px] text-slate-500 text-center py-2">Sin mensajes aún.</p>
-        )}
-        {messages.map((m, idx) => (
-          <ChatBubble key={m.id || idx} m={m} order={order} perspective="admin" />
-        ))}
-      </div>
-      <div className="px-2.5 pt-2.5 flex flex-wrap gap-1.5">
-        {TEMPLATES.map((t) => (
-          <button
-            key={t.label}
-            onClick={() => send(t.text(order.customerName, order.id))}
-            disabled={sending}
-            className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 text-[10px] font-bold hover:bg-emerald-500/20 transition-all disabled:opacity-50 active:scale-95"
-            title="Envía la plantilla al cliente en 1 tap"
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div className="p-2.5 border-t border-slate-700/70 flex gap-2">
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') send();
-          }}
-          placeholder="Responder al cliente…"
-          maxLength={300}
-          className="flex-1 min-w-0 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:border-teal-500 focus:outline-none"
-        />
-        <button
-          onClick={send}
-          disabled={sending || !text.trim()}
-          className="shrink-0 px-3 py-2 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs disabled:opacity-50 disabled:pointer-events-none transition-all active:scale-95"
-        >
-          Enviar
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const BEAUTY_CATEGORIES = ['higiene', 'limpieza', 'perfum', 'cosmetic', 'belleza', 'farmacia', 'salud', 'cuidado'];
 // Toast persistente de cobro vencido. No se quita solo; el admin debe pulsar
 // "Enviar cobro" (abre WhatsApp) o "✕" (descartar en esta sesión).

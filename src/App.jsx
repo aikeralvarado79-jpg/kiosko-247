@@ -15,6 +15,7 @@ import ProductDetailModal from './components/views/ProductDetailModal.jsx';
 import IdentityModal from './components/views/IdentityModal.jsx';
 import CheckoutModal from './components/views/CheckoutModal.jsx';
 import AdminOrderCard from './components/views/AdminOrderCard.jsx';
+import AdminMostradorView from './components/views/AdminMostradorView.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BrowserMultiFormatReader } from '@zxing/browser';
@@ -8230,231 +8231,6 @@ function AdminView({
   // por pedido (Aceptar → Listo → Despachar/Entregado). Los pagos digitales
   // por validar o rechazados viven AQUÍ con sus botones de Confirmar/Rechazar:
   // no avanzan hasta resolverse.
-  const renderMostrador = () => {
-    const active = (orders || []).filter((o) => !['entregado', 'cancelado'].includes(o.status));
-    const withWait = active.map((o) => {
-      const d = parseOrderDate(o);
-      const waitMs = isNaN(d) ? 0 : Math.max(0, mostradorNow - d.getTime());
-      return { o, waitMs };
-    });
-    const queue = withWait.sort((a, b) => b.waitMs - a.waitMs); // el más viejo primero
-
-    const stageChips = [
-      { label: 'Recibidos', n: queue.filter(({ o }) => o.status === 'pendiente' && !needsPaymentAttention(o)).length, cls: 'bg-slate-700 text-slate-200 border-slate-600' },
-      { label: 'Por validar', n: queue.filter(({ o }) => needsPaymentAttention(o)).length, cls: 'bg-amber-500/15 text-amber-300 border-amber-500/40' },
-      { label: 'Armando', n: queue.filter(({ o }) => o.status === 'en_preparacion').length, cls: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40' },
-      { label: 'Listos', n: queue.filter(({ o }) => o.status === 'listo').length, cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
-      { label: 'Camino', n: queue.filter(({ o }) => o.status === 'en_camino').length, cls: 'bg-sky-500/15 text-sky-300 border-sky-500/40' }
-    ];
-
-    return (
-      <div className="max-w-md mx-auto sm:max-w-xl space-y-3 animate-fade-in">
-        {/* Resumen de etapas */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-          {stageChips.map((c) => (
-            <span key={c.label} className={`px-3 py-1.5 rounded-xl border text-[11px] font-black whitespace-nowrap shrink-0 ${c.cls}`}>
-              {c.label} · {c.n}
-            </span>
-          ))}
-          <button onClick={() => setTvMode(true)} className="px-3 py-1.5 rounded-xl bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 text-[11px] font-black whitespace-nowrap shrink-0 flex items-center gap-1">
-            <Icon name="maximize" className="w-3.5 h-3.5" /> TV
-          </button>
-          <span className="ml-auto text-[10px] text-slate-500 font-semibold whitespace-nowrap shrink-0">
-            → desliza tarjeta para avanzar
-          </span>
-        </div>
-
-        {queue.length === 0 ? (
-          <div className="py-16 text-center space-y-2 text-slate-500">
-            <Icon name="checkCircle" className="w-12 h-12 mx-auto text-emerald-500/60" />
-            <p className="font-bold text-slate-400">Sin pedidos activos 🎉</p>
-          </div>
-        ) : (
-          queue.map(({ o, waitMs }) => {
-            const mm = Math.floor(waitMs / 60000);
-            const ss = Math.floor((waitMs % 60000) / 1000);
-            const est = Number(o.estimatedMinutes) || 0;
-            const tone = (est > 0 && mm > est) || mm >= 10 ? 'rose' : mm >= 5 ? 'amber' : 'emerald';
-            const toneCls = tone === 'rose'
-              ? 'text-rose-400'
-              : tone === 'amber'
-                ? 'text-amber-300'
-                : 'text-emerald-300';
-            const pay = paymentInfoOf(o);
-            const payAttn = needsPaymentAttention(o);
-            const cardTone = payAttn
-              ? 'border-amber-500/60 bg-amber-950/30'
-              : tone === 'rose'
-                ? 'border-rose-500/60 bg-rose-950/40'
-                : tone === 'amber'
-                  ? 'border-amber-500/50 bg-amber-950/30'
-                  : 'border-slate-700 bg-slate-800/80';
-            const busy = Boolean(busyActions[`st:${o.id}`]);
-            const payBusy = Boolean(busyActions[`pay:${o.id}`]);
-            const missing = lowStockInOrder(o);
-            const isDelivery = o.type === 'delivery';
-
-            let action;
-            if (!payAttn) {
-              if (o.status === 'pendiente') {
-                action = o.credit
-                  ? { next: 'en_preparacion', label: 'Aprobar pedido a cuenta', icon: 'creditCard' }
-                  : { next: 'en_preparacion', label: 'Aceptar pedido', icon: 'check' };
-              } else if (o.status === 'en_preparacion') {
-                action = { next: 'listo', label: 'Pedido listo', icon: 'package' };
-              } else if (o.status === 'listo') {
-                action = isDelivery
-                  ? { next: 'en_camino', label: 'Despachar pedido', icon: 'navigation' }
-                  : { next: 'entregado', label: 'Cliente retiró', icon: 'checkCircle', verify: true };
-              } else if (o.status === 'en_camino') {
-                action = { next: 'entregado', label: 'Marcar entregado', icon: 'checkCircle' };
-              }
-            }
-
-            return (
-              <div key={o.id} className={`p-4 rounded-3xl border shadow-xl space-y-3 ${cardTone}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                    <span className="font-mono text-sm font-bold text-teal-400">{o.id}</span>
-                    <span className="px-2 py-0.5 rounded-full border border-slate-600 bg-slate-900/60 text-[10px] font-bold text-slate-300 shrink-0">
-                      {isDelivery ? '🛵 Delivery' : '🏪 Retiro'}
-                    </span>
-                    {/* Método de pago visible sin abrir la ficha */}
-                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold shrink-0 flex items-center gap-1 ${pay.cls}`}>
-                      <Icon name={pay.icon} className="w-3 h-3" />
-                      {pay.label}{pay.suffix ? ` · ${pay.suffix}` : ''}
-                    </span>
-                  </div>
-                  {/* Cronómetro de espera vivo (#6) */}
-                  <span className={`font-mono font-black text-2xl leading-none tabular-nums shrink-0 ${toneCls}`}>
-                    {mm}:{String(ss).padStart(2, '0')}
-                  </span>
-                </div>
-
-                {o.customerName && (
-                  <p className="text-xs font-bold text-slate-300 truncate">{o.customerName}</p>
-                )}
-
-                {o.notes && (
-                  <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-400/15 border border-amber-400/50 text-amber-200 text-xs font-bold">
-                    <Icon name="edit" className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    <span className="min-w-0 flex-1">{o.notes}</span>
-                  </div>
-                )}
-
-                {!payAttn && (
-                  <ul className="space-y-1">
-                    {(o.items || []).map((it, idx) => (
-                      <li key={`${it.id}-${idx}`} className="flex items-baseline gap-2 text-sm">
-                        <span className="font-black text-white tabular-nums">{it.quantity}×</span>
-                        <span className="text-slate-200 min-w-0 truncate">{it.name}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-
-                {!payAttn && missing.length > 0 && (
-                  <p className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5">
-                    <Icon name="alertTriangle" className="w-3.5 h-3.5" />
-                    Sin stock: {missing.map((m) => m.name).join(', ')}
-                  </p>
-                )}
-
-                {/* Efectivo: qué cobrar y cuándo */}
-                {!o.credit && pay.key === 'efectivo' && o.status !== 'en_camino' && (
-                  <p className="text-[11px] font-bold text-emerald-300 flex items-center gap-1.5">
-                    <Icon name="dollarSign" className="w-3.5 h-3.5" />
-                    Cobrar {formatUsd(o.total)}{isDelivery ? ' al entregar' : ' al retirar'}
-                  </p>
-                )}
-                {o.credit && o.status === 'pendiente' && (
-                  <p className="text-[11px] font-semibold text-indigo-300">
-                    Fiado: el cliente paga después. Aprobar lo pasa directo a preparación.
-                  </p>
-                )}
-
-                {!payAttn && !isDelivery && ['en_preparacion', 'listo'].includes(o.status) && (
-                  <p className="text-[11px] font-black font-mono tracking-widest text-teal-300">
-                    🔑 Código: {pickupCodeOf(o.id)}
-                  </p>
-                )}
-
-                {/* Pago digital por validar o rechazado: bloquea el armado */}
-                {payAttn ? (
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
-                      <Icon name="lock" className="w-3.5 h-3.5" />
-                      {o.paymentStatus === 'rechazado'
-                        ? 'Pago rechazado: el cliente debe subir nuevo comprobante.'
-                        : 'Pago digital por validar: el pedido no avanza hasta confirmarlo.'}
-                    </p>
-                    {o.hasProof && (
-                      <button
-                        onClick={() => setProofOrder(o)}
-                        data-no-swipe
-                        disabled={payBusy}
-                        className="w-full flex items-center gap-2 p-2.5 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left disabled:opacity-60"
-                      >
-                        <span className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-                          <Icon name="image" className="w-4 h-4 text-teal-400" />
-                        </span>
-                        <span className="text-xs font-bold text-white flex-1">Ver comprobante</span>
-                        {o.paymentReference && (
-                          <span className="font-mono text-[10px] text-slate-400 mr-1">{o.paymentReference}</span>
-                        )}
-                        <Icon name="eye" className="w-4 h-4 text-teal-400" />
-                      </button>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => runExclusive(`pay:${o.id}`, () => onUpdateOrderPayment(o.id, 'confirmado'))}
-                        disabled={payBusy}
-                        className="py-3 rounded-xl bg-emerald-500 text-white text-xs font-black shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all disabled:opacity-70 disabled:pointer-events-none"
-                      >
-                        <Icon name={payBusy ? 'refresh' : 'check'} className={`w-3.5 h-3.5 ${payBusy ? 'animate-spin' : ''}`} />
-                        {payBusy ? 'Procesando…' : 'Confirmar'}
-                      </button>
-                      <button
-                        onClick={() => runExclusive(`pay:${o.id}`, () => onUpdateOrderPayment(o.id, 'rechazado'))}
-                        disabled={payBusy}
-                        className="py-3 rounded-xl bg-rose-500/90 text-white text-xs font-black shadow-lg shadow-rose-500/20 flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all disabled:opacity-70 disabled:pointer-events-none"
-                      >
-                        <Icon name={payBusy ? 'refresh' : 'x'} className={`w-3.5 h-3.5 ${payBusy ? 'animate-spin' : ''}`} />
-                        {payBusy ? 'Procesando…' : 'Rechazar'}
-                      </button>
-                    </div>
-                  </div>
-                ) : action ? (
-                  <button
-                    onClick={() => {
-                      if (action.verify) setRetiroVerifyOrder(o);
-                      else runExclusive(`st:${o.id}`, () => onUpdateOrderStatus(o.id, action.next));
-                    }}
-                    disabled={busy}
-                    className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-sm font-black shadow-lg shadow-teal-500/25 flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 disabled:pointer-events-none"
-                  >
-                    {busy
-                      ? <><Icon name="refresh" className="w-4 h-4 animate-spin" /> Procesando…</>
-                      : <><Icon name={action.icon} className="w-4 h-4" /> {action.label}</>}
-                  </button>
-                ) : null}
-
-                <button
-                  onClick={() => openFicha(o)}
-                  data-no-swipe
-                  disabled={busy}
-                  className="w-full py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-300 text-[11px] font-bold hover:text-white transition-all disabled:opacity-60"
-                >
-                  Ver ficha completa
-                </button>
-              </div>
-            );
-          })
-        )}
-      </div>
-    );
-  };
-
   const openProfile = () => {
     // En móvil el perfil es una vista completa; en escritorio, el modal clásico.
     if (window.innerWidth < 640) setAdminTab('profile');
@@ -9079,7 +8855,21 @@ function AdminView({
             ))}
           </div>
 
-          {ordersView === 'mostrador' && renderMostrador()}
+            {ordersView === 'mostrador' && (
+              <AdminMostradorView
+                orders={orders}
+                products={products}
+                mostradorNow={mostradorNow}
+                busyActions={busyActions}
+                onRunExclusive={runExclusive}
+                onUpdateOrderStatus={onUpdateOrderStatus}
+                onUpdateOrderPayment={onUpdateOrderPayment}
+                onSetRetiroVerify={setRetiroVerifyOrder}
+                onSetProofOrder={setProofOrder}
+                onOpenFicha={openFicha}
+                onSetTvMode={setTvMode}
+              />
+            )}
 
           {ordersView === 'lista' && (
           <>

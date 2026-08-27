@@ -21,6 +21,7 @@ import AdminAnalytics from './components/views/AdminAnalytics.jsx';
 import AdminEquipo from './components/views/AdminEquipo.jsx';
 import AdminHistorialView from './components/views/AdminHistorialView.jsx';
 import AdminDespachoView from './components/views/AdminDespachoView.jsx';
+import AdminDeliveriesView from './components/views/AdminDeliveriesView.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BrowserMultiFormatReader } from '@zxing/browser';
@@ -8596,123 +8597,17 @@ function AdminView({
 
           {/* Vista Entregas: ruta del día ordenada por cercanía */}
           {ordersView === 'entregas' && (
-            <div className="space-y-4">
-              <DeliveriesRouteMap storeLocation={storeLocation} deliveries={activeDeliveries.ordered} />
-              {activeDeliveries.ordered.length === 0 && activeDeliveries.withoutCoords.length === 0 ? (
-                <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
-                  <Icon name="mapPin" className="w-10 h-10 text-slate-700 mx-auto" />
-                  <p className="font-bold text-slate-400">No hay entregas activas</p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {activeDeliveries.ordered.map((o) => {
-                    const wa = formatPhoneWhatsApp(o.phone);
-                    const isTracking = courierActive && courierOrderId === o.id;
-                    return (
-                      <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2.5">
-                        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-                          <span
-                            className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black ${
-                              o.status === 'en_camino'
-                                ? 'bg-emerald-500 text-slate-950'
-                                : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                            }`}
-                          >
-                            {o.routeNumber}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
-                              <span className="text-xs font-bold text-white truncate">{o.customerName}</span>
-                              {isTracking && (
-                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                  GPS en vivo
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-slate-400 truncate">{o.address}</p>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                            <button
-                              onClick={() => openFicha(o)}
-                              title="Ver ficha del pedido"
-                              className="px-2.5 py-1.5 rounded-xl bg-slate-700/40 border border-slate-600 text-slate-200 text-[11px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all inline-flex items-center gap-1"
-                            >
-                              <Icon name="eye" className="w-3 h-3" /> Ficha
-                            </button>
-                            {o.lat != null && o.lng != null && (
-                              <a
-                                href={`https://www.google.com/maps?q=${o.lat},${o.lng}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2.5 py-1.5 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[11px] font-bold hover:bg-sky-500/25 transition-all inline-flex items-center gap-1"
-                              >
-                                <Icon name="mapPin" className="w-3 h-3" /> Maps
-                              </a>
-                            )}
-                            {wa && (
-                              <a
-                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, tu pedido ${o.id} en Kiosko 247 está en camino`)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/25 transition-all inline-flex items-center gap-1"
-                              >
-                                <Icon name="whatsapp" className="w-3 h-3" /> WA
-                              </a>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Acción principal: ocupa todo el ancho del contenedor del pedido */}
-                        {o.status === 'listo' && (
-                          <button
-                            onClick={() => {
-                              onUpdateOrderStatus(o.id, 'en_camino');
-                              startCourierTracking(o.id);
-                            }}
-                            className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                          >
-                            <Icon name="mapPin" className="w-4 h-4" /> Iniciar entrega (rastreo GPS en vivo)
-                          </button>
-                        )}
-                        {o.status === 'en_camino' && (
-                          <div className="space-y-2">
-                            {isTracking ? (
-                              <button
-                                onClick={stopCourierTracking}
-                                className="w-full py-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all flex items-center justify-center gap-1.5"
-                              >
-                                <Icon name="mapPin" className="w-4 h-4" /> Detener rastreo en vivo
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => startCourierTracking(o.id)}
-                                className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all flex items-center justify-center gap-1.5"
-                              >
-                                <Icon name="mapPin" className="w-4 h-4" /> Compartir GPS en vivo
-                              </button>
-                            )}
-                            <button
-                              onClick={() => onUpdateOrderStatus(o.id, 'entregado')}
-                              className="w-full py-2.5 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold hover:bg-sky-500/25 transition-all flex items-center justify-center gap-1.5"
-                            >
-                              <Icon name="check" className="w-4 h-4" /> Marcar entregado
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {activeDeliveries.withoutCoords.length > 0 && (
-                    <div className="px-3 py-2 rounded-2xl bg-slate-800/40 border border-slate-700/50 text-[11px] text-slate-400">
-                      {activeDeliveries.withoutCoords.length} entrega(s) sin coordenadas (no aparecen en el mapa):{' '}
-                      {activeDeliveries.withoutCoords.map((o) => o.id).join(', ')}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            <AdminDeliveriesView
+              activeDeliveries={activeDeliveries}
+              courierOrderId={courierOrderId}
+              courierActive={courierActive}
+              onOpenFicha={openFicha}
+              onUpdateOrderStatus={onUpdateOrderStatus}
+              onStartCourierTracking={startCourierTracking}
+              onStopCourierTracking={stopCourierTracking}
+              storeLocation={storeLocation}
+              DeliveriesRouteMap={DeliveriesRouteMap}
+            />
           )}
 
           {/* Vista Historial: pedidos finalizados (entregado + cancelado) */}

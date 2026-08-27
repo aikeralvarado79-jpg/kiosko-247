@@ -20,6 +20,7 @@ import AdminInventory from './components/views/AdminInventory.jsx';
 import AdminAnalytics from './components/views/AdminAnalytics.jsx';
 import AdminEquipo from './components/views/AdminEquipo.jsx';
 import AdminHistorialView from './components/views/AdminHistorialView.jsx';
+import AdminDespachoView from './components/views/AdminDespachoView.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BrowserMultiFormatReader } from '@zxing/browser';
@@ -8580,214 +8581,17 @@ function AdminView({
 
           {/* Vista Despacho / Caja: separa lo que hay que alistar de lo que hay que validar */}
           {ordersView === 'despacho' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-black text-slate-200 flex items-center gap-2">
-                    <Icon name="package" className="w-4 h-4 text-cyan-400" />
-                    Por alistar
-                  </h3>
-                  <span className="text-[11px] text-slate-500">{despachoOrders.length} pedido(s)</span>
-                </div>
-                {despachoOrders.length === 0 ? (
-                  <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
-                    <Icon name="checkCircle" className="w-10 h-10 text-slate-700 mx-auto" />
-                    <p className="font-bold text-slate-400">Nada por alistar</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {despachoOrders.map((o) => {
-                      const sem = semaforoOf(o);
-                      const missing = lowStockInOrder(o);
-                      const wa = formatPhoneWhatsApp(o.phone);
-                      const isPickup = o.type !== 'delivery';
-                      const nxt =
-                        o.status === 'pendiente'
-                          ? 'en_preparacion'
-                          : o.status === 'en_preparacion'
-                            ? 'listo'
-                            : isPickup && o.status === 'listo'
-                              ? 'entregado'
-                              : null;
-                      const nxtLabel =
-                        nxt === 'en_preparacion' ? 'Iniciar ▸' : nxt === 'listo' ? 'Marcar listo ✓' : nxt === 'entregado' ? 'Retirado ✓' : null;
-                      const nxtTone =
-                        nxt === 'en_preparacion'
-                          ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/25'
-                          : nxt === 'listo'
-                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
-                            : nxt === 'entregado'
-                              ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/25'
-                              : 'bg-slate-700/40 border-slate-600 text-slate-300';
-                      return (
-                        <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
-                            <div className="flex items-center gap-1.5">
-                              <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold flex items-center gap-1 ${SEM_TONES[sem.tone]}`}>
-                                <Icon name="clock" className="w-3 h-3" />
-                                {sem.text}
-                              </span>
-                              <button
-                                onClick={() => openFicha(o)}
-                                title="Ver ficha del pedido"
-                                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-700/40 border border-slate-600 text-slate-200 text-[10px] font-bold hover:border-teal-500/50 hover:text-teal-300 transition-all"
-                              >
-                                <Icon name="eye" className="w-3 h-3" />
-                                Ficha
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-sm font-bold text-white">{o.customerName}</p>
-                          <p className="text-[11px] text-slate-400 line-clamp-2">
-                            {o.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')}
-                          </p>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-black text-teal-400">{formatUsd(o.total)}</span>
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${
-                                o.type === 'delivery'
-                                  ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
-                                  : 'text-teal-300 border-teal-500/40 bg-teal-500/10'
-                              }`}
-                            >
-                              {o.type === 'delivery' ? (
-                                <Icon name="mapPin" className="w-3 h-3" />
-                              ) : (
-                                <Icon name="store" className="w-3 h-3" />
-                              )}
-                              {o.type === 'delivery' ? 'Entrega' : 'Retiro'}
-                            </span>
-                          </div>
-                          <OrderStepsTimeline order={o} />
-                          {missing.length > 0 && (
-                            <p className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2 py-1.5">
-                              ⚠️ Sin stock suficiente: {missing.map((m) => m.name).join(', ')}
-                            </p>
-                          )}
-                          <div className="flex gap-2">
-                            {nxt && nxtLabel ? (
-                              <button
-                                onClick={() => onUpdateOrderStatus(o.id, nxt)}
-                                className={`flex-1 py-2 rounded-xl border text-xs font-bold transition-all ${nxtTone}`}
-                              >
-                                {nxtLabel}
-                              </button>
-                            ) : (
-                              <div className="flex-1 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-xs font-bold text-center">
-                                {isPickup ? 'Esperando retiro' : 'Pasa a Entregas'}
-                              </div>
-                            )}
-                            {wa && (
-                              <a
-                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, sobre tu pedido ${o.id} en Kiosko 247`)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="shrink-0 inline-flex items-center gap-1 px-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition-all"
-                              >
-                                <Icon name="whatsapp" className="w-3.5 h-3.5" /> WA
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-black text-slate-200 flex items-center gap-2">
-                    <Icon name="creditCard" className="w-4 h-4 text-amber-400" />
-                    Por validar (caja)
-                  </h3>
-                  <span className="text-[11px] text-slate-500">{cajaOrders.length} pago(s)</span>
-                </div>
-                {cajaOrders.length === 0 ? (
-                  <div className="py-10 text-center text-slate-500 space-y-2 bg-slate-800/40 rounded-2xl border border-slate-700/50">
-                    <Icon name="checkCircle" className="w-10 h-10 text-slate-700 mx-auto" />
-                    <p className="font-bold text-slate-400">Sin pagos por validar</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {cajaOrders.map((o) => {
-                      const wa = formatPhoneWhatsApp(o.phone);
-                      return (
-                        <div key={o.id} className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
-                          <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className="font-mono text-xs font-bold text-teal-400">{o.id}</span>
-                            <span
-                              className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${
-                                o.paymentStatus === 'rechazado'
-                                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
-                                  : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
-                              }`}
-                            >
-                              {o.paymentStatus === 'rechazado' ? 'Rechazado' : 'En revisión'}
-                            </span>
-                          </div>
-                          <p className="text-sm font-bold text-white">{o.customerName}</p>
-                          <p className="text-[11px] text-slate-400">
-                            {(o.paymentMethod === 'pago_movil' ? 'Pago Móvil' : 'Transferencia')} · Ref:{' '}
-                            <span className="font-mono text-white">{o.paymentReference || '—'}</span>
-                          </p>
-                          {o.hasProof ? (
-                            <button
-                              onClick={() => setProofOrder(o)}
-                              className="w-full flex items-center gap-2 p-2 rounded-xl bg-slate-900/60 border border-slate-700 hover:border-teal-500/40 transition-all text-left"
-                            >
-                              <span className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-                                <Icon name="image" className="w-4 h-4 text-teal-400" />
-                              </span>
-                              <span className="text-xs font-bold text-white flex-1">Ver comprobante</span>
-                              <Icon name="eye" className="w-4 h-4 text-teal-400" />
-                            </button>
-                          ) : (
-                            <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1.5">
-                              Sin comprobante adjunto
-                            </p>
-                          )}
-                          {o.paymentStatus === 'rechazado' && (
-                            <p className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2 py-1.5">
-                              El cliente debe subir otro comprobante o pasar el pedido a cuenta.
-                            </p>
-                          )}
-                          <div className="flex gap-2 flex-wrap">
-                            {o.paymentStatus === 'pendiente' && (
-                              <>
-                                <button
-                                  onClick={() => onUpdateOrderPayment(o.id, 'confirmado')}
-                                  className="flex-1 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 transition-all"
-                                >
-                                  Confirmar ✓
-                                </button>
-                                <button
-                                  onClick={() => onUpdateOrderPayment(o.id, 'rechazado')}
-                                  className="flex-1 py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold hover:bg-rose-500/25 transition-all"
-                                >
-                                  Rechazar
-                                </button>
-                              </>
-                            )}
-                            {wa && (
-                              <a
-                                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola ${o.customerName}, sobre el pago de tu pedido ${o.id} en Kiosko 247`)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="shrink-0 inline-flex items-center gap-1 px-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition-all"
-                              >
-                                <Icon name="whatsapp" className="w-3.5 h-3.5" /> WA
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
+            <AdminDespachoView
+              despachoOrders={despachoOrders}
+              cajaOrders={cajaOrders}
+              semaforoOf={semaforoOf}
+              lowStockInOrder={lowStockInOrder}
+              OrderStepsTimeline={OrderStepsTimeline}
+              onUpdateOrderStatus={onUpdateOrderStatus}
+              onUpdateOrderPayment={onUpdateOrderPayment}
+              onSetProofOrder={setProofOrder}
+              onOpenFicha={openFicha}
+            />
           )}
 
           {/* Vista Entregas: ruta del día ordenada por cercanía */}

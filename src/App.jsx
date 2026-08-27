@@ -6677,6 +6677,7 @@ function LiveTrackingModal({ order, onClose, storeLocation, isBenefited, onOrder
     </div>
   );
 }
+
 // Modal para que el admin revise el comprobante de pago a pantalla completa
 // y confirme o rechace el pago digital. El comprobante no viaja en el estado
 // público: se descarga bajo demanda por el dueño del pedido o el admin.

@@ -21,9 +21,12 @@ import AdminMostradorView from './components/views/AdminMostradorView.jsx';
 import AdminInventory from './components/views/AdminInventory.jsx';
 import AdminAnalytics from './components/views/AdminAnalytics.jsx';
 import AdminEquipo from './components/views/AdminEquipo.jsx';
+import AdminTienda from './components/views/AdminTienda.jsx';
+import MapPickerModal from './components/views/MapPickerModal.jsx';
 import AdminHistorialView from './components/views/AdminHistorialView.jsx';
 import AdminDespachoView from './components/views/AdminDespachoView.jsx';
 import AdminDeliveriesView from './components/views/AdminDeliveriesView.jsx';
+import AdminBenefited from './components/views/AdminBenefited.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BrowserMultiFormatReader } from '@zxing/browser';
@@ -8580,60 +8583,7 @@ function AdminView({
 
       {/* Tab 4: Beneficiados */}
       {adminTab === 'benefited' && (
-        <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-            <div>
-              <h3 className="text-lg font-bold text-white">Clientes Beneficiados</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Los beneficiados pueden enviar pedidos a crédito (sumar a su cuenta).
-              </p>
-            </div>
-            <button
-              onClick={onLoadCustomers}
-              className="px-3 py-2 rounded-xl bg-slate-700 text-slate-100 text-xs font-bold hover:bg-slate-600 transition-colors"
-            >
-              Actualizar lista
-            </button>
-          </div>
-
-          {allCustomers.length === 0 ? (
-            <p className="text-sm text-slate-500 py-8 text-center">No hay clientes registrados aún.</p>
-          ) : (
-            <div className="grid gap-2">
-              {allCustomers.map((c) => (
-                <div
-                  key={c.phone}
-                  className="flex flex-wrap items-center gap-3 p-3 rounded-2xl glass-strong bg-slate-900 border border-slate-700/60"
-                >
-                  <span
-                    className={`p-2 rounded-xl shrink-0 ${
-                      c.isBenefited ? 'bg-teal-500/20 text-teal-400' : 'bg-slate-800 text-slate-500'
-                    }`}
-                  >
-                    <Icon name="user" className="w-4 h-4" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-slate-100 truncate">{c.customerName || 'Cliente'}</p>
-                    <p className="text-[11px] text-slate-400">{c.phone}</p>
-                  </div>
-                  {c.isBenefited && (
-                    <CreditLimitInput customer={c} onSetCreditLimit={onSetCreditLimit} />
-                  )}
-                  <button
-                    onClick={() => onToggleBenefited(c.phone, !c.isBenefited)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
-                      c.isBenefited
-                        ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                        : 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 hover:from-teal-400 hover:to-emerald-400'
-                    }`}
-                  >
-                    {c.isBenefited ? 'Revocar beneficio' : 'Dar beneficio'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <AdminBenefited allCustomers={allCustomers} onLoadCustomers={onLoadCustomers} onToggleBenefited={onToggleBenefited} onSetCreditLimit={onSetCreditLimit} CreditLimitComponent={CreditLimitInput} />
       )}
 
       {/* Tab 5: Lista Negra */}
@@ -8666,68 +8616,13 @@ function AdminView({
 
       {/* Tab: Tienda — ubicación fija del comercio */}
       {adminTab === 'tienda' && (
-        <div className="p-4 sm:p-8 rounded-3xl bg-slate-800/80 border border-slate-700/80 shadow-2xl backdrop-blur-md space-y-4">
-          <div>
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Icon name="store" className="w-5 h-5 text-teal-400" />
-              Ubicación del Comercio
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Esta es la dirección fija del negocio. Aparece en el rastreo del cliente como punto de origen
-              de la entrega. Cualquier administrador puede actualizarla.
-            </p>
-          </div>
-
-          {storeLocation ? (
-            <div className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/60 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-              <span className="p-2.5 rounded-xl bg-teal-500/20 text-teal-400 shrink-0">
-                <Icon name="store" className="w-5 h-5" />
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-slate-400">Comercio configurado</p>
-                {storeLocation.address && (
-                  <p className="text-sm font-bold text-white truncate">{storeLocation.address}</p>
-                )}
-                <p className="text-[11px] text-slate-500">
-                  {Number(storeLocation.lat).toFixed(6)}, {Number(storeLocation.lng).toFixed(6)}
-                </p>
-              </div>
-              <a
-                href={`https://www.google.com/maps?q=${Number(storeLocation.lat)},${Number(storeLocation.lng)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-2 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold hover:bg-sky-500/25 transition-all inline-flex items-center gap-1.5"
-              >
-                <Icon name="mapPin" className="w-3.5 h-3.5" />
-                Abrir en Maps
-              </a>
-            </div>
-          ) : (
-            <div className="rounded-2xl glass-strong bg-slate-900 border border-slate-700/60 p-4 text-sm text-slate-400">
-              Aún no configuraste la ubicación del comercio. Usa el botón para elegirla en el mapa.
-            </div>
-          )}
-
-          <button
-            onClick={() => setShowStorePicker(true)}
-            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 font-bold text-sm hover:from-teal-400 hover:to-emerald-400 shadow-lg shadow-teal-500/20 transition-all inline-flex items-center gap-2"
-          >
-            <Icon name="mapPin" className="w-4 h-4" />
-            {storeLocation ? 'Cambiar ubicación del comercio' : 'Configurar ubicación'}
-          </button>
-
-          {showStorePicker && (
-            <MapPickerModal
-              title="Ubicación del comercio"
-              initial={storeLocation?.lat != null ? { lat: storeLocation.lat, lng: storeLocation.lng } : null}
-              onPick={async (p) => {
-                const ok = await onSaveStoreLocation(p);
-                if (ok) setShowStorePicker(false);
-              }}
-              onClose={() => setShowStorePicker(false)}
-            />
-          )}
-        </div>
+        <AdminTienda
+          storeLocation={storeLocation}
+          showStorePicker={showStorePicker}
+          setShowStorePicker={setShowStorePicker}
+          MapPickerModal={MapPickerModal}
+          onSaveStoreLocation={onSaveStoreLocation}
+        />
       )}
 
       {/* Tab 6: Analytics / Finanzas */}
